@@ -1,3 +1,19 @@
+# 会话质检工作台
+
+当前版本：**0.11.4**
+
+[免登录下载 Windows 完整安装包](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.4/QualityWorkbench-0.11.4-Windows-x64.exe) · [本版发布说明](https://github.com/Adden-code/service-quality-workbench-releases/releases/tag/v0.11.4) · [SHA256 校验](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.4/SHA256.txt)
+
+本版改进人工审核保存性能：单会话命令、任务/会话分片持久化、工作区增量同步、审核节点复用及规则证据按需展开。质检规则页顶部可直达既有的安装包规则装载流程。
+
+本机合成34条长原文、17条规则、约5.1 MB工作区，连续保存并下一条由约1.2–1.4秒降至约90毫秒。2515测试通过、0失败、1条件跳过；实际安装、重启、旧工作区升级、备份恢复及中英报告/明细结构通过。真实内网性能与模型语义仍由业务验收。
+
+升级前请完整备份。已装载完整NP-R13 V1.1的工作区无需重复装载规则；旧任务依据保持冻结，用新规则重检。0.11.4启用分片存储，请勿直接用旧程序读取新版目录；回退使用升级前备份。
+
+按已确认授权公开规则与示例完整版。安装包不含真实会话、评价批次、模型密钥或工作区。本仓库首页提交属于分发说明，安装包发行不等于应用源码Git提交。
+
+## 之前的发布说明（历史）
+
 # service-quality-workbench-releases
 
 会话质检工作台 Windows 安装包下载。
