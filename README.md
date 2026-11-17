@@ -1,5 +1,9 @@
 # 会话质检工作台
 
+> [!IMPORTANT]
+> **一线全新装机请勿下载本页的 Program-Update 包：它不含内置种子，会显示规则目录为空。**
+> 全新装机须由内部交付人提供“0.11.5 两场景内置·一线完整安装”包（17条规则+两场景配置）。误装后覆盖完整包，再从“场景管理→辅助判定与交付形式→从安装包装载新版”补齐；不要删除工作区。
+
 当前公开更新：**0.11.5 程序更新包**。内网已验收的两场景试点基线：**0.11.4**。
 
 [免登录下载 Windows 程序更新包](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.5/QualityWorkbench-0.11.5-Program-Update-Windows-x64.exe) · [发布说明](https://github.com/Adden-code/service-quality-workbench-releases/releases/tag/v0.11.5) · [SHA256 校验](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.5/SHA256.txt)
