@@ -1,21 +1,23 @@
 # service-quality-workbench-releases
-Service quality workbench Windows portable downloads
 
-## 最新版：0.11.2
+会话质检工作台 Windows 安装包下载。
 
-[免登录下载 Windows x64 完整安装包](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.2/QualityWorkbench-0.11.2-Windows-x64.exe)
+## 最新版：0.11.3
 
-[版本说明与全部附件](https://github.com/Adden-code/service-quality-workbench-releases/releases/tag/v0.11.2) · [SHA256 校验清单](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.2/SHA256.txt) · [发布范围说明](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.2/Release-Scope.txt)
+[免登录下载 Windows x64 完整安装包](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.3/QualityWorkbench-0.11.3-Windows-x64.exe)
 
-本完整版包含两场景规则、案例和示例，已获用户明确公开授权。不含真实业务会话或模型凭据。安装包与本地验收包字节一致；本次发布范围以 Release-Scope.txt 为准。
+[版本说明与全部附件](https://github.com/Adden-code/service-quality-workbench-releases/releases/tag/v0.11.3) · [SHA256 校验清单](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.3/SHA256.txt) · [发布范围说明](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.3/Release-Scope.txt)
 
-更新包括：相似块失败保留逐行结果、单独补跑失败块、电商自然时间、五项内联审核、规则预选、每规则每批5%且至少5条抽检、17条规则英文字段。
+本完整版包含获准公开的两场景规则、案例和分类示例，不含真实业务会话、评价批次或模型凭据。
 
-升级先备份，再到场景管理装载本包内置配置后新建任务。旧任务保持冻结依据。
+本次更新：核对探需八场景例外，补齐挽留与导购范围、完整政策原文索引和旧口径提示；归档/作废移出审核队列并禁止写入，启动恢复跳过历史任务；审核需处理项置顶；保留翻译与优秀案例的有效部分并补跑缺失项；下载按钮旁增加生成前置提示。
 
-安装包大小：97,696,347 字节。SHA256：
+**已有工作区升级：先备份 → 场景管理 → 配置 → 从安装包装载新版 → 新建任务或重检。** 安装器保留原数据，旧任务冻结依据不会自动改写。0.11.2发行种子中的探需八场景已完整，工作区中的通用短句需通过装载新版更新。
 
-`cb3cbab61e044bdbedbd018ace58e3b5ceec6c486e15978ae374fc94361ef6d2`
+验证：2509项测试，2508通过、0失败、1项环境条件跳过；浏览器8条路径、实际安装/重启/旧工作区升级，以及中英双场景HTML/Excel导出通过。测试使用合成会话和本地模型响应，真实内网模型效果仍需复测。
 
-此仓库用于安装包分发，发布安装包不等于提交应用源码。
+安装包大小：97,703,407 字节。SHA256：
 
+`60b2a837459397cf8bb624695eb1c700be6c51112f1f9f05cdfcb0335e69ddc6`
+
+此仓库用于安装包分发，发行包与首页说明提交不等于提交应用源码。
