@@ -1,39 +1,19 @@
 # 会话质检工作台
 
-当前版本：**0.11.4**
+当前公开更新：**0.11.5 程序更新包**。内网已验收的两场景试点基线：**0.11.4**。
 
-[免登录下载 Windows 完整安装包](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.4/QualityWorkbench-0.11.4-Windows-x64.exe) · [本版发布说明](https://github.com/Adden-code/service-quality-workbench-releases/releases/tag/v0.11.4) · [SHA256 校验](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.4/SHA256.txt)
+[免登录下载 Windows 程序更新包](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.5/QualityWorkbench-0.11.5-Program-Update-Windows-x64.exe) · [发布说明](https://github.com/Adden-code/service-quality-workbench-releases/releases/tag/v0.11.5) · [SHA256 校验](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.5/SHA256.txt)
 
-本版改进人工审核保存性能：单会话命令、任务/会话分片持久化、工作区增量同步、审核节点复用及规则证据按需展开。质检规则页顶部可直达既有的安装包规则装载流程。
+**本公开包不附业务规则原文、案例、分类示例或业务批次。** 用于已有工作台升级，请选择原安装目录；既有工作区、模型配置和已安装的规则资源会保留。全新一线装机需要内部渠道的两场景完整包。内部完整包未上传本次公开发行。
 
-本机合成34条长原文、17条规则、约5.1 MB工作区，连续保存并下一条由约1.2–1.4秒降至约90毫秒。2515测试通过、0失败、1条件跳过；实际安装、重启、旧工作区升级、备份恢复及中英报告/明细结构通过。真实内网性能与模型语义仍由业务验收。
+本版修复重复装载场景种子时的错误提示：返回409并显示“本安装包内置场景已装载，可在场景管理查看或维护。”，保留输入内容，规则、版本和审计记录不变。不改变业务口径，已装载完整V1.1规则无需重复装载。
 
-升级前请完整备份。已装载完整NP-R13 V1.1的工作区无需重复装载规则；旧任务依据保持冻结，用新规则重检。0.11.4启用分片存储，请勿直接用旧程序读取新版目录；回退使用升级前备份。
+2518项测试：2517通过、0失败、1既有条件跳过；实际完整安装/重启、公开程序覆盖升级保留4任务16会话及模型配置、双场景中英交付结构通过。7附件已匿名完整下载并核验SHA256。本机合成测试不代替真实内网模型质量与业务验收。
 
-按已确认授权公开规则与示例完整版。安装包不含真实会话、评价批次、模型密钥或工作区。本仓库首页提交属于分发说明，安装包发行不等于应用源码Git提交。
+0.11.4已完成单会话保存、任务/会话分片、增量同步、审核节点复用及证据按需展开。首次全量加载和文件导入解析迁移Worker尚未实现，将先测量卡顿，再分步移出UI线程；本版不把计划称为已交付。
 
-## 之前的发布说明（历史）
+升级前通过应用内“备份与恢复”保存完整备份。不要用不支持分片的旧程序直接读取新目录；回退使用升级前备份。
 
-# service-quality-workbench-releases
+按最新发布范围，含真实规则与示例的完整包仅内部交付。原v0.11.2–v0.11.4完整包已转草稿停止公开下载，原匿名安装包地址已核验404；无法召回已下载副本。公开包不含真实会话、评价数据、工作区或密钥。
 
-会话质检工作台 Windows 安装包下载。
-
-## 最新版：0.11.3
-
-[免登录下载 Windows x64 完整安装包](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.3/QualityWorkbench-0.11.3-Windows-x64.exe)
-
-[版本说明与全部附件](https://github.com/Adden-code/service-quality-workbench-releases/releases/tag/v0.11.3) · [SHA256 校验清单](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.3/SHA256.txt) · [发布范围说明](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.3/Release-Scope.txt)
-
-本完整版包含获准公开的两场景规则、案例和分类示例，不含真实业务会话、评价批次或模型凭据。
-
-本次更新：核对探需八场景例外，补齐挽留与导购范围、完整政策原文索引和旧口径提示；归档/作废移出审核队列并禁止写入，启动恢复跳过历史任务；审核需处理项置顶；保留翻译与优秀案例的有效部分并补跑缺失项；下载按钮旁增加生成前置提示。
-
-**已有工作区升级：先备份 → 场景管理 → 配置 → 从安装包装载新版 → 新建任务或重检。** 安装器保留原数据，旧任务冻结依据不会自动改写。0.11.2发行种子中的探需八场景已完整，工作区中的通用短句需通过装载新版更新。
-
-验证：2509项测试，2508通过、0失败、1项环境条件跳过；浏览器8条路径、实际安装/重启/旧工作区升级，以及中英双场景HTML/Excel导出通过。测试使用合成会话和本地模型响应，真实内网模型效果仍需复测。
-
-安装包大小：97,703,407 字节。SHA256：
-
-`60b2a837459397cf8bb624695eb1c700be6c51112f1f9f05cdfcb0335e69ddc6`
-
-此仓库用于安装包分发，发行包与首页说明提交不等于提交应用源码。
+本仓库用于程序分发；发行和首页提交不等于应用源码Git提交。历史发布说明以其当时范围为准，当前下载范围以上述说明为准。
