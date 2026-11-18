@@ -1,6 +1,20 @@
 # 会话质检工作台
 
-## 0.11.8 稳定候选版 · 完整内置
+## 0.11.9 需求五修复候选版 · 完整内置
+
+**[免登录下载完整安装包（17条规则＋两场景）](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.9-full/QualityWorkbench-0.11.9-Full-Setup-Windows-x64.exe)**
+
+[发布与验收说明](https://github.com/Adden-code/service-quality-workbench-releases/releases/tag/v0.11.9-full) · [升级指引](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.9-full/Hotfix-Guide-zh.txt) · [SHA256](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.9-full/SHA256.txt) · [实际应用源码提交](https://github.com/Adden-code/service-quality-workbench-releases/commit/db73a0b27f7f2b8eac2cc746708fb93715f6ac2b)
+
+本版补齐辅助能力start/end整数串兼容、指定文本块内逐字唯一定位修复和原偏移留痕；多处命中与改写引文继续拒绝。额外修复电商分类恢复后旧时效判定的冻结依据冲突，原有效判定与人工记录保持不变。保留完整种子、有限重试及熔断。
+
+本地2561通过/0失败/1既有环境跳过；实际安装后，用旧0.11.8生成的123行合成暂停任务恢复：3个失败能力各一次通过、103行继续派发，原20行判定与人工记录未改写。148项合成阿语/电商能力经包内Node→Java→本机替身通过，故意使用字符串confidence与漂移字符串偏移。无外部模型调用，真实内网批次待定点验收。本版为候选，保留原稳定入口。
+
+安装器97717641字节；SHA256：`8529136019a64ee05455e42d7d05bd851dae01ec59f1713e8c155236f4ee1695`。7附件均无认证、无cookie完整下载并核验。
+
+源码分支`source-v0.11.9`；构建`0.11.9-01fef74c6dfb6b8f`。含授权公开的规则与示例，不含真实会话、评价数据、工作区或密钥。
+
+## 上一候选版0.11.8（需求五已在0.11.9补齐）
 
 **[免登录下载完整安装包（17条规则＋两场景）](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.8-full/QualityWorkbench-0.11.8-Full-Setup-Windows-x64.exe)**
 
