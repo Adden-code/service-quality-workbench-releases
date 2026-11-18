@@ -17,6 +17,7 @@ test('paused capability guidance has counts, concrete actions and review access;
  const task={id:'SYNTHETIC-TASK',aiStatus:'paused',aiQueue:{status:'paused',stopReason:'capability_failure_rate'},capabilityMonitor:{intent:{total:25,technicalFailures:25,businessUncertain:0,rate:1,paused:true,secret:'DO NOT EXPORT'}},source:{text:'CUSTOMER SECRET'},name:'CUSTOMER NAME',aiRun:{id:'synthetic-run',apiKey:'SECRET'}};
  assert.match(capabilityPauseSummary(task),/25 个样本中 25 个/);const html=taskQueueNotice({tasks:[task],sessions:[]},task);assert.match(html,/复制问题摘要/);assert.match(html,/审核已完成结果/);assert.match(html,/管理员/);
  const summary=taskProblemSummary(task,{version:'test',buildId:'test-build'});assert.doesNotMatch(summary,/SECRET|CUSTOMER|apiKey|source"|text"/);assert.equal(JSON.parse(summary).capabilities[0].technicalFailures,25);
+ task.aiQueue.stopReason='interrupted';assert.match(taskQueueNotice({tasks:[task],sessions:[]},task),/用户意图：25 个样本中 25 个技术失败/);
 });
 test('first-import navigation handles removed parent without a dead action',()=>{
  const first={id:'T1',mode:'manual'},repeat={id:'T2',mode:'manual',importLineage:{schemaVersion:1,ordinal:2,firstTaskId:'T1'}};
