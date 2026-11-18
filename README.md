@@ -1,6 +1,20 @@
 # 会话质检工作台
 
-## 0.11.9 需求五修复候选版 · 完整内置
+## 0.11.10 需求六修复候选版 · 完整内置
+
+**[免登录下载完整安装包（17条规则＋两场景）](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.10-full/QualityWorkbench-0.11.10-Full-Setup-Windows-x64.exe)**
+
+[发布与验收说明](https://github.com/Adden-code/service-quality-workbench-releases/releases/tag/v0.11.10-full) · [升级指引](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.10-full/Hotfix-Guide-zh.txt) · [SHA256](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.10-full/SHA256.txt) · [实际应用源码提交](https://github.com/Adden-code/service-quality-workbench-releases/commit/2ed8ee7d0afd3553f34bb88b25368dc65b5ea508)
+
+本版增加扩展引文的唯一性引导；重试后仍无法唯一定位则转人工，单列引文歧义、不计入技术失败率。鉴权、网络、缺字段、编造引文等仍熔断。恢复时校正旧歧义统计，保护已有人工作业和原判定。严格定位与需求五修复保留。
+
+本地2568通过/0失败/1既有环境跳过；实际安装后验证34行合成重复话术一次跑完：6行转人工、2行扩展引文自愈；旧0.11.9暂停工作区升级继续完成，含人工备注的20条已判记录保留。需求五123行恢复与包内Node→Java原148能力回归通过，并验证歧义分流。无外部模型调用，真实内网批次待定点验收。
+
+安装器97720726字节；SHA256：`5e8d4840e8aac342a354b0da990070bbf49bfbd70bcfc598a7d51fc19209947e`。7附件均无认证、无cookie完整下载并核验。
+
+源码分支`source-v0.11.10`；构建`0.11.10-6f848931c68fffc6`。含授权公开的规则与示例，不含真实会话、评价数据、工作区或密钥。
+
+## 上一候选版0.11.9（需求六已在0.11.10补齐）
 
 **[免登录下载完整安装包（17条规则＋两场景）](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.9-full/QualityWorkbench-0.11.9-Full-Setup-Windows-x64.exe)**
 
