@@ -192,7 +192,7 @@ export function createArkClient({fetchImpl=fetch,timeoutMs=120000,maxResponseByt
       const prepared=prepareSceneCapability(input,retryFeedback),{content,...meta}=await request(config,prepared.messages,prepared.maxTokens,signal,trace,prepared.responseFormat);
       return traced(trace,'validation',{capability:input.capability,contract:input.contract,required:prepared.outputSchema.required},async()=>{
         try{return {...parseSceneCapability(content,input),modelId:meta.modelId||config.model};}
-        catch(error){error.traceOutput={capability:input.capability,code:'INVALID_OUTPUT',message:error.message};throw error;}
+        catch(error){error.traceOutput={capability:input.capability,code:'INVALID_OUTPUT',message:error.message,...(error.validationReason?{validationReason:error.validationReason}:{})};throw error;}
       });
     },
     async prepareScenePackage({config,input,signal,trace}={}){

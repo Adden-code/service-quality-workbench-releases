@@ -16,7 +16,7 @@ import {RAW_INPUT_MODE,isRawTranscriptSession,validateRawTranscript} from '../pu
 import {RAW_INSPECTION_PROMPT_VERSION,rawUnavailableResults,rawInspectionRetryFeedback} from './raw-inspection.mjs';
 import {rawTimeRuleIds} from '../public/raw-evidence.mjs';
 
-import {executeSceneCapabilities,enforceSceneResults,recordCapabilityOutcomes} from './scene-capabilities.mjs';
+import {executeSceneCapabilities,enforceSceneResults,recordCapabilityOutcomes,reconcileCapabilityOutcomes} from './scene-capabilities.mjs';
 import {inspectionBasis} from '../public/scene-aggregate.mjs';
 
 const copy=value=>structuredClone(value),now=()=>new Date().toISOString();
@@ -117,6 +117,7 @@ export async function createAiService(options={}){
   for(const entry of pendingTaskEntries(scheduler))entry.blockedReason='interrupted';
  });
  function resetForResume(task,state){writable(state,task);
+  if(task.executionSnapshot?.configuration.executionMode==='configured')task.capabilityMonitor=reconcileCapabilityOutcomes(task.capabilityMonitor,state.sessions.filter(s=>s.taskId===task.id),task.executionSnapshot.configuration.failurePolicy);
   const q=task.aiQueue;q.status='queued';delete q.stopReason;q.resumeCount=(q.resumeCount||0)+1;
   for(const row of q.rows)if(['failed','running','blocked'].includes(row.status)&&!row.semanticResult)row.status='pending';
   task.aiStatus='queued';task.aiRun.status='queued';task.aiRun.completedAt=null;refresh(task,state);
