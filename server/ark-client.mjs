@@ -84,7 +84,7 @@ function parseResults(content,expected) {
   const seen=new Set(),output=[];
   for(const item of result.results){
     if(!object(item)||!expected.rules.has(item.ruleId)||seen.has(item.ruleId)||!VERDICTS.has(item.verdict)||!text(item.reason)||item.reason.length>20000||!Array.isArray(item.evidence)||!Array.isArray(item.referenceIds))throw invalidOutput();
-    const evidence=item.evidence.map(id=>typeof id==='string'&&/^-?\d+$/.test(id.trim())?Number(id.trim()):id);
+    const rejectedQuotes=[],evidence=item.evidence.map(id=>typeof id==='string'&&/^-?\d+$/.test(id.trim())?Number(id.trim()):id);
     if(new Set(evidence).size!==evidence.length||evidence.some(id=>!Number.isSafeInteger(id)||!expected.turns.has(id)))throw invalidOutput();
     if(new Set(item.referenceIds).size!==item.referenceIds.length||item.referenceIds.some(id=>typeof id!=='string'||!expected.rules.get(item.ruleId).has(id)))throw invalidOutput();
     if(Object.hasOwn(item,'fieldEvidence')&&(!Array.isArray(item.fieldEvidence)||new Set(item.fieldEvidence).size!==item.fieldEvidence.length||item.fieldEvidence.some(key=>typeof key!=='string'||!expected.fieldKeys.has(key))))throw invalidOutput();
@@ -94,15 +94,18 @@ function parseResults(content,expected) {
     if(Object.hasOwn(item,'conflictsWith')){if(!Array.isArray(item.conflictsWith)||new Set(item.conflictsWith).size!==item.conflictsWith.length||item.conflictsWith.some(id=>typeof id!=='string'||!expected.rules.has(id)||id===item.ruleId))throw invalidOutput();assurance.conflictsWith=[...item.conflictsWith];}
     if(Object.hasOwn(item,'evidenceQuotes')){
      if(!Array.isArray(item.evidenceQuotes)||item.evidenceQuotes.length>500)throw invalidOutput();
-     assurance.evidenceQuotes=item.evidenceQuotes.map(quote=>{
-      if(!object(quote))throw invalidOutput();
+     assurance.evidenceQuotes=item.evidenceQuotes.flatMap(quote=>{
+      const reject=reasonCode=>{rejectedQuotes.push({reasonCode,quote:typeof quote?.quote==='string'?quote.quote:null,turnId:quote?.turnId??null});return[];};
+      if(!object(quote))return reject('invalid_quote');
       const turnId=typeof quote.turnId==='string'&&/^\d+$/.test(quote.turnId.trim())?Number(quote.turnId.trim()):quote.turnId,turn=expected.turnMap.get(turnId);
-      if(!Number.isSafeInteger(turnId)||!turn||!evidence.includes(turnId)||!text(quote.quote)||quote.quote.length>20000||(quote.role!==undefined&&quote.role!==turn.role))throw invalidOutput();
+      if(!Number.isSafeInteger(turnId)||!turn||!evidence.includes(turnId)||!text(quote.quote)||quote.quote.length>20000||(quote.role!==undefined&&quote.role!==turn.role))return reject('invalid_quote_locator');
       const originalQuote=sourceQuoteSlice(turn.text,quote.quote);
-      if(originalQuote===null||originalQuote.length>20000)throw invalidOutput();
-      return{turnId,quote:originalQuote,...(quote.role!==undefined?{role:quote.role}:{})};
+      if(originalQuote===null||originalQuote.length>20000)return reject('quote_mismatch');
+      return[{turnId,quote:originalQuote,...(quote.role!==undefined?{role:quote.role}:{})}];
      });
     }
+    if(expected.triageRequired&&!assurance.evidenceQuotes?.length&&!rejectedQuotes.length)rejectedQuotes.push({reasonCode:'missing_quote',quote:null});
+    if(rejectedQuotes.length)assurance.evidenceValidation={version:1,status:'unverified',rejectedQuotes};
     seen.add(item.ruleId);output.push({ruleId:item.ruleId,verdict:item.verdict,reason:item.reason,evidence,referenceIds:[...item.referenceIds],...(Object.hasOwn(item,'fieldEvidence')?{fieldEvidence:[...item.fieldEvidence]}:{}),...assurance});
   }
   return output;

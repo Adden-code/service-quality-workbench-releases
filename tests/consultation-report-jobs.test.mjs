@@ -24,7 +24,7 @@ test('49 consultation sessions create frozen 28-column Excel and six-section HTM
  const result=await f.service.getResult('consultation-49');assert.equal(result.job.status,'completed');assert.equal(result.snapshot.deliveryType,'consultation-v1');assert.equal(result.snapshot.records.length,49);
  assert.equal(result.snapshot.basis.rules.length,17);assert.equal(result.snapshot.basis.dimensions.length,3);assert.equal(result.enrichment.analysisStats.completed,49);assert.equal(result.enrichment.vocItems.length,49);
  assert.ok(f.calls.filter(c=>c.kind==='translation').every(c=>c.input.items.length===1));assert.equal(f.calls.filter(c=>c.kind==='consultationAnalysis').length,49);assert.ok(f.calls.filter(c=>c.kind==='consultationAnalysis').every(c=>!Object.hasOwn(c.input,'records')));
- const tables=await readXlsx(await buildBusinessDeliveryXlsx(result.snapshot,result.enrichment)),main=tables['检核明细'];assert.equal(main[0].length,28);assert.equal(main.length,50);assert.equal(main[1][0],'0000');assert.equal(main[1][XLSX_ROW_NUMBER],2);
+ const tables=await readXlsx(await buildBusinessDeliveryXlsx(result.snapshot,result.enrichment)),main=tables['检核明细'];assert.equal(main[0].length,29);assert.equal(main.length,50);assert.equal(main[1][0],'0000');assert.equal(main[1][XLSX_ROW_NUMBER],2);
  assert.deepEqual(main[0].slice(3,9),['会话详情翻译（中文）','销售环节（一级/二级）','用户意图','用户诉求总结','是否涉及负面声音','用户负面原声']);assert.equal(main[1][7],'是');
  const html=buildBusinessReportHtml(result.snapshot,result.enrichment);assert.ok(html.includes('新品质检报告'),'Uses the required business report title.');assert.equal((html.match(/<section\b/g)||[]).length,6);assert.ok(!/https?:\/\/|<script|<link\b/.test(html));assert.equal(JSON.stringify(f.state),before);
 });

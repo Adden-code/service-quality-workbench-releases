@@ -12,8 +12,8 @@ export function fixture(){
 }
 export const ui=extra=>({dataMode:'manual',reviewTaskId:'T-SYNTHETIC',reviewStatus:'待确认',reviewQuery:'',selectedId:'WAIT',openRules:[],highlightedTurns:[],resultFilter:'全部',...extra});
 test('completed PASS with a human draft is reviewable, never mislabeled unexecuted',()=>{
- const s=fixture().sessions[1],p=getReviewPresentation(s);assert.equal(p.aiCount,1);assert.equal(p.pendingCount,1);assert.equal(p.needsReview,true);assert.equal(p.aiFinal,false);
- assert.doesNotMatch(reviewRoutingSummary(s),/AI尚未执行完成/);assert.match(reviewRoutingSummary(s),/待人工确认 1 项/);
+ const s=fixture().sessions[1],p=getReviewPresentation(s);assert.equal(p.aiCount,1);assert.equal(p.pendingCount,0);assert.equal(p.needsReview,true);assert.equal(p.aiFinal,false);
+ assert.doesNotMatch(reviewRoutingSummary(s),/AI尚未执行完成/);assert.match(reviewRoutingSummary(s),/草稿已齐，待提交确认/);
 });
 test('initial entry skips unexecuted records and filter counts distinguish initial from final AI decisions',()=>{
  const state=fixture(),view=ui();assert.deepEqual(reviewQueue(state,view).map(s=>s.id),['DRAFT','FAIL']);

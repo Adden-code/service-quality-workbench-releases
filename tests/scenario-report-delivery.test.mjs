@@ -19,7 +19,7 @@ test('registered conversation delivery freezes config, preserves source and choo
  assert.deepEqual(consultationDeliveryHeaders(s).slice(5,12),['会话详情翻译（中文）','用户意图','是否涉及负面声音','用户负面原声','处理方案','处理渠道','客户诉求原文']);
  f.state.scenarios[0].name='新名字';f.task.scenarioSnapshot.customFields[0].label='新字段名';assert.deepEqual(s.scenarioSnapshot,before);
  const e={scenarioFields:Object.fromEntries(s.records.map(r=>[r.id,{status:'completed',fields:before.customFields.map(field=>({id:field.id,value:field.type==='quote'?r.turns[0].text:field.type==='enum'?'线上':'已提供处理方案',missing:false,turnId:field.type==='quote'?1:null}))}]))};
- const tables=await readXlsx(await buildBusinessDeliveryXlsx(s,e));assert.equal(tables['检核明细'][1][4],'0000');assert.equal(tables['检核明细'][1][XLSX_ROW_NUMBER],2);assert.match(tables['检核明细'][1][11],/第1轮/);assert.equal(tables['检核明细'][0].at(-2),'整体通过');
+ const tables=await readXlsx(await buildBusinessDeliveryXlsx(s,e));assert.equal(tables['检核明细'][1][4],'0000');assert.equal(tables['检核明细'][1][XLSX_ROW_NUMBER],2);assert.match(tables['检核明细'][1][11],/第1轮/);assert.equal(tables['检核明细'][0].at(-3),'整体通过');
  assert.ok(tables['口径说明'].some(row=>row[0]==='场景配置'&&row[1].includes('SCENE-AFTERSALES')));
  assert.equal(businessTasks(f.state).length,1);
  const html=buildBusinessReportHtml(s,e);assert.match(html,/<h1>售后服务质检报告<\/h1>/);assert.match(html,/按区域质检概况/);assert.match(html,/华北/);assert.equal((html.match(/<section\b/g)||[]).length,2);assert.ok(!/id="(?:dimension-results|typical-cases|issue-clusters|voice-of-customer)"/.test(html));

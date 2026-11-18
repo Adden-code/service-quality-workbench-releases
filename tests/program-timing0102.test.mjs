@@ -83,7 +83,7 @@ test('non-time quote failures still retry and degrade only the invalid non-time 
  const session=unavailableSession(),wire=rawWire(session);wire.results[0].evidenceQuotes=[{quote:'fabricated non-time evidence'}];
  assert.throws(()=>parse(wire,session),error=>error.code==='INVALID_OUTPUT'&&error.diagnostic.reasonCodes.includes('quote_mismatch')&&error.diagnostic.ruleIds.join()==='SYN-R1');
  const results=parse(wire,session,mixedBasis(),{allowDegraded:true});
- assert.equal(results[1].rawValidation.status,'degraded');assert.equal(results[1].rawValidation.originalReason,wire.results[0].reason);assert.equal(results[3].verdict,'符合');
+ assert.equal(results[1].rawValidation.status,'unverified-quote');assert.equal(results[1].rawValidation.originalReason,wire.results[0].reason);assert.equal(results[3].verdict,'符合');
  for(const result of results.filter(result=>timeIds.includes(result.ruleId)))assertProgramResult(result,session);
 });
 

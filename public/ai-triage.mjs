@@ -1,3 +1,5 @@
+import {hasUnverifiedEvidence} from './evidence-status.mjs';
+import {aggregateRuleId} from './scene-aggregate.mjs';
 import {hasCompletedAI,hasRawFallback} from './session-result-availability.mjs';
 import {isInactiveTask,isVoidedTask} from './task-lifecycle.mjs';
 import {hasEcommerceClassification,classificationReviewed} from './ecommerce-classification-review.mjs';
@@ -41,6 +43,7 @@ export function deriveAIDecision(session,input,{at=new Date().toISOString(),runI
  if(session.aiExecution?.status!=='completed')issue('output_failure','AI未形成完整有效输出，须由人工核对。');
  if(!expected.length||new Set(expected).size!==expected.length||results.length!==expected.length||new Set(results.map(r=>r.ruleId)).size!==expected.length||results.some(r=>!expected.includes(r.ruleId)))issue('missing_checks','检核结果未完整覆盖冻结规则。');
  for(const result of results){
+  if(hasUnverifiedEvidence(result))issue('quote_unverified','本项依据未核验，可由人工确认，不能免审。');
   const localTime=result.ruleId==='EC-TIME'&&Boolean(session.ecommerce);
   const value=localTime?1:result.confidence;
   if(typeof value!=='number'||!Number.isFinite(value)||value<0||value>1)issue('missing_confidence','模型未提供有效置信度，不能免审。');
@@ -50,14 +53,14 @@ export function deriveAIDecision(session,input,{at=new Date().toISOString(),runI
   if(raw){
    const assurance=validateRawResultAssurance(result,session);
    if(!assurance.valid)issue('quote_mismatch','引文无法在本行原始单元格逐字定位，须人工核对。');
-   if(result.rawValidation?.status!=='verified')issue('raw_result_degraded','原文结果经程序降级或执行失败，须人工核对。');
+   if(result.rawValidation?.status!=='verified'&&result.rawValidation?.status!=='unverified-quote')issue('raw_result_degraded','原文结果经程序降级或执行失败，须人工核对。');
    if(unavailableTimeRules.includes(result.ruleId)&&result.verdict!=='无法判定')issue('source_time_unavailable','未提供可靠来源时间，纯时效类检核须保留无法判定。');
   }else if(!Array.isArray(result.evidence)||result.evidence.some(id=>!Number.isSafeInteger(id)||!turns.some(t=>t.id===id)))issue('invalid_evidence','轮次证据无效。');
   if(!localTime){
    if(!Array.isArray(result.conflictsWith))issue('missing_consistency','模型未完成规则间一致性检查。');
    else if(result.conflictsWith.length)issue('rule_conflict','规则之间存在尚未消解的结论冲突。');
    const quotes=result.evidenceQuotes;
-   if(!Array.isArray(quotes)||!quotes.length)issue('missing_quote','缺少可逐字定位的原文引文或不适用依据。');
+   if((!Array.isArray(quotes)||!quotes.length)&&!hasUnverifiedEvidence(result))issue('missing_quote','缺少可逐字定位的原文引文或不适用依据。');
    for(const quote of !raw&&Array.isArray(quotes)?quotes:[]){
     const turn=turns.find(t=>t.id===quote?.turnId);
     if(!turn||typeof quote.quote!=='string'||!quote.quote.trim()||!turn.text.includes(quote.quote)||!result.evidence?.includes(quote.turnId))issue('quote_mismatch','引文无法在声明轮次逐字定位。');
@@ -85,9 +88,9 @@ export function requiresHumanReview(session){
 /** Read-only business projection used by all review entry points and displays. */
 export function getReviewPresentation(session,task){
  const human=session.review?.status==='已确认',processedUnknown=isProcessedUnknown(session),aiFinal=isAIFinal(session),inactive=isInactiveTask(task);
- const expected=session.expectedRuleIds||session.aiResults?.map(r=>r.ruleId)||[],ready=hasCompletedAI(session),fallback=hasRawFallback(session);
- const aiCount=ready?session.aiResults.length:0,draftCount=Object.keys(session.review?.drafts||{}).length;
- const needsReview=!inactive&&requiresHumanReview(session),pendingCount=human||processedUnknown||aiFinal?0:expected.filter(id=>!ruleExemption(session,id)).length;
+ const aggregate=aggregateRuleId(task?.executionSnapshot||session.executionSnapshot),expected=(session.expectedRuleIds||session.aiResults?.map(r=>r.ruleId)||[]).filter(id=>id!==aggregate),ready=hasCompletedAI(session),fallback=hasRawFallback(session);
+ const aiCount=ready?session.aiResults.filter(r=>expected.includes(r.ruleId)).length:0,draftCount=Object.keys(session.review?.drafts||{}).length;
+ const needsReview=!inactive&&requiresHumanReview(session),pendingCount=human||processedUnknown||aiFinal?0:expected.filter(id=>!ruleExemption(session,id)&&!session.review?.drafts?.[id]).length;
  const returned=Boolean(session.review?.returned),execution=session.aiExecution?.status||'not_run';
  const kind=human?'human':processedUnknown?'processed-unknown':aiFinal?'ai-final':returned?'returned':aiCount?'pending-ai':draftCount?'pending-draft':fallback||execution==='failed'?'pending-manual':needsReview?'pending-manual':'waiting';
  return {kind,aiCount,draftCount,pendingCount,needsReview,aiFinal,human,processedUnknown,returned,execution,inactive,lifecycle:isVoidedTask(task)?'voided':inactive?'archived':'active',ready:aiCount>0||draftCount>0||fallback,initialPending:needsReview&&aiCount>0};

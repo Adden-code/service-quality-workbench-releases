@@ -91,7 +91,7 @@ test('human raw quotations are recomputed locally and do not masquerade as accep
  const changed=domain.saveReview(state,s.id,draft,now),saved=changed.sessions[0].review.drafts.R004;
  assert.equal(saved.source,'人工独立审核');assert.equal(saved.rawValidation.status,'verified');assert.ok(saved.evidenceQuotes[0].matches[0].start>0);
  assert.throws(()=>domain.saveReview(state,s.id,{...draft,evidenceQuotes:[{quote:'invented'}]},now),/引文|原文/);
- assert.throws(()=>domain.saveReview(state,s.id,{...draft,evidenceQuotes:[]},now),/引文|原文/);
+ assert.equal(domain.saveReview(state,s.id,{...draft,evidenceQuotes:[]},now).sessions[0].review.drafts.R004.rawValidation.status,'manual-provided');
 });
 test('raw active-review segments are measured values, idempotent and protected from invalid durations',async()=>{
  const {state}=taskOf(await input()),sessionId=state.sessions[0].id,record={sessionId,elapsedMs:4500,reviewer:'Reviewer',now,segmentId:'SYN-TIMER-1'};

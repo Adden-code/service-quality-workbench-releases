@@ -10,5 +10,5 @@ test('Arabic presentation forms, canonical composition and tatweel resolve to ex
  }
 });
 test('Arabic word changes, alef/hamza differences, diacritic removal and partial ligatures are never auto-accepted',()=>{
- for(const [source,quote] of [['أريد معرفة السعر','اريد معرفة السعر'],['عَلَم','علم'],['لا تعمل','تعمل بشكل جيد'],['ﻻ','ل']]){assert.throws(()=>check(source,quote));assert.ok(check(source,quote,true).result.every(r=>r.verdict==='无法判定'&&r.rawValidation.status==='degraded'));}
+ for(const [source,quote] of [['أريد معرفة السعر','اريد معرفة السعر'],['عَلَم','علم'],['لا تعمل','تعمل بشكل جيد'],['ﻻ','ل']]){assert.throws(()=>check(source,quote));assert.ok(check(source,quote,true).result.every(r=>r.verdict==='符合'&&r.rawValidation.status==='unverified-quote'&&r.evidenceQuotes.length===0));}
 });

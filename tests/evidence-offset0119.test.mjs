@@ -16,15 +16,15 @@ test('numeric-string drifting offsets repair on a unique literal quote, preservi
  const exact=parse(body(String(start),String(end))).evidence[0];assert.deepEqual(exact.locatorRepair,{version:1,method:'numeric-string',originalStart:String(start),originalEnd:String(end)});
  assert.equal(parse(body(start,end)).evidence[0].locatorRepair,undefined);
 });
-test('repair never guesses among duplicates, crosses blocks, normalizes text or accepts invalid offset values',()=>{
- for(const t of [quote+' / '+quote,'aaaa']){const q=t==='aaaa'?'aa':quote;assert.throws(()=>parse(body(95,121,{quote:q}),{...input,blocks:[{id:'turn-1',text:t}]}),/多处|唯一/);}
- assert.throws(()=>parse(body(0,1,{quote:'not present'})),/逐字/);
- assert.throws(()=>parse(body(0,1,{blockId:'missing'})),/文本块/);
- assert.throws(()=>parse(body(0,1,{quote:'Synthetic tail.\n'})),/逐字/);
- assert.throws(()=>parse(body(0,1,{quote:'البطاريه لا تعمل'})),/逐字/);
- assert.throws(()=>parse(body(),{...input,blocks:[{id:'turn-1',text:'not here'},{id:'turn-2',text:quote}]}),/逐字/);
- for(const value of ['',' ','high','0x10','NaN','Infinity','1.5',1.5,null,true,{},[],undefined,-1,'-1',9007199254740992])assert.throws(()=>parse(body(95,121,{start:value})),/偏移/);
- assert.throws(()=>parse(body(4,3)),/偏移/);
+test('repair never guesses among duplicates, crosses blocks, normalizes text or trusts invalid offsets',()=>{
+ for(const t of [quote+' / '+quote,'aaaa']){const q=t==='aaaa'?'aa':quote;assert.throws(()=>parse(body(95,121,{quote:q}),{...input,blocks:[{id:'turn-1',text:t}]}),e=>e.validationReason==='evidence_ambiguous');}
+ assert.throws(()=>parse(body(0,1,{quote:'not present'})),e=>e.validationReason==='evidence_unverified');
+ assert.throws(()=>parse(body(0,1,{blockId:'missing'})),e=>e.validationReason==='evidence_unverified');
+ assert.throws(()=>parse(body(0,1,{quote:'Synthetic tail.\n'})),e=>e.validationReason==='evidence_unverified');
+ assert.throws(()=>parse(body(0,1,{quote:'البطاريه لا تعمل'})),e=>e.validationReason==='evidence_unverified');
+ assert.throws(()=>parse(body(),{...input,blocks:[{id:'turn-1',text:'not here'},{id:'turn-2',text:quote}]}),e=>e.validationReason==='evidence_unverified');
+ for(const value of ['',' ','high','0x10','NaN','Infinity','1.5',1.5,null,true,{},[],undefined,-1,'-1',9007199254740992])assert.equal(parse(body(95,121,{start:value})).evidence[0].start,text.indexOf(quote));
+ assert.equal(parse(body(4,3)).evidence[0].start,text.indexOf(quote));
 });
 test('valid explicit duplicate location is retained; repair uses UTF16 rather than code points',()=>{
  const repeated=quote+' / '+quote,second=repeated.lastIndexOf(quote),e=parse(body(second,second+quote.length),{...input,blocks:[{id:'turn-1',text:repeated}]}).evidence[0];assert.equal(e.start,second);assert.equal(e.locatorRepair,undefined);

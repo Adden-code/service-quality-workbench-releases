@@ -41,7 +41,7 @@ test('one altered, foreign-row, normalized, translated or stitched quotation ret
  for(const quote of ['Check the policies.','Only in another row','check the policy.','按政策核对。','Customer: Return?…Check the policy.','Check  the policy.',''])await t.test(JSON.stringify(quote),()=>{
   const wire=rawWire();wire.results[0].evidenceQuotes.push({quote});
   assert.throws(()=>parse(wire),error=>error.code==='INVALID_OUTPUT'&&error.diagnostic.ruleIds.includes('SYN-R1'));
-  const results=parse(wire,rawSession(),rawBasis(),{allowDegraded:true}),bad=results[0];assert.equal(bad.verdict,'无法判定');assert.equal(bad.rawValidation.status,'degraded');assert.equal(bad.rawValidation.originalVerdict,'符合');assert.equal(bad.rawValidation.originalReason,wire.results[0].reason);assert.deepEqual(bad.evidenceQuotes,[]);assert.ok(bad.rawValidation.rejectedQuotes.some(value=>value.quote===quote));assert.equal(results[1].verdict,'符合');assert.equal(results[1].rawValidation.status,'verified');
+  const results=parse(wire,rawSession(),rawBasis(),{allowDegraded:true}),bad=results[0];assert.equal(bad.verdict,'符合');assert.equal(bad.rawValidation.status,'unverified-quote');assert.equal(bad.rawValidation.originalVerdict,'符合');assert.equal(bad.rawValidation.originalReason,wire.results[0].reason);assert.ok(bad.evidenceQuotes.every(q=>q.matches.length>0));assert.ok(bad.rawValidation.rejectedQuotes.some(value=>value.quote===quote));assert.equal(results[1].verdict,'符合');assert.equal(results[1].rawValidation.status,'verified');
  });
 });
 test('batch missing-time declaration deterministically overrides pure timing only before quote retries',()=>{
@@ -53,8 +53,8 @@ test('batch missing-time declaration deterministically overrides pure timing onl
 test('a per-rule cumulative quotation match budget retries then degrades only that rule without truncated matches',()=>{
  const session=rawSession('a'.repeat(6000)+'\nCheck the policy.'),wire=rawWire(session);wire.results[0].evidenceQuotes=[{quote:'a'},{quote:'aa'}];
  assert.throws(()=>parse(wire,session),error=>error.code==='INVALID_OUTPUT'&&error.diagnostic.ruleIds.length===1&&error.diagnostic.ruleIds[0]==='SYN-R1'&&error.diagnostic.reasonCodes.includes('quote_match_budget'));
- const results=parse(wire,session,rawBasis(),{allowDegraded:true});assert.equal(results[0].rawValidation.status,'degraded');assert.ok(results[0].rawValidation.reasonCodes.includes('quote_match_budget'));assert.deepEqual(results[0].evidenceQuotes,[]);assert.equal(results[1].rawValidation.status,'verified');assert.equal(results[1].evidenceQuotes[0].matches.length,1);
- const excessive=rawSession('a'.repeat(10001)+'\nCheck the policy.'),single=rawWire(excessive);single.results[0].evidenceQuotes=[{quote:'a'}];assert.equal(parse(single,excessive,rawBasis(),{allowDegraded:true})[0].verdict,'无法判定');
+ const results=parse(wire,session,rawBasis(),{allowDegraded:true});assert.equal(results[0].rawValidation.status,'unverified-quote');assert.ok(results[0].rawValidation.reasonCodes.includes('quote_match_budget'));assert.ok(results[0].evidenceQuotes.every(q=>q.matches.length<=10000));assert.equal(results[1].rawValidation.status,'verified');assert.equal(results[1].evidenceQuotes[0].matches.length,1);
+ const excessive=rawSession('a'.repeat(10001)+'\nCheck the policy.'),single=rawWire(excessive);single.results[0].evidenceQuotes=[{quote:'a'}];assert.equal(parse(single,excessive,rawBasis(),{allowDegraded:true})[0].verdict,'符合');
 });
 test('raw input source hash changes, invalid frozen basis and inspection time are refused before a model call',()=>{
  const prepare=method('prepareRawInspection'),session=rawSession();session.rawTranscript.text+=' changed';assert.throws(()=>prepare(session,rawBasis(),{inspectionAt}),error=>error.code==='INVALID_INPUT');

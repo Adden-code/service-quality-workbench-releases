@@ -93,7 +93,8 @@ test('saveReview validates verdict, known rule, human reason and actual evidence
   const draft = human(item, 'R002', '符合', '价格计算符合规则。', [2]);
   assert.throws(() => domain.saveReview(state, item.id, { ...draft, verdict: '通过' }), /判定|verdict/);
   assert.throws(() => domain.saveReview(state, item.id, { ...draft, ruleId: 'R099' }), /规则|rule/);
-  assert.throws(() => domain.saveReview(state, item.id, { ...draft, reason: '  ' }), /理由|reason/);
+  assert.doesNotThrow(() => domain.saveReview(state, item.id, { ...draft, reason: '  ' }));
+  assert.throws(() => domain.saveReview(state, item.id, { ...draft, verdict:'不符合', reason: '  ' }), /理由|reason/);
   assert.throws(() => domain.saveReview(state, item.id, { ...draft, evidence: [999] }), /证据|evidence/);
   assert.throws(() => domain.saveReview(state, 'UNKNOWN', draft), /会话|session/);
 });

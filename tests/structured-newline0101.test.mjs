@@ -20,7 +20,7 @@ test('structured model LF quotation resolves to original CRLF slice without chan
  assert.equal(deriveAIDecision(s,s.reviewPolicy,{basis,runId:'SYN-RUN',at:'2026-11-12T10:00:00Z'}).status,'PASS');
 });
 test('structured newline compatibility still rejects whitespace edits, joins and foreign text',async()=>{
- for(const quote of [text.replace('\r\n',' '),text.replace('Exact','exact'),text.replace('!','?'),'Foreign row'])await assert.rejects(run(quote),error=>error.code==='INVALID_OUTPUT');
+ for(const quote of [text.replace('\r\n',' '),text.replace('Exact','exact'),text.replace('!','?'),'Foreign row'])assert.equal((await run(quote)).results[0].evidenceValidation.status,'unverified');
 });
 
-test('CRLF source expansion may not produce a stored quotation above the existing size limit',async()=>{const original='A\r\n'.repeat(7000),selected={...session,turns:[session.turns[0],{...session.turns[1],text:original}]};await assert.rejects(run(original.replaceAll('\r\n','\n'),selected),error=>error.code==='INVALID_OUTPUT');});
+test('CRLF source expansion may not produce a stored quotation above the existing size limit',async()=>{const original='A\r\n'.repeat(7000),selected={...session,turns:[session.turns[0],{...session.turns[1],text:original}]};assert.equal((await run(original.replaceAll('\r\n','\n'),selected)).results[0].evidenceValidation.status,'unverified');});

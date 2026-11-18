@@ -140,7 +140,7 @@ export function parseRawInspectionResult(content,{session,basis,outputLanguage='
    if(invalid){
     const codes=[...new Set(reasonCodes)];problems.push({ruleId:item.ruleId,reasonCodes:codes});
     if(!allowDegraded)continue;
-    output.push({...base,verdict:'无法判定',reason:outputLanguage==='en'?'The model quotations could not be verified against this exact source row; human review is required.':'模型引文未能在本行原文逐字核验，已转无法判定并交人工核对。',evidenceQuotes:[],rawValidation:{...validation,status:'degraded',reasonCodes:[...new Set([...validation.reasonCodes,...codes])],originalVerdict:item.verdict,originalReason:item.reason,rejectedQuotes:rejected.length?rejected:[{quote:null,reasonCode:'missing_quote'}]}});
+    output.push({...base,evidenceQuotes:accepted,rawValidation:{...validation,status:'unverified-quote',reasonCodes:[...new Set([...validation.reasonCodes,...codes])],originalVerdict:item.verdict,originalReason:item.reason,rejectedQuotes:rejected.length?rejected:[{quote:null,reasonCode:'missing_quote'}]}});
    }else output.push({...base,evidenceQuotes:accepted,rawValidation:{...validation,reasonCodes:[...new Set([...validation.reasonCodes,...reasonCodes])]}});
   }
   if(problems.length&&!allowDegraded)invalidOutput(problems.flatMap(item=>item.reasonCodes),problems.map(item=>item.ruleId));

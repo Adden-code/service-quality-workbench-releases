@@ -97,7 +97,7 @@ test('a newline-compatible model quote cannot exceed the saved original quote le
  const session=rawSession('A\r\n'.repeat(7000)),wire=wireWithQuote(session,'A\n'.repeat(7000));
  assert.throws(()=>parse(wire,session),error=>error.code==='INVALID_OUTPUT'&&error.diagnostic.reasonCodes.includes('invalid_quote'));
  const result=parse(wire,session,rawBasis(),{allowDegraded:true})[0];
- assert.equal(result.verdict,'无法判定');assert.equal(result.rawValidation.status,'degraded');assert.deepEqual(result.evidenceQuotes,[]);
+ assert.equal(result.verdict,'符合');assert.equal(result.rawValidation.status,'unverified-quote');assert.deepEqual(result.evidenceQuotes,[]);
 });
 
 test('synthetic transport trace retains the original LF model JSON after exact source slicing',async()=>{

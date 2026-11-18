@@ -1,3 +1,4 @@
+import {appendEvidenceSheets} from './evidence-audit.mjs';
 import {workbook} from './io.mjs';
 import {ecommerceDeliverySource,ecommerceSourceMappingRows} from './ecommerce-delivery-source.mjs';
 import {createReportLocale,reportFieldId,englishReportValue,ENGLISH_BUSINESS_RULES,groundedReportQuote,visibleReportClusters,reportSentiment} from './report-locale.mjs';
@@ -109,5 +110,5 @@ export async function buildEnglishDeliveryXlsx(snapshot,enrichment={},options={}
  const provenance=resultProvenanceSheet(snapshot,'en');if(provenance)sheets.push(provenance);
  const used=new Set(sheets.map(sheet=>sheet.name));
  for(const extra of array(snapshot.original?.additionalSheets))sheets.push({name:safeSheetName(`Original_${extra.sheetName}`,used),headers:[...extra.headers],rows:[...extra.rows].sort((a,b)=>a.sourceRow-b.sourceRow).map(row=>Array.from({length:extra.headers.length},(_,index)=>row.values[index]??'')),rowNumbers:[...extra.rows].sort((a,b)=>a.sourceRow-b.sourceRow).map(row=>row.sourceRow)});
- return workbook(excelEnglishSheets(sheets));
+ return workbook(excelEnglishSheets(appendEvidenceSheets(sheets,snapshot,true)));
 }

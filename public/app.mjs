@@ -1,3 +1,5 @@
+import {installReadingControls} from './raw-review-layout.mjs';
+installReadingControls();
 import {clientBuild} from './build-identity.mjs';
 import {taskProblemSummary} from './task-diagnostics.mjs';
 import {renderUpdate} from './render-update.mjs';

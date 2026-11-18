@@ -305,7 +305,7 @@ const refreshTask = (state, taskId) => {
 };
 const fillAIDrafts = (item,now,recordHistory=false) => {
   for (const result of item.aiResults) {
-    if (!ownDraft(item,result.ruleId)&&!ruleExemption(item,result.ruleId)){
+    if (item.expectedRuleIds?.includes(result.ruleId)!==false&&!ownDraft(item,result.ruleId)&&!ruleExemption(item,result.ruleId)){
       const saved={...clone(result),source:'AI接受'};
       item.review.drafts={...item.review.drafts,[result.ruleId]:saved};
       if(recordHistory){item.review.history??=[];item.review.history.push({ruleId:result.ruleId,at:now,reviewer:item.review.reviewer,before:null,after:clone(saved)});}
@@ -333,6 +333,7 @@ export function saveReview(state, sessionId, draft, now) {
   const rule=sessionRules.find(rule=>rule.id===draft?.ruleId);
   if (!rule||(isManual&&!item.expectedRuleIds.includes(draft.ruleId))) throw new Error('规则 ruleId 无效。');
   if (!VERDICTS.includes(draft.verdict)) throw new Error('判定 verdict 无效。');
+  if(draft.verdict==='符合'&&typeof draft.reason==='string'&&!draft.reason.trim())draft={...draft,reason:'人工核对符合。'};
   if (typeof draft.reason !== 'string' || !draft.reason.trim()||draft.reason.length>20000) throw new Error('人工判定理由 reason 不能为空且不能超过20000字符。');
   if (!Array.isArray(draft.evidence) || draft.evidence.some(id => !item.turns.some(turn => turn.id === id))) throw new Error('证据 evidence 必须是本会话真实轮次。');
   let rawEvidence;
@@ -345,8 +346,8 @@ export function saveReview(state, sessionId, draft, now) {
       const quote=item.rawTranscript.text.slice(matches[0].start,matches[0].end);
       if(!quoteSeen.has(quote)){evidenceQuotes.push({quote,matches});quoteSeen.add(quote);}
     }
-    rawEvidence={evidenceQuotes,turnRefs:[],rawValidation:{schemaVersion:1,status:'verified',textSha256:item.rawTranscript.textSha256,evidenceMatching:RAW_QUOTE_MATCHING_VERSION,reasonCodes:evidenceQuotes.length?[]:['missing_quote']}};
-    if(draft.verdict!=='无法判定'&&!evidenceQuotes.length)throw new Error('确定性人工结论须提供本行原文逐字引文。');
+    rawEvidence={evidenceQuotes,turnRefs:[],rawValidation:{schemaVersion:1,status:evidenceQuotes.length?'verified':'manual-provided',textSha256:item.rawTranscript.textSha256,evidenceMatching:RAW_QUOTE_MATCHING_VERSION,reasonCodes:evidenceQuotes.length?[]:['missing_quote']}};
+    // Human quotation is optional; supplied quotations still require exact source locations.
     if(!validateRawResultAssurance({...draft,...rawEvidence},item).valid)throw new Error('人工原文引文校验未通过。');
   }
   if(draft.fieldEvidence!==undefined)validateFieldEvidence(draft.fieldEvidence,item.contextFields||[]);

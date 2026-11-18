@@ -18,6 +18,15 @@ const GOLDEN_ERRORS_EN={
  '模板记录超出任务范围。':'Template records exceed the task scope.',
 };
 const RAW_COPY_EN={
+'其他待确认':'Other awaiting confirmation',
+'待人工处理':'Pending item review',
+'无可定位引文，可结合原文与判定理由确认。':'No located quotation. Review using the original conversation and the reason.',
+'引文与原文不一致或无法定位':'Quotation differs from the source or cannot be located',
+'判定理由（符合可不填，其余必填）':'Reason (optional for Pass; required otherwise)',
+'证据引文（选填）':'Evidence quotations (optional)',
+'未修改项采用AI原判；未核验依据保留标注，无法判定单列。':'Unedited checks use AI judgments. Unverified evidence stays marked; undetermined results remain separate.',
+'未核验状态须保留引文诊断或辅助依赖标记。':'Unverified evidence must retain quotation diagnostics or an auxiliary-dependency marker.',
+
  '原文直判':'Raw direct inspection',
  '保存的引文须为首个命中的原文切片。':'The saved quotation must be the exact original source slice at the first matching occurrence.',
  '原文证据匹配口径无效。':'The original-text evidence matching contract is invalid.',

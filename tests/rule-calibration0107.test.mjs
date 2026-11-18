@@ -93,3 +93,8 @@ test('0117 repeated imports never inflate calibration pairs and cross-group orig
  assert.throws(()=>calibrationPreview(state,{trainingTaskIds:['VAL'],validationTaskIds:['VAL-REPEAT']}),/交集/);
  assert.throws(()=>calibrationPreview(state,{...options,validationTaskIds:['VAL-REPEAT']}),/再次导入.*排除/);
 });
+
+test('unverified quote and dependency evidence cannot enter calibration or exemption even after human confirmation',()=>{
+ const state=fixture({count:32,correct:32}),rows=state.sessions.filter(s=>s.taskId==='VAL');rows[0].aiResults[0].evidenceValidation={version:1,status:'unverified',rejectedQuotes:[{quote:'absent'}]};rows[1].aiResults[0].sceneDependencies=[{origin:'unverified'}];const preview=calibrationPreview(state,options);assert.equal(preview.groups[0].pairCount,30);assert.ok(preview.groups[0].pairs.every(p=>p.sessionId!==rows[0].id&&p.sessionId!==rows[1].id));
+ const active=activated(),task=addRun(active.state,2),run=active.state.sessions.filter(s=>s.taskId===task.id);run[0].aiResults[0].evidenceValidation={version:1,status:'unverified',rejectedQuotes:[{quote:'absent'}]};run[1].aiResults[0].sceneDependencies=[{origin:'unverified'}];applyAIDecisions(active.state,task,now);assert.deepEqual(run.map(s=>s.aiDecision.ruleDecisions[0].status),['manual','manual']);
+});

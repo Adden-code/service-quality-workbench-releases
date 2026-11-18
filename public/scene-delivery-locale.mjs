@@ -1,7 +1,9 @@
+import {evidenceAuditSheet} from './evidence-audit.mjs';
 import {resultProvenanceSheet} from './triage-export.mjs';
 import {createReportLocale,englishReportValue} from './report-locale.mjs';
 
 const labels={
+ '证据核验状态':'Evidence verification status','AI证据核验状态':'AI evidence verification','证据核验审计':'Verification audit','证据核验明细':'Evidence verification','已核验':'Verified','未核验':'Unverified','人工提供':'Human provided',
  '译文与置信度':'Translations and confidence','翻译字段':'Translation field','原文语种':'Source language','翻译置信度':'Translation confidence','译文':'Translation',
  '评价归类复核与改判记录':'Evaluation classification review and correction history',
  '模型子项原判与合并策略':'Original model component and merge policy',
@@ -23,9 +25,9 @@ export function sceneReportLocale(snapshot,enrichment={},options={}){
  const text=value=>{if(!english||typeof value!=='string')return value;if(Object.hasOwn(labels,value))return labels[value];const fixed=englishReportValue(value);if(fixed!==value)return fixed;if(!/[\u3400-\u9fff]/.test(value))return value;return locale.display(value);};
  const source=value=>english?locale.sourceLabel(value):value;
  function sheets(input){if(!english)return input;const t=snapshot.executionSnapshot.template;
-  return input.map((sheet,index)=>{if(sheet.name==='判定来源与分流')return resultProvenanceSheet(snapshot,'en');
+  return input.map((sheet,index)=>{if(sheet.name==='证据核验明细')return evidenceAuditSheet(snapshot,true);if(sheet.name==='判定来源与分流')return resultProvenanceSheet(snapshot,'en');
    const result={...sheet,name:labels[sheet.name]||sheet.name.replace(/^原始数据/,'Original data '),headers:sheet.headers.map(text)};
-   if(index===0){const sourceCount=sheet.headers.length-t.columns.filter(c=>c.visible).length-1;result.headers=sheet.headers.map((v,i)=>i<sourceCount?'Original data':text(v));result.rows=sheet.rows.map(row=>row.map((v,i)=>i<sourceCount?v:text(v)));}
+   if(index===0){const sourceCount=sheet.headers.length-t.columns.filter(c=>c.visible).length-1-(snapshot.evidenceAudit?1:0);result.headers=sheet.headers.map((v,i)=>i<sourceCount?'Original data':text(v));result.rows=sheet.rows.map(row=>row.map((v,i)=>i<sourceCount?v:text(v)));}
    else if(index===1)result.rows=sheet.rows.map(row=>row.map((v,i)=>i===0?v:text(v)));
    else if(index===2)result.rows=sheet.rows.map(row=>row.map((v,i)=>[4,6].includes(i)?text(v):v));
    else if(index===4)result.rows=sheet.rows.map(([key,value])=>[text(key),key==='来源声明'?`${snapshot.source.name}; SHA256 ${snapshot.source.sha256}; local frozen snapshot`:['冻结版本','输出语种','模板列规则'].includes(key)?value:text(value)]);

@@ -122,7 +122,7 @@ test('reordered core-only Sheet4 uses schema4 and fixed43 outputs without extens
  const layout=[...core].reverse(),bytes=await workbook([{name:'Sheet4',headers:layout.map(index=>EC_HEADERS[index]),rows:[layout.map(index=>standards[index]),layout.map(index=>raw()[index])]}]),p=valid(await parse(bytes));
  assert.equal(p.sessions[0].ecommerce.schemaVersion,4);assert.match(p.sessions[0].id,/-S1-3$/);assert.deepEqual(p.sessions[0].ecommerce.sourceColumns,{core:core.map(index=>22-index),extensions:[]});
  const {state}=stateFor(p),snapshot=createBusinessDeliverySnapshot(state,{taskId:state.tasks[0].id,now});
- for(const language of ['zh','en']){const tables=await readXlsx(await buildBusinessDeliveryXlsx(snapshot,{}, {language}));assert.equal(tables[language==='en'?'Inspection Details':'检核明细'][0].length,43);assert.equal(tables[language==='en'?'Source Column Map':'源列映射'].length,23);}
+ for(const language of ['zh','en']){const tables=await readXlsx(await buildBusinessDeliveryXlsx(snapshot,{}, {language}));assert.equal(tables[language==='en'?'Inspection Details':'检核明细'][0].length,44);assert.equal(tables[language==='en'?'Source Column Map':'源列映射'].length,23);}
 });
 
 test('mapped rich-text bilingual and explanatory aliases keep source labels and time fieldEvidence as text',async()=>{
@@ -159,9 +159,9 @@ test('mapped source bytes and maps persist across restart, model input excludes 
  await client.inspectEcommerceRow({config:{apiKey:'fictional-only'},session:saved.sessions[0],basis:f.basisSnapshot});assert.doesNotMatch(JSON.stringify(sent),/PRIVATE_|sourceColumns|extensions|CORE_STANDARD/);
  const snapshot=createBusinessDeliverySnapshot(saved,{taskId:saved.tasks[0].id,now}),before=JSON.stringify(snapshot);assert.deepEqual(snapshot.sourceColumns,expectedMap(layouts.shuffled));
  for(const language of ['zh','en']){
-  const tables=await readXlsx(await buildBusinessDeliveryXlsx(snapshot,{}, {language})),main=tables[language==='en'?'Inspection Details':'检核明细'];assert.equal(main[0].length,46);assert.deepEqual(main[0].slice(0,22),EC_HEADERS);assert.deepEqual(main[0].slice(43),extraHeaders);assert.deepEqual(main[1].slice(0,22),standards);assert.deepEqual(main[1].slice(43),extraStandards);
+  const tables=await readXlsx(await buildBusinessDeliveryXlsx(snapshot,{}, {language})),main=tables[language==='en'?'Inspection Details':'检核明细'];assert.equal(main[0].length,47);assert.deepEqual(main[0].slice(0,22),EC_HEADERS);assert.deepEqual(main[0].slice(43,-1),extraHeaders);assert.deepEqual(main[1].slice(0,22),standards);assert.deepEqual(main[1].slice(43,-1),extraStandards);
   if(language==='zh'){assert.ok(main[1][30].includes(`第${snapshot.sourceColumns.core[15]}列`));assert.ok(main[1][35].includes(`第${snapshot.sourceColumns.core[20]}列`));}
-  for(const row of [3,7,27]){const line=main.find(r=>r[XLSX_ROW_NUMBER]===row);assert.deepEqual(line.slice(0,22),raw(row));assert.deepEqual(line.slice(43),extraValues);}
+  for(const row of [3,7,27]){const line=main.find(r=>r[XLSX_ROW_NUMBER]===row);assert.deepEqual(line.slice(0,22),raw(row));assert.deepEqual(line.slice(43,-1),extraValues);}
   const mapping=tables[language==='en'?'Source Column Map':'源列映射'];assert.ok(mapping);assert.equal(mapping.length,26);
   for(const [i,physical]of snapshot.sourceColumns.core.entries()){const line=mapping.find(r=>r[0]===String(physical));assert.equal(line[1],String(i+1));assert.equal(line[2],EC_HEADERS[i]);}
   for(const [i,physical]of snapshot.sourceColumns.extensions.entries()){const line=mapping.find(r=>r[0]===String(physical));assert.equal(line[1],String(44+i));assert.equal(line[2],extraHeaders[i]);}

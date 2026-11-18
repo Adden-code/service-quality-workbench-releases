@@ -1,2 +1,2 @@
 // Replaced in the packaged payload with the exact source and resource identity.
-export const clientBuild={version:'0.11.10',buildId:'development',sourceCommit:null,resourceFingerprint:null};
+export const clientBuild={version:'0.11.11',buildId:'development',sourceCommit:null,resourceFingerprint:null};

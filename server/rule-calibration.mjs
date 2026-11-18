@@ -1,3 +1,4 @@
+import {hasVerifiableAIEvidence} from '../public/evidence-status.mjs';
 import {isRepeatedImport} from '../public/import-lineage.mjs';
 import {createHash,randomUUID} from 'node:crypto';
 import {calibrationScope,calibratedReviewPolicy,stable,allRulesExempt,mandatorySampleCount} from '../public/rule-calibration-policy.mjs';
@@ -26,7 +27,7 @@ function collect(state,taskIds){
    if(repeated||!keys||!s.aiExecution?.promptVersion||s.review?.status!=='已确认'||s.review.disposition||s.aiExecution?.status!=='completed')continue;
    const run=[task.aiRun,...(task.aiRunHistory||[])].find(r=>r?.id===s.aiExecution.runId);if(!run?.modelConfigFingerprint)continue;
    for(const rule of task.basisSnapshot?.rules||[]){const ai=s.aiResults.find(r=>r.ruleId===rule.id),human=s.review.drafts[rule.id];
-    if(!ai||!human||!['符合','不符合','不适用'].includes(human.verdict)||!['符合','不符合','不适用','无法判定'].includes(ai.verdict))continue;
+    if(!hasVerifiableAIEvidence(ai,s)||!human||!['符合','不符合','不适用'].includes(human.verdict)||!['符合','不符合','不适用','无法判定'].includes(ai.verdict))continue;
     const scope=calibrationScope(task),key=sha({scope,ruleId:rule.id,version:rule.version,modelFingerprint:run.modelConfigFingerprint,promptVersion:s.aiExecution.promptVersion});
     rows.push({key,ruleId:rule.id,ruleVersion:rule.version,title:rule.title||rule.name,scope,modelFingerprint:run.modelConfigFingerprint,promptVersion:s.aiExecution.promptVersion,taskId:id,sessionId:s.id,sourceKeys:keys,ai:ai.verdict,human:human.verdict,humanSource:human.source||'unknown'});
    }

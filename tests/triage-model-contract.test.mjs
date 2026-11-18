@@ -13,6 +13,6 @@ test('inspection preserves confidence and validated source quotes and instructs 
 });
 test('invalid confidence, invented source quotes and mismatched roles remain retryable invalid outputs',async()=>{
  for(const modify of [r=>r.confidence=1.4,r=>r.confidence='0.95junk',r=>r.evidenceQuotes[0].quote='Invented',r=>r.evidenceQuotes[0].turnId=1,r=>r.evidenceQuotes[0].role='客户',r=>r.conflictsWith=['R404']]){
-  const value=result();modify(value);await assert.rejects(createArkClient({fetchImpl:async()=>respond(value)}).inspect({config,session,basis}),e=>e.code==='INVALID_OUTPUT');
+  const value=result();modify(value);const promise=createArkClient({fetchImpl:async()=>respond(value)}).inspect({config,session,basis});if(value.evidenceQuotes[0].quote==='Invented'||value.evidenceQuotes[0].turnId===1||value.evidenceQuotes[0].role==='客户'){const r=(await promise).results[0];assert.equal(r.verdict,value.verdict);assert.equal(r.evidenceValidation.status,'unverified');assert.deepEqual(r.evidenceQuotes,[]);}else await assert.rejects(promise,e=>e.code==='INVALID_OUTPUT');
  }
 });

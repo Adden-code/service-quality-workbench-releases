@@ -27,7 +27,7 @@ test('123 ecommerce rows resume after restart: failed offsets recover once, 103 
    // With VERIFY_OLD_APP_ROOT the actual 0.11.8 parser rejects the exact valid quote.
    // Default regression injects the same INVALID_OUTPUT boundary without a legacy install dependency.
    const evidence={blockId:b.id,quote:initial&&index<3&&!oldRoot?'Synthetic missing quote':drift?quote:b.text,start:drift?'95':0,end:drift?'121':b.text.length};
-   return new Response(JSON.stringify({choices:[{finish_reason:'stop',message:{content:'```json\n'+JSON.stringify({status:'completed',value:{polarity:'negative',vocKind:'substantive'},confidence:'0.95',reason:'Synthetic',evidence:[evidence]})+'\n```'}}]}));
+   return new Response(JSON.stringify({choices:[{finish_reason:'stop',message:{content:'```json\n'+JSON.stringify({status:'completed',value:{polarity:'negative',vocKind:'substantive'},confidence:initial&&index<3&&!oldRoot?'high':'0.95',reason:'Synthetic',evidence:[evidence]})+'\n```'}}]}));
   }});
   return{inspectSceneCapability:wire.inspectSceneCapability,inspectEcommerceRow:async()=>({results:EC_RULE_IDS.filter(id=>id!=='EC-TIME').map(ruleId=>({ruleId,verdict:'符合',reason:'Synthetic direct result',evidence:[2],referenceIds:[],confidence:.9,conflictsWith:[]})),modelId:'synthetic-model'})};
  }

@@ -1,3 +1,4 @@
+import {hasUnverifiedEvidence} from '../public/evidence-status.mjs';
 import {createHash} from 'node:crypto';
 import {setTimeout as delay} from 'node:timers/promises';
 import {sceneCapabilitySchema} from './scene-capability-schema.mjs';
@@ -15,21 +16,21 @@ export function sceneSourceBlocks(session){
  if(session.rawTranscript)return[{id:'raw',text:session.rawTranscript.text,role:null,at:null}];
  return(session.turns||[]).map(t=>({id:`turn-${t.id}`,text:t.text,role:t.role,at:t.at??t.time??null}));
 }
-function evidence(value,input,{required=true,onAmbiguous}={}){
- if(!Array.isArray(value)||value.length>100||required&&!value.length)throw error('能力结果缺少原文依据。');
- return value.map(e=>{
+function evidence(value,input,{required=true,onUnverified}={}){
+ if(!Array.isArray(value)||value.length>100)throw error('能力原文依据数组格式无效。');
+ if(required&&!value.length)onUnverified({reasonCode:'missing_quote',quote:null});
+ return value.flatMap(e=>{
   const b=input.blocks.find(b=>b.id===e?.blockId);
-  if(!b||typeof e.quote!=='string'||!e.quote)throw error('能力结果引文缺少有效的原始文本块或原文。');
+  const reject=reasonCode=>{onUnverified({reasonCode,blockId:typeof e?.blockId==='string'?e.blockId:null,quote:typeof e?.quote==='string'?e.quote:null,originalStart:e?.start??null,originalEnd:e?.end??null});return[];};
+  if(!b||typeof e.quote!=='string'||!e.quote||e.quote.length>100000)return reject('invalid_quote');
   let start=normalizeConfidenceValue(e.start),end=normalizeConfidenceValue(e.end),method;
-  if(!Number.isSafeInteger(start)||!Number.isSafeInteger(end)||start<0||end<=start)throw error('能力结果引文偏移无效：start/end须为非负整数或规范整数字符串，且end大于start。');
-  if(end>b.text.length||b.text.slice(start,end)!==e.quote){
-   // Search only the declared block, without altering the quote or normalizing source text.
-   const first=b.text.indexOf(e.quote);
-   if(first<0)throw error('能力结果引文未在声明的原始文本块逐字命中。');
-   if(b.text.indexOf(e.quote,first+1)>=0){onAmbiguous();return{blockId:b.id,quote:e.quote,start,end};}
+  const validOffset=Number.isSafeInteger(start)&&Number.isSafeInteger(end)&&start>=0&&end>start&&end<=b.text.length;
+  if(!validOffset||b.text.slice(start,end)!==e.quote){
+   const first=b.text.indexOf(e.quote);if(first<0)return reject('quote_mismatch');
+   if(b.text.indexOf(e.quote,first+1)>=0)return reject('quote_ambiguous');
    start=first;end=first+e.quote.length;method='unique-exact';
   }else if(typeof e.start==='string'||typeof e.end==='string')method='numeric-string';
-  return{blockId:b.id,quote:e.quote,start,end,...(method?{locatorRepair:{version:1,method,originalStart:e.start,originalEnd:e.end}}:{})};
+  return[{blockId:b.id,quote:e.quote,start,end,...(method?{locatorRepair:{version:1,method,originalStart:e.start??null,originalEnd:e.end??null}}:{})}];
  });
 }
 function exactKeys(v,allowed){if(!v||typeof v!=='object'||Array.isArray(v)||allowed.some(k=>!Object.hasOwn(v,k))||Object.keys(v).some(k=>!allowed.includes(k)))throw error('能力输出缺少必填字段或包含未定义字段。');}
@@ -47,10 +48,14 @@ export function parseSceneCapability(content,input){
  body.confidence=normalizeConfidenceValue(body.confidence);
  if(typeof body.confidence!=='number'||!Number.isFinite(body.confidence)||body.confidence<0||body.confidence>1)throw error('能力置信度无效：confidence须为0至1的数值或规范数值字符串，不能为空白或等级文字。');
  if(!['completed','uncertain'].includes(body.status)||typeof body.reason!=='string'||!body.reason.trim())throw error('能力状态或理由无效。');
- let ambiguous=false;const onAmbiguous=()=>{ambiguous=true;},rejectAmbiguity=()=>{if(ambiguous)throw Object.assign(error('能力结果引文在声明文本块内多处命中，无法唯一修复偏移；请人工核对。'),{validationReason:'evidence_ambiguous'});};
- // Validate the entire contract before categorizing ambiguity: malformed fields or
- // a second invented quote must still be technical validation failures.
- const grounded=evidence(body.evidence,input,{required:body.status==='completed',onAmbiguous});if(body.status==='uncertain'){if(body.value!==null)throw error('无法确定的能力value必须为null。');rejectAmbiguity();return uncertain(body.reason,{confidence:body.confidence,evidence:grounded});}
+ const rejectedQuotes=[],onUnverified=q=>rejectedQuotes.push(q);
+ const finish=result=>{
+  if(!rejectedQuotes.length)return result;
+  const candidate={...result,origin:'unverified',evidenceValidation:{version:1,status:'unverified',rejectedQuotes}};
+  throw Object.assign(error('能力引文未核验；保留有效能力值供人工确认。'),{validationReason:rejectedQuotes.every(q=>q.reasonCode==='quote_ambiguous')?'evidence_ambiguous':'evidence_unverified',unverifiedCandidate:candidate});
+ };
+ // Check all non-evidence fields before retaining any unverified model value.
+ const grounded=evidence(body.evidence,input,{required:body.status==='completed',onUnverified});if(body.status==='uncertain'){if(body.value!==null)throw error('无法确定的能力value必须为null。');return finish(uncertain(body.reason,{confidence:body.confidence,evidence:grounded}));}
  const v=body.value;
  if(input.capability==='ecommerceClassification'){exactKeys(v,['polarity','vocKind']);if(!['positive','negative','invalid'].includes(v.polarity)||!['substantive','strong-negative','none'].includes(v.vocKind)||(v.polarity!=='negative'&&v.vocKind!=='none'))throw error('评价归类结果无效。');v.evaluationType=v.polarity==='invalid'?'无效评价':input.rating===1?'差评':input.rating>=2&&input.rating<=3?'中评':input.rating>=4&&input.rating<=5?(v.polarity==='invalid'?'无效评价':v.polarity==='negative'?'好评负向':'好评正向'):'无法判定';}
  if(input.capability==='site'){exactKeys(v,['siteId']);if(!input.sites.some(s=>s.id===v.siteId))throw error('站点不在冻结字典。');}
@@ -59,11 +64,11 @@ export function parseSceneCapability(content,input){
  if(input.capability==='timing'){
   exactKeys(v,['firstCustomer','firstAgent','queries','completeCoverage']);if(v.completeCoverage!==true||!Array.isArray(v.queries)||v.queries.length>200)throw error('查询事件覆盖不完整。');
   const ref=r=>{if(r===null)return;exactKeys(r,['blockId','timestampQuote']);if(!input.blocks.some(b=>b.id===r.blockId)||typeof r.timestampQuote!=='string')throw error('时间引用无效。');};ref(v.firstCustomer);ref(v.firstAgent);
-  for(const q of v.queries){exactKeys(q,['issueId','topic','start','end','evidence']);if(typeof q.issueId!=='string'||!q.issueId||typeof q.topic!=='string'||!q.topic)throw error('查询必须按问题主题归类。');ref(q.start);ref(q.end);q.evidence=evidence(q.evidence,input,{onAmbiguous});}
-  const themes=new Map();for(const q of v.queries){if(themes.has(q.issueId)&&themes.get(q.issueId)!==q.topic)throw error('同一问题ID必须采用相同主题。');themes.set(q.issueId,q.topic);for(const r of [q.start,q.end])if(r){const b=input.blocks.find(b=>b.id===r.blockId);if(b.role&&!['客服','坐席','agent','assistant'].includes(String(b.role).toLowerCase()))throw error('查询起止必须定位坐席告知/结果回复。');if(r.timestampQuote&&!b.text.includes(r.timestampQuote))throw error('时间引文不是对应原文的逐字子串。');}}
+  for(const q of v.queries){exactKeys(q,['issueId','topic','start','end','evidence']);if(typeof q.issueId!=='string'||!q.issueId||typeof q.topic!=='string'||!q.topic)throw error('查询必须按问题主题归类。');ref(q.start);ref(q.end);q.evidence=evidence(q.evidence,input,{onUnverified});}
+  const themes=new Map();for(const q of v.queries){if(themes.has(q.issueId)&&themes.get(q.issueId)!==q.topic)throw error('同一问题ID必须采用相同主题。');themes.set(q.issueId,q.topic);for(const r of [q.start,q.end])if(r){const b=input.blocks.find(b=>b.id===r.blockId);if(b.role&&!['客服','坐席','agent','assistant'].includes(String(b.role).toLowerCase()))throw error('查询起止必须定位坐席告知/结果回复。');if(r.timestampQuote&&!b.text.includes(r.timestampQuote))onUnverified({reasonCode:'timestamp_quote_mismatch',blockId:r.blockId,quote:r.timestampQuote});}}
   const starts=v.queries.filter(q=>q.start).map(q=>JSON.stringify(q.start));if(new Set(starts).size!==starts.length)throw error('同一次查询开始被重复计数。');
  }
- rejectAmbiguity();return completed(clone(v),grounded,{confidence:body.confidence,reason:body.reason});
+ return finish(completed(clone(v),grounded,{confidence:body.confidence,reason:body.reason}));
 }
 function siteValue(session,field){
  if(!field)return[];if(session.rawTranscript){const r=session.rawTranscript;return r.headers.flatMap((h,i)=>h===field&&r.raw[i]?.trim()?[r.raw[i].trim()]:[]);}
@@ -96,7 +101,7 @@ export function calculateSceneTiming(session,snapshot,site,extracted){
   const values=actual[metric],unknown=values.some(v=>v.value===null),breach=values.some(v=>v.value!==null&&v.value>standard.value);
   return{metric,status:unknown?'uncertain':'completed',verdict:unknown?'无法判定':breach?'不符合':'符合',siteId,standard:clone(standard),standardOrigin:fallback?'batch-fallback':'site-table',actual:values,timeSource:session.rawTranscript?'quoted-raw-with-declared-timezone':'source-turn-timestamp',reason:unknown?'时间源缺失、无完整日期或起止顺序异常。':values.length?'程序逐项比较人工标准。':'完整会话没有查询事件。'};
  });
- return completed({metrics},extracted.evidence,{metrics,siteId,events:clone(events),siteOrigin:site.origin,confidence:Math.min(extracted.confidence??0,site.confidence??1)});
+ return completed({metrics},extracted.evidence,{...(hasUnverifiedEvidence(extracted)||hasUnverifiedEvidence(site)?{origin:'unverified',evidenceValidation:{version:1,status:'unverified',dependencies:['site','timing']}}:{}),metrics,siteId,events:clone(events),siteOrigin:site.origin,confidence:Math.min(extracted.confidence??0,site.confidence??1)});
 }
 export async function executeSceneCapabilities({session,snapshot,client,config,signal,trace,previous,phase='pre',maxAttempts=3,retryDelayMs=500}){
  if(!snapshot||snapshot.configuration.executionMode!=='configured')return null;
@@ -115,7 +120,7 @@ export async function executeSceneCapabilities({session,snapshot,client,config,s
   if(key==='site'&&!sitePolicy.sites.length)return outputs[key]=uncertain('站点字典尚未维护，不能让模型猜测站点键。',{origin:'configuration-pending'});
   for(const dep of a.dependsOn)await execute(dep);
   if(a.dependsOn.some(dep=>outputs[dep]?.status!=='completed'))return outputs[key]=uncertain('依赖能力未确定，本项未使用空结果。',{dependencyBlocked:true});
-  if(key==='salesStage'){const parent=snapshot.taxonomy?.labels.find(l=>l.id===outputs.intent.value.labelId)?.parentId;const label=snapshot.taxonomy?.labels.find(l=>l.id===parent);return outputs[key]=label?completed({id:label.id,label:label.label},outputs.intent.evidence,{origin:'taxonomy-parent'}):uncertain('二级意图没有有效父级。');}
+  if(key==='salesStage'){const parent=snapshot.taxonomy?.labels.find(l=>l.id===outputs.intent.value.labelId)?.parentId;const label=snapshot.taxonomy?.labels.find(l=>l.id===parent);return outputs[key]=label?completed({id:label.id,label:label.label},outputs.intent.evidence,{origin:hasUnverifiedEvidence(outputs.intent)?'unverified':'taxonomy-parent',...(hasUnverifiedEvidence(outputs.intent)?{evidenceValidation:clone(outputs.intent.evidenceValidation)}:{})}):uncertain('二级意图没有有效父级。');}
   if(key==='site'){const direct=resolveSiteField(session,sitePolicy);if(direct){outputs.site=direct;return fallbackSite();}}
   if(typeof client.inspectSceneCapability!=='function')throw error('模型客户端缺少辅助能力执行器。','CAPABILITY_EXECUTOR_MISSING');
   const input={contract:CAPABILITY_VERSION,capability:key,blocks:key==='ecommerceClassification'?blocks.filter(b=>['客户','用户','customer','user'].includes(String(b.role).toLowerCase())):blocks,...(key==='ecommerceClassification'?{rating:Number(session.ecommerce?.raw[10])||null}:{}),sites:sitePolicy.sites,taxonomy:key==='intent'?snapshot.taxonomy:null,targetLanguage:snapshot.configuration.inspectionLanguage||'zh',dependencies:Object.fromEntries(a.dependsOn.map(d=>[d,outputs[d]])),timePolicy:session.rawTranscript?.timePolicy||{mode:'structured-source'}};
@@ -127,7 +132,7 @@ export async function executeSceneCapabilities({session,snapshot,client,config,s
    const code=String(e.code||'PROVIDER_ERROR').toUpperCase();
    if(signal?.aborted||code.startsWith('TRACE_')||['AUTH','UNAUTHORIZED','FORBIDDEN','AUTHENTICATION','PERMISSION','REQUEST_REJECTED','NOT_CONFIGURED','CAPABILITY_EXECUTOR_MISSING','INVALID_INPUT'].includes(code))throw e;
    retryFeedback={code};
-   if(attempt===maxAttempts&&code==='INVALID_OUTPUT'&&e.validationReason==='evidence_ambiguous')outputs[key]=uncertain(`引文多处命中，${maxAttempts}次尝试后仍无法唯一定位；本能力无法判定，依赖项转人工，不计入技术失败率。`,{origin:'evidence-ambiguous',value:null,confidence:0,evidence:[],errorCode:code,attempts:attempt});
+   if(attempt===maxAttempts&&code==='INVALID_OUTPUT'&&['evidence_ambiguous','evidence_unverified'].includes(e.validationReason)&&e.unverifiedCandidate)outputs[key]={...clone(e.unverifiedCandidate),attempts:attempt};
    else if(attempt===maxAttempts)outputs[key]={status:'failed',reason:`能力最终技术失败（已尝试${maxAttempts}次），依赖项转人工。${e.message?.startsWith('能力置信度无效：')?' confidence须为0至1的数值或规范数值字符串，不能为空白或等级文字。':e.message?.startsWith('能力结果引文')?e.message:''}`,errorCode:code,attempts:attempt};
    else await delay(retryDelayMs*2**(attempt-1),undefined,{signal});
   }
@@ -140,35 +145,37 @@ export async function executeSceneCapabilities({session,snapshot,client,config,s
  return{version:CAPABILITY_VERSION,fingerprint,outputs};
 }
 export function addSceneContext(messages,snapshot,capabilities){
- if(!capabilities)return;messages[0].content+=' sceneContext是程序核对后的前置能力结果及冻结例外表，仅作检核输入，不能取代原文证据。缺失/失败依赖不得猜测。规则例外表须结合原文与意图逐项判断，不能单凭意图分类推导NA。表中result为继续检核的场景必须继续核对动作，不等于NA或通过；只有明确匹配不适用条件才判NA。不得根据模型自评修改人工时效标准。ruleExecutionPolicies声明了分项执行范围时，模型仅按basis.rules中的子项口径判断；时效与知识缺失由程序合并，原始规则和案例不扩展该模型子项范围。';
+ if(!capabilities)return;messages[0].content+=' sceneContext包含字段校验后的前置能力结果及冻结例外表，仅作检核输入，不能取代原文证据。origin=unverified表示引文未核验：能力值保留作辅助输入，不等于事实已经证实，仍须结合会话原文判断。缺失/失败依赖不得猜测。规则例外表须结合原文与意图逐项判断，不能单凭意图分类推导NA。表中result为继续检核的场景必须继续核对动作，不等于NA或通过；只有明确匹配不适用条件才判NA。不得根据模型自评修改人工时效标准。ruleExecutionPolicies声明了分项执行范围时，模型仅按basis.rules中的子项口径判断；时效与知识缺失由程序合并，原始规则和案例不扩展该模型子项范围。';
  const data=JSON.parse(messages[1].content);data.sceneContext={outputs:capabilities.outputs,ruleDependencies:snapshot.configuration.ruleDependencies,ruleExecutionPolicies:snapshot.configuration.ruleExecutionPolicies||{},exceptionTables:snapshot.exceptions};messages[1].content=JSON.stringify(data);
 }
 export function enforceSceneResults(results,snapshot,capabilities,session){
  if(!capabilities)return results;
  return results.map(result=>{const deps=snapshot.configuration.ruleDependencies[result.ruleId]||[],missing=deps.filter(d=>capabilities.outputs[d]?.status!=='completed'),policy=snapshot.configuration.ruleExecutionPolicies?.[result.ruleId];let outcome,reason;
+  const unverifiedDependencies=deps.filter(d=>hasUnverifiedEvidence(capabilities.outputs[d]));
+  if(unverifiedDependencies.length)result={...result,evidenceValidation:{...result.evidenceValidation,version:1,status:'unverified',dependencies:unverifiedDependencies},sceneDependencies:clone(deps.map(d=>({capability:d,...capabilities.outputs[d]})))};
   const componentAudit={...(policy?{sceneExecutionPolicy:clone(policy),sceneModelComponent:clone(result)}:{})};
   if(policy?.mode==='missing-knowledge'||policy?.mode==='missing-knowledge-or-model'){
    const explicitFailure=policy.mode==='missing-knowledge-or-model'&&result.verdict==='不符合';
    return{...result,...componentAudit,verdict:explicitFailure?'不符合':'无法判定',reason:explicitFailure?`${result.reason}\n${policy.reason}；当前不通过仅依据可直接核对的显性违规。`:policy.reason,confidence:explicitFailure?result.confidence:0,sceneProgramDecision:true};
   }
   if(policy?.mode==='timing-or-model'&&result.verdict==='不符合')return{...result,...componentAudit,sceneProgramDecision:true,sceneDependencies:clone(deps.map(d=>({capability:d,...capabilities.outputs[d]}))),reason:`${result.reason}\n非时效子项已不通过；时效结果不覆盖该结论。`};
-  if(missing.length){outcome='无法判定';reason=`前置能力未确定：${missing.join('、')}。`;}else if(deps.includes('timing')){const required=snapshot.configuration.timingRuleMetrics?.[result.ruleId]||[],metrics=capabilities.outputs.timing.metrics?.filter(m=>required.includes(m.metric))||[];if(!required.length||metrics.length!==required.length||metrics.some(m=>m.status!=='completed')){outcome='无法判定';reason='依赖的站点时效指标缺少可靠依据。';}else{outcome=metrics.some(m=>m.verdict==='不符合')?'不符合':'符合';reason=metrics.map(m=>`${m.metric}：站点${m.siteId}，阈值${m.standard.value}${m.standard.unit}，实际${m.actual.map(v=>v.value).join('/')||'无查询事件'}；${m.reason}`).join('\n');}}
+  if(missing.length){outcome='无法判定';reason=`前置能力未确定：${missing.map(d=>({site:'站点识别',intent:'用户意图',salesStage:'销售环节',demandSummary:'诉求总结',negativeVoice:'负面声音',translation:'前置翻译',timing:'时效计算',ecommerceClassification:'评价归类'})[d]||'辅助判定').join('、')}。`;}else if(deps.includes('timing')){const required=snapshot.configuration.timingRuleMetrics?.[result.ruleId]||[],metrics=capabilities.outputs.timing.metrics?.filter(m=>required.includes(m.metric))||[];if(!required.length||metrics.length!==required.length||metrics.some(m=>m.status!=='completed')){outcome='无法判定';reason='依赖的站点时效指标缺少可靠依据。';}else{outcome=metrics.some(m=>m.verdict==='不符合')?'不符合':'符合';reason=metrics.map(m=>`${m.metric}：站点${m.siteId}，阈值${m.standard.value}${m.standard.unit}，实际${m.actual.map(v=>v.value).join('/')||'无查询事件'}；${m.reason}`).join('\n');}}
   if(!outcome)return result;
   if(policy?.mode==='timing-or-model'&&outcome==='符合'&&!['符合','不适用'].includes(result.verdict)){outcome='无法判定';reason+=`\n非时效子项尚无法确定：${result.reason}`;}
   else if(policy?.mode==='timing-or-model')reason+=`\n非时效子项：${result.verdict}；${result.reason}`;
   if(session?.rawTranscript?.timePolicy.mode==='unavailable'&&rawTimeRuleIds(snapshot.basis||snapshot.configuration.basis).includes(result.ruleId))return result;
-  const updated={...result,...componentAudit,verdict:outcome,reason,confidence:outcome==='无法判定'?0:Math.min(...deps.map(d=>capabilities.outputs[d].confidence??1)),sceneProgramDecision:true,sceneDependencies:clone(deps.map(d=>({capability:d,...capabilities.outputs[d]})))};
+  const updated={...result,...componentAudit,sceneModelComponent:clone(result),verdict:outcome,reason,confidence:outcome==='无法判定'?0:Math.min(...deps.map(d=>capabilities.outputs[d].confidence??1)),sceneProgramDecision:true,sceneDependencies:clone(deps.map(d=>({capability:d,...capabilities.outputs[d]})))};
   if(updated.rawValidation){
    updated.rawValidation={schemaVersion:1,status:'verified',textSha256:session.rawTranscript.textSha256,evidenceMatching:RAW_QUOTE_MATCHING_VERSION,reasonCodes:outcome==='无法判定'?['scene_dependency_uncertain']:[]};
-   if(outcome!=='无法判定'){const quotes=[...new Set((capabilities.outputs.timing?.evidence||[]).filter(e=>e.blockId==='raw').map(e=>e.quote))];updated.evidenceQuotes=quotes.map(quote=>({quote,matches:matchRawQuote(session.rawTranscript.text,quote)}));if(!updated.evidenceQuotes.length){updated.verdict='无法判定';updated.confidence=0;updated.reason='程序时效结果缺少可核对的原文定位。';}}
+   if(outcome!=='无法判定'){const quotes=[...new Set((capabilities.outputs.timing?.evidence||[]).filter(e=>e.blockId==='raw').map(e=>e.quote))];updated.evidenceQuotes=quotes.map(quote=>({quote,matches:matchRawQuote(session.rawTranscript.text,quote)}));if(!updated.evidenceQuotes.length){updated.rawValidation.status='unverified-quote';updated.rawValidation.reasonCodes=['dependency_quote_unverified'];updated.evidenceValidation={version:1,status:'unverified',dependencies:deps};}}
   }
   return updated;
  });
 }
 export function recordCapabilityOutcomes(monitor={},sessionId,capabilities,policy){
  const next=clone(monitor);for(const [key,value] of Object.entries(capabilities?.outputs||{})){
-  if(value.dependencyBlocked)continue;const rows=(next[key]?.rows||[]).filter(r=>r.sessionId!==sessionId);const legacyAmbiguity=value.status==='failed'&&value.errorCode==='INVALID_OUTPUT'&&/^能力最终技术失败（已尝试[1-3]次），依赖项转人工。能力结果引文在声明文本块内多处命中，无法唯一修复偏移；请人工核对。$/.test(value.reason||''),ambiguous=legacyAmbiguity||value.status==='uncertain'&&value.origin==='evidence-ambiguous';rows.push({sessionId,status:legacyAmbiguity?'uncertain':value.status,...(ambiguous?{origin:'evidence-ambiguous'}:{})});const window=rows.slice(-policy.window),technicalFailures=window.filter(r=>r.status==='failed').length,businessUncertain=window.filter(r=>r.status==='uncertain').length;
-  next[key]={rows:window,total:window.length,technicalFailures,businessUncertain,evidenceAmbiguities:window.filter(r=>r.origin==='evidence-ambiguous').length,rate:technicalFailures/window.length,paused:window.length>=policy.minimum&&technicalFailures/window.length>policy.rate};
+  if(value.dependencyBlocked)continue;const rows=(next[key]?.rows||[]).filter(r=>r.sessionId!==sessionId);const legacyAmbiguity=value.status==='failed'&&value.errorCode==='INVALID_OUTPUT'&&/^能力最终技术失败（已尝试[1-3]次），依赖项转人工。能力结果引文在声明文本块内多处命中，无法唯一修复偏移；请人工核对。$/.test(value.reason||''),legacyQuote=value.status==='failed'&&value.errorCode==='INVALID_OUTPUT'&&/^能力最终技术失败（已尝试[1-3]次），依赖项转人工。(?:能力结果引文未在声明的原始文本块逐字命中。|能力结果引文偏移无效：start\/end须为非负整数或规范整数字符串，且end大于start。|能力结果引文缺少有效的原始文本块或原文。)$/.test(value.reason||''),ambiguous=legacyAmbiguity||value.status==='uncertain'&&value.origin==='evidence-ambiguous';rows.push({sessionId,status:legacyAmbiguity||legacyQuote?'uncertain':value.status,...(ambiguous?{origin:'evidence-ambiguous'}:legacyQuote||hasUnverifiedEvidence(value)?{origin:'unverified'}:{})});const window=rows.slice(-policy.window),technicalFailures=window.filter(r=>r.status==='failed').length,businessUncertain=window.filter(r=>r.status==='uncertain').length;
+  next[key]={rows:window,total:window.length,technicalFailures,businessUncertain,evidenceAmbiguities:window.filter(r=>r.origin==='evidence-ambiguous').length,unverifiedEvidence:window.filter(r=>r.origin==='unverified').length,rate:technicalFailures/window.length,paused:window.length>=policy.minimum&&technicalFailures/window.length>policy.rate};
  }return next;
 }
 

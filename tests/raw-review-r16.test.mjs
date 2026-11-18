@@ -44,3 +44,8 @@ test('saved legacy review highlights keep literal coordinates while new evidence
  assert.match(html,/data-raw-match-count="1"/);
  assert.match(html,/A\nB \/ <mark[^>]*>A\r\nB<\/mark>/);
 });
+
+test('derived summary never contributes to pending badges or pending rule cards',async()=>{
+ const {getReviewPresentation}=await import('../public/ai-triage.mjs'),f=fixture();f.task.executionSnapshot={configuration:{aggregateRuleId:'NP-R01',ruleBindings:['NP-R01',...f.session.expectedRuleIds].map(ruleId=>({ruleId,ruleVersion:'V1'}))}};f.session.expectedRuleIds.unshift('NP-R01');f.session.aiResults.unshift({...structuredClone(f.session.aiResults[0]),ruleId:'NP-R01'});f.session.review.drafts.SYN2={...f.session.aiResults[2],source:'人工修改'};
+ const p=getReviewPresentation(f.session,f.task);assert.equal(p.pendingCount,1);const html=api.rawReviewView(f.state,f.ui,{session:f.session,queue:f.queue});assert.equal((html.match(/data-rule-card=/g)||[]).length,1);assert.doesNotMatch(html,/data-rule-card="NP-R01"/);assert.match(html,/待人工确认 1 项/);assert.match(html,/自动汇总，随16个子项更新/);assert.match(html,/问题 1.*需核实 0.*其他待确认 0/s);
+});

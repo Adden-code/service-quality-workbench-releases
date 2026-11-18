@@ -9,6 +9,7 @@ export function reviewSessionLabel(session,task){
  if(p.aiFinal)return L('AI终判免审','AI final · exempt');
  if(p.returned)return L(`已退回人工 · 待确认 ${count} 项`,`Returned · ${count} checks pending`);
  if(session.review?.status==='待补充')return L(`待补充 · 待确认 ${count} 项`,`Awaiting information · ${count} checks pending`);
+ if(p.draftCount&&count===0)return L('草稿已齐，待提交确认','Drafts ready · submit to confirm');
  if(p.aiCount||p.draftCount)return L(`待人工确认 ${count} 项`,`${count} checks awaiting confirmation`);
  if(p.needsReview)return L(`需人工检查 ${count} 项`,`${count} checks require manual inspection`);
  return p.execution==='running'?L('AI执行中，等待可审结果','AI running · awaiting reviewable results'):L('尚无可审结果','No reviewable results yet');

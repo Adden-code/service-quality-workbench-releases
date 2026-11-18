@@ -1,3 +1,4 @@
+import {appendEvidenceSheets} from './evidence-audit.mjs';
 import {sceneDeliverySnapshot,configuredDelivery,buildSceneDeliveryXlsx} from './scene-delivery.mjs';
 import {isProcessedUnknown} from './pending-resolution.mjs';
 import {hasCompletedAI} from './domain.mjs';
@@ -206,7 +207,7 @@ export async function buildConsultationDeliveryXlsx(snapshot,enrichment={},optio
   const provenance=resultProvenanceSheet(snapshot);if(provenance)sheets.push(provenance);
   const used=new Set(sheets.map(sheet=>sheet.name));
  for(const extra of snapshot.original.additionalSheets||[])sheets.push({name:sheetName(`原文_${extra.sheetName}`,used),headers:[...extra.headers],rows:[...extra.rows].sort((a,b)=>a.sourceRow-b.sourceRow).map(row=>Array.from({length:extra.headers.length},(_,i)=>row.values[i]??'')),rowNumbers:[...extra.rows].sort((a,b)=>a.sourceRow-b.sourceRow).map(row=>row.sourceRow)});
- return workbook(excelSafeSheets(sheets));
+ return workbook(excelSafeSheets(appendEvidenceSheets(sheets,snapshot)));
 }
 
 export function selectConsultationErrorCases(snapshot,limit=10){

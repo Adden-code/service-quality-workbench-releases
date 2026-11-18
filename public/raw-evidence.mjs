@@ -73,14 +73,14 @@ export function validateRawResultAssurance(result,session){
  if(result.confidence!==undefined&&(typeof result.confidence!=='number'||!Number.isFinite(result.confidence)||result.confidence<0||result.confidence>1))issue('invalid_confidence','模型自评分须为0至1有限数值。');
  if(result.conflictsWith!==undefined&&(!Array.isArray(result.conflictsWith)||new Set(result.conflictsWith).size!==result.conflictsWith.length||result.conflictsWith.some(id=>!nonempty(id)||id===result.ruleId||(Array.isArray(session?.expectedRuleIds)&&!session.expectedRuleIds.includes(id)))))issue('invalid_consistency','冲突规则标识无效。');
  const metadata=result.rawValidation;
- if(!object(metadata)||Object.keys(metadata).some(key=>!['schemaVersion','status','textSha256','reasonCodes','originalVerdict','originalReason','rejectedQuotes','evidenceMatching'].includes(key))||Object.hasOwn(metadata,'evidenceMatching')&&metadata.evidenceMatching!==RAW_QUOTE_MATCHING_VERSION||metadata.schemaVersion!==1||!['verified','degraded','program-fallback'].includes(metadata.status)||!hash(metadata.textSha256)||metadata.textSha256!==raw?.textSha256||!Array.isArray(metadata.reasonCodes)||new Set(metadata.reasonCodes).size!==metadata.reasonCodes.length||metadata.reasonCodes.some(value=>!nonempty(value)||value.length>100))issue('invalid_raw_validation','原文校验状态或来源摘要无效。');
+ if(!object(metadata)||Object.keys(metadata).some(key=>!['schemaVersion','status','textSha256','reasonCodes','originalVerdict','originalReason','rejectedQuotes','evidenceMatching'].includes(key))||Object.hasOwn(metadata,'evidenceMatching')&&metadata.evidenceMatching!==RAW_QUOTE_MATCHING_VERSION||metadata.schemaVersion!==1||!['verified','degraded','program-fallback','unverified-quote','manual-provided'].includes(metadata.status)||!hash(metadata.textSha256)||metadata.textSha256!==raw?.textSha256||!Array.isArray(metadata.reasonCodes)||new Set(metadata.reasonCodes).size!==metadata.reasonCodes.length||metadata.reasonCodes.some(value=>!nonempty(value)||value.length>100))issue('invalid_raw_validation','原文校验状态或来源摘要无效。');
  if(metadata?.originalVerdict!==undefined&&!verdicts.has(metadata.originalVerdict))issue('invalid_raw_validation','保留的模型原判无效。');
  if(metadata?.originalReason!==undefined&&(!nonempty(metadata.originalReason)||metadata.originalReason.length>20000))issue('invalid_raw_validation','保留的模型原理由无效。');
  if(metadata?.rejectedQuotes!==undefined&&(!Array.isArray(metadata.rejectedQuotes)||metadata.rejectedQuotes.length>500||metadata.rejectedQuotes.some(value=>!object(value)||Object.keys(value).some(key=>!['quote','reasonCode'].includes(key))||(value.quote!==null&&typeof value.quote!=='string')||!nonempty(value.reasonCode))))issue('invalid_raw_validation','未采用的模型引文诊断无效。');
  const quotes=result.evidenceQuotes;
  if(!Array.isArray(quotes)||quotes.length>500)issue('invalid_quote','逐字原文引文结构无效。');
  else{
-  if(!quotes.length)issue('missing_quote','没有已定位的原文引文。',{advisory:result.verdict==='无法判定'});
+  if(!quotes.length)issue('missing_quote','没有已定位的原文引文。',{advisory:result.verdict==='无法判定'||['unverified-quote','manual-provided'].includes(metadata?.status)});
   const canonical=metadata?.evidenceMatching===RAW_QUOTE_MATCHING_VERSION,match=canonical?matchRawQuote:matchLiteralRawQuote,seen=new Set();let matchCount=0;
   for(const quote of quotes){
    if(!object(quote)||Object.keys(quote).some(key=>!['quote','matches'].includes(key))||!nonempty(quote.quote)||quote.quote.length>20000||seen.has(canonical?canonicalNewlines(quote.quote):quote.quote)){issue('invalid_quote','逐字引文内容或重复项无效。');continue;}
@@ -96,6 +96,7 @@ export function validateRawResultAssurance(result,session){
  }
  if(['degraded','program-fallback'].includes(metadata?.status)&&(result.verdict!=='无法判定'||!Array.isArray(quotes)||quotes.length))issue('invalid_raw_validation','程序降级或失败占位只能为无已核验引文的无法判定。');
  if(metadata?.status==='degraded'&&(!verdicts.has(metadata.originalVerdict)||!nonempty(metadata.originalReason)||!Array.isArray(metadata.rejectedQuotes)))issue('invalid_raw_validation','局部降级须保留模型原判、原理由及拒绝引文。');
+ if(metadata?.status==='unverified-quote'&&(!Array.isArray(metadata.rejectedQuotes)||!metadata.rejectedQuotes.length)&&!metadata.reasonCodes?.includes('dependency_quote_unverified'))issue('invalid_raw_validation','未核验状态须保留引文诊断或辅助依赖标记。');
  const metadataCodes=Array.isArray(metadata?.reasonCodes)?metadata.reasonCodes:[];
  if(metadata?.status==='verified'&&(metadata.rejectedQuotes?.length||metadataCodes.some(code=>['quote_mismatch','invalid_quote','quote_match_budget'].includes(code))))issue('invalid_raw_validation','已核验结果不能同时保留引文失败或拒绝引文状态。');
  if(metadataCodes.includes('source_time_unavailable')&&(raw?.timePolicy?.mode!=='unavailable'||result.verdict!=='无法判定'||!Array.isArray(quotes)||quotes.length))issue('invalid_raw_validation','缺少来源时间的确定性处理须保持无法判定，且与批次声明一致。');

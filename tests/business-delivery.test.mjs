@@ -87,7 +87,7 @@ test('error cases cover five dimensions, include longest failing time and never 
 test('business Excel has43 columns, original names/raw, row2 criteria and sparse physical rows with language columns',async()=>{
  const state=fixture([sourceRow({row:7,reply:'Exact English reply.'}),sourceRow({row:3,reply:'Exact English reply.'})]);state.sessions.forEach(s=>ai(s));state.sessions[0].ecommerce.headers[14]='评价类型 好评正向：4-5分';state.sessions[1].ecommerce.headers[14]=state.sessions[0].ecommerce.headers[14];
  const value=snapshot(state,{targetLang:'en'}),translations=Object.fromEntries(value.records.map((r,i)=>[r.id,{comment:{status:i?'failed':'translated',text:'Translated comment'},reply:{status:'same',text:r.raw22[9],detectedLanguage:'en'}}]));
- const bytes=await buildBusinessDeliveryXlsx(value,{translations}),tables=await readXlsx(bytes),main=tables['检核明细'];assert.ok(main);assert.equal(main[0].length,43);assert.deepEqual(main[0].slice(0,22),value.headers22);assert.deepEqual(main[1].slice(0,22),value.standards22);
+ const bytes=await buildBusinessDeliveryXlsx(value,{translations}),tables=await readXlsx(bytes),main=tables['检核明细'];assert.ok(main);assert.equal(main[0].length,44);assert.deepEqual(main[0].slice(0,22),value.headers22);assert.deepEqual(main[1].slice(0,22),value.standards22);
  assert.equal(businessDeliveryHeaders(value).length,43);assert.match(main[0][22],/英文/);assert.match(main[0][23],/英文/);
  for(const r of value.records){const row=main.find(row=>row[XLSX_ROW_NUMBER]===r.sourceRow);assert.ok(row);assert.deepEqual(row.slice(0,22),r.raw22);assert.equal(row[23],r.raw22[9]);}
  assert.equal(main.find(row=>row[XLSX_ROW_NUMBER]===3)[22],'Translated comment');assert.equal(main.find(row=>row[XLSX_ROW_NUMBER]===7)[22],'');
@@ -104,7 +104,7 @@ test('optional workbook rowNumbers reject conflicts and preserve legacy default 
 test('Excel long translated text uses complete continuation rows without changing43 columns or snapshot',async()=>{
  const state=fixture();ai(state.sessions[0]);const value=snapshot(state),before=JSON.stringify(value),long='长译文🙂'.repeat(9000);
  const tables=await readXlsx(await buildBusinessDeliveryXlsx(value,{translations:{[value.records[0].id]:{comment:{status:'translated',text:long},reply:{status:'empty',text:''}}}}));
- const main=tables['检核明细'];assert.equal(main[0].length,43);const key=main[2][22].match(/长文本留存：(TEXT-\d+)/)?.[1];assert.ok(key);
+ const main=tables['检核明细'];assert.equal(main[0].length,44);const key=main[2][22].match(/长文本留存：(TEXT-\d+)/)?.[1];assert.ok(key);
  assert.equal(tables['长文本留存'].slice(1).filter(row=>row[0]===key).map(row=>row[3]).join(''),long);assert.equal(JSON.stringify(value),before);for(const sheet of Object.values(tables))for(const row of sheet)for(const cell of row)assert.ok(cell.length<=32767);
 });
 

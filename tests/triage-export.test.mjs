@@ -67,12 +67,12 @@ test('a forged PASS with invalid evidence cannot become an AI final through the 
 
 test('new routing audit worksheets preserve the fixed 43 ecommerce columns in Chinese and English',async()=>{
   const state=ecommerce(['PASS','FAIL']),snapshot=ecSnapshot(state);assert.equal(businessDeliveryHeaders(snapshot).length,43);
-  for(const language of ['zh','en']){const sheets=await readXlsx(await buildBusinessDeliveryXlsx(snapshot,{}, {language})),main=sheets[language==='en'?'Inspection Details':'检核明细'],trail=sheets[language==='en'?'Result provenance':'判定来源与分流'];assert.equal(main[0].length,43);assert.ok(trail);assert.ok(trail.flat().some(value=>String(value).includes('unvalidated')||String(value).includes('未标定')));assert.ok(trail.flat().some(value=>String(value).includes('AI终判')||String(value).includes('AI final')));}
+  for(const language of ['zh','en']){const sheets=await readXlsx(await buildBusinessDeliveryXlsx(snapshot,{}, {language})),main=sheets[language==='en'?'Inspection Details':'检核明细'],trail=sheets[language==='en'?'Result provenance':'判定来源与分流'];assert.equal(main[0].length,44);assert.ok(trail);assert.ok(trail.flat().some(value=>String(value).includes('unvalidated')||String(value).includes('未标定')));assert.ok(trail.flat().some(value=>String(value).includes('AI终判')||String(value).includes('AI final')));}
 });
 
 test('consultation provenance is an additional worksheet while original and dynamic main columns remain unchanged',async()=>{
   const f=consultation(['PASS','RETURNED']),snapshot=cSnapshot(f),headers=consultationDeliveryHeaders(snapshot);
-  for(const language of ['zh','en']){const sheets=await readXlsx(await buildConsultationDeliveryXlsx(snapshot,{}, {language}));assert.equal(sheets[language==='en'?'Inspection Details':'检核明细'][0].length,headers.length);assert.ok(sheets[language==='en'?'Result provenance':'判定来源与分流']);}
+  for(const language of ['zh','en']){const sheets=await readXlsx(await buildConsultationDeliveryXlsx(snapshot,{}, {language}));assert.equal(sheets[language==='en'?'Inspection Details':'检核明细'][0].length,headers.length+1);assert.ok(sheets[language==='en'?'Result provenance':'判定来源与分流']);}
 });
 
 test('old tasks and old snapshots keep their original historical priority, column count and lack of routing metadata',async()=>{

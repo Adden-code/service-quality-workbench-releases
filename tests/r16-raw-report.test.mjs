@@ -37,7 +37,7 @@ test('raw source and report reject tampered row text, all extension cells and qu
 });
 test('raw business Excel uses quotations in trail while main original/dynamic column positions remain stable',async()=>{
  globalThis.JSZip=JSZip;const f=rawReportFixture(),s=snapshot(f),tables=await readXlsx(await buildConsultationDeliveryXlsx(s));
- assert.deepEqual(tables.检核明细[0],consultationDeliveryHeaders(s));assert.deepEqual(tables.检核明细[1].slice(0,5),f.session.rawTranscript.raw);assert.equal(tables.检核明细[1][XLSX_ROW_NUMBER],7);
+ assert.deepEqual(tables.检核明细[0],[...consultationDeliveryHeaders(s),'证据核验状态']);assert.deepEqual(tables.检核明细[1].slice(0,5),f.session.rawTranscript.raw);assert.equal(tables.检核明细[1][XLSX_ROW_NUMBER],7);
  const trail=tables.判定留痕;assert.ok(trail[0].includes('证据引文'));assert.ok(!trail[0].includes('证据轮次'));assert.ok(trail.flat().includes(f.quote));assert.ok(tables.口径说明.flat().some(v=>String(v).includes('未进行金标准对照')));
  const english=await readXlsx(await buildConsultationDeliveryXlsx(s,{}, {language:'en'}));assert.ok(english['Judgment Trail'][0].includes('Evidence quotations'));assert.ok(english.Methodology.flat().some(v=>String(v).includes('Not evaluated')));
 });

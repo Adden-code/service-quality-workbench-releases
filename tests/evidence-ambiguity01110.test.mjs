@@ -12,21 +12,21 @@ function client(output){const requests=[];return {requests,...createArkClient({f
 test('ambiguous literal location has a typed validation reason without accepting model content',()=>{
  assert.throws(()=>parseSceneCapability(JSON.stringify(body()),input),e=>e.code==='INVALID_OUTPUT'&&e.validationReason==='evidence_ambiguous');
  const invalid=body();invalid.value={wrong:'field'};assert.throws(()=>parseSceneCapability(JSON.stringify(invalid),input),e=>e.code==='INVALID_OUTPUT'&&!e.validationReason);
- const mixed=body();mixed.evidence.push({blockId:'raw',quote:'invented',start:0,end:3});assert.throws(()=>parseSceneCapability(JSON.stringify(mixed),input),e=>e.code==='INVALID_OUTPUT'&&!e.validationReason);
+ const mixed=body();mixed.evidence.push({blockId:'raw',quote:'invented',start:0,end:3});assert.throws(()=>parseSceneCapability(JSON.stringify(mixed),input),e=>e.code==='INVALID_OUTPUT'&&e.validationReason==='evidence_unverified');
 });
 test('correction extends a repeated quote and recovers unique-exact on attempt two',async()=>{
  const c=client(n=>body(n===1?quote:`${quote}. Battery issue.`)),r=await executeSceneCapabilities({...fixture(),client:c});
  assert.equal(c.requests.length,2);assert.match(c.requests[1].messages[0].content,/唯一命中.*扩展引文长度.*前后文/s);assert.equal(r.outputs.demandSummary.status,'completed');assert.equal(r.outputs.demandSummary.attempts,2);assert.equal(r.outputs.demandSummary.evidence[0].locatorRepair.method,'unique-exact');
 });
-test('exhausted ambiguity becomes no-value uncertainty, keeps dependent checks manual, and is cached across resume',async()=>{
+test('exhausted ambiguity retains the candidate with an annotation and is cached across resume',async()=>{
  const c=client(()=>body()),args={...fixture(),client:c},r=await executeSceneCapabilities(args),v=r.outputs.demandSummary;
- assert.equal(c.requests.length,3);assert.equal(v.status,'uncertain');assert.equal(v.origin,'evidence-ambiguous');assert.equal(v.value,null);assert.deepEqual(v.evidence,[]);assert.equal(v.confidence,0);assert.match(v.reason,/人工/);
- const final=enforceSceneResults([{ruleId:'R',verdict:'符合',reason:'Synthetic',confidence:.9},{ruleId:'independent',verdict:'符合',reason:'Synthetic',confidence:.9}],args.snapshot,r,args.session);assert.equal(final[0].verdict,'无法判定');assert.equal(final[1].verdict,'符合');
+ assert.equal(c.requests.length,3);assert.equal(v.status,'completed');assert.equal(v.origin,'unverified');assert.deepEqual(v.value,{text:'Synthetic request'});assert.deepEqual(v.evidence,[]);assert.equal(v.confidence,.9);assert.equal(v.reason,'Synthetic reason');assert.equal(v.evidenceValidation.status,'unverified');
+ const final=enforceSceneResults([{ruleId:'R',verdict:'符合',reason:'Synthetic',confidence:.9},{ruleId:'independent',verdict:'符合',reason:'Synthetic',confidence:.9}],args.snapshot,r,args.session);assert.equal(final[0].verdict,'符合');assert.equal(final[0].evidenceValidation.status,'unverified');assert.equal(final[1].verdict,'符合');
  assert.deepEqual(await executeSceneCapabilities({...args,previous:r}),r);assert.equal(c.requests.length,3);
- let monitor={};for(let i=0;i<34;i++)monitor=recordCapabilityOutcomes(monitor,String(i),r,{window:50,minimum:20,rate:.1});assert.equal(monitor.demandSummary.technicalFailures,0);assert.equal(monitor.demandSummary.evidenceAmbiguities,34);assert.equal(monitor.demandSummary.businessUncertain,34);assert.equal(monitor.demandSummary.paused,false);
+ let monitor={};for(let i=0;i<34;i++)monitor=recordCapabilityOutcomes(monitor,String(i),r,{window:50,minimum:20,rate:.1});assert.equal(monitor.demandSummary.technicalFailures,0);assert.equal(monitor.demandSummary.unverifiedEvidence,34);assert.equal(monitor.demandSummary.businessUncertain,0);assert.equal(monitor.demandSummary.paused,false);
 });
 test('unrelated invalid output and mixed retry failures still count as technical failures',async()=>{
- for(const make of [()=>({...body(),confidence:'high'}),()=>({...body(),value:{wrong:1}}),()=>({...body(),evidence:[{blockId:'raw',quote:'absent',start:0,end:2}]}),n=>n===3?({...body(),confidence:'high'}):body()]){
+ for(const make of [()=>({...body(),confidence:'high'}),()=>({...body(),value:{wrong:1}}),n=>n===3?({...body(),confidence:'high'}):body()]){
   const c=client(make),r=await executeSceneCapabilities({...fixture(),client:c});assert.equal(r.outputs.demandSummary.status,'failed');let m={};for(let i=0;i<20;i++)m=recordCapabilityOutcomes(m,String(i),r,{window:50,minimum:20,rate:.1});assert.equal(m.demandSummary.technicalFailures,20);assert.equal(m.demandSummary.paused,true);
  }
 });

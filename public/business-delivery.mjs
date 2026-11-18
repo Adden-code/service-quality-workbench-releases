@@ -1,3 +1,4 @@
+import {appendEvidenceSheets} from './evidence-audit.mjs';
 import {classificationReviewed} from './ecommerce-classification-review.mjs';
 import {isBusinessEcommerceBasis,businessEvaluationType} from './ecommerce-business-profile.mjs';
 import {sceneDeliverySnapshot,configuredDelivery,buildSceneDeliveryXlsx} from './scene-delivery.mjs';
@@ -161,5 +162,5 @@ export async function buildBusinessDeliveryXlsx(snapshot,enrichment={},options={
   }
   sheets[1].rows.push(['翻译失败文本（去重）',failedTexts.size],['未完成翻译文本（去重）',pendingTexts.size],['缺少译文的记录数',affected.size]);
   const provenance=resultProvenanceSheet(snapshot);if(provenance)sheets.push(provenance);
-  return workbook(excelSafeSheets(sheets));
+  return workbook(excelSafeSheets(appendEvidenceSheets(sheets,snapshot)));
 }

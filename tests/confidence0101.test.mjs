@@ -93,7 +93,7 @@ for(const kind of kinds){
     };
     for(const [label,mutate] of Object.entries(invalids))await t.test(label,async()=>{
       const body=bodyFor(kind,'0.9');mutate(resultsOf(kind,body));
-      await assert.rejects(inspect(kind,body),invalidOutput);
+      if(['invented quote','unlisted quote turn','mismatched quote role'].includes(label)){const {answer}=await inspect(kind,body);const item=(answer.results||answer.records?.[0]?.results||[])[0];assert.equal(item.evidenceValidation.status,'unverified');assert.deepEqual(item.evidenceQuotes,[]);}else await assert.rejects(inspect(kind,body),invalidOutput);
     });
   });
   test(`${kind} still requires every triage assurance field`,async()=>{
