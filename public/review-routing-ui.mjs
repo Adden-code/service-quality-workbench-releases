@@ -1,10 +1,11 @@
+import {reviewSessionLabel} from './review-state-ui.mjs';
 import {getLocale} from './i18n.mjs';
 import {samplingDescription} from './rule-calibration-policy.mjs';
 import {html as uiHtml,uiLiteral,t as uiT} from './i18n.mjs';
 import {d as businessText} from './content-translation-ui.mjs';
 import {e,icon,badge,dateTime} from './ui.mjs';
 import {getSessionRules} from './task-basis.mjs';
-import {DEFAULT_REVIEW_POLICY,normalizeReviewPolicy,getReviewRouting,isAIFinal,returnToHumanReview} from './ai-triage.mjs';
+import {getReviewPresentation,DEFAULT_REVIEW_POLICY,normalizeReviewPolicy,getReviewRouting,isAIFinal,returnToHumanReview} from './ai-triage.mjs';
 
 const thresholdLabel=session=>Number(session.aiDecision?.confidenceThreshold??session.reviewPolicy?.confidenceThreshold??0.90).toFixed(2);
 export function triagePolicyFields(policy=DEFAULT_REVIEW_POLICY){
@@ -29,9 +30,9 @@ export function reviewNavigationBadge(summary){
 
 export function reviewRoutingSummary(session){
   const routing=getReviewRouting(session);if(routing.status==='LEGACY')return '';
-  const label=routing.resultSource==='human'?'人工已确认':routing.aiFinal?'已由AI判定':routing.returned?'已退回人工':routing.status==='FAIL'?'AI不通过 · 待人工审核':routing.status==='UNCERTAIN'?'AI需核对 · 待人工审核':'AI尚未执行完成';
+  const label=reviewSessionLabel(session);
   const returned=session.review?.returned;
-  return uiHtml`<div class="review-routing-summary ${routing.aiFinal?'ai-final':routing.needsReview?'needs-review':''}" data-review-routing="${e(routing.status)}"><div>${badge(label,routing.resultSource?'success':routing.needsReview?'warning':'muted')}${routing.aiFinal?uiHtml`<button class="text-btn" data-act="review-return" data-id="${e(session.id)}">标记可疑 → 退回人工</button>`:''}</div>${routing.resultSource==='human'?uiLiteral('<p>人工确认结果为最终结论；AI原判与操作历史保留。</p>'):session.aiDecision?uiHtml`<p>${routing.aiFinal&&session.reviewPolicy?.version===2?uiT('本会话全部规则均为有效规则级免审，原判定与抽检分配留痕。'):routing.aiFinal?uiT('AI终判依据：全部适用项通过，置信度达到门槛，原文引文和规则一致性检查通过。'):uiT('AI原判保留；人工核对后另行确认最终结果。')}</p><p>${session.reviewPolicy?.version===2?uiT('规则独立验证≥30对、一致率≥80%；仅符合项免审。')+' '+samplingDescription(session.reviewPolicy,getLocale()==='en'):uiT('当前门槛 {0}（内测启用，尚未用真实业务基准标定）。',{0:thresholdLabel(session)})}${typeof session.aiDecision.confidence==='number'?uiT(' 最低项目置信度 {0}。',{0:session.aiDecision.confidence.toFixed(2)}):''}</p>${routing.reasons.length?uiHtml`<ul>${routing.reasons.map(reason=>uiHtml`<li>${e(uiT(reason))}</li>`).join('')}</ul>`:''}`:uiLiteral('<p>未执行的记录不计为审核完成。可从全部记录开始独立人工检查。</p>')}${returned?uiHtml`<p class="returned-review-note"><strong>退回原因</strong> ${e(returned.reason)}<br>${e(returned.reviewer)} · ${dateTime(returned.at)}</p>`:''}</div>`;
+  return uiHtml`<div class="review-routing-summary ${routing.aiFinal?'ai-final':routing.needsReview?'needs-review':''}" data-review-routing="${e(routing.status)}"><div>${badge(label,routing.resultSource?'success':routing.needsReview?'warning':'muted')}${routing.aiFinal?uiHtml`<button class="text-btn" data-act="review-return" data-id="${e(session.id)}">标记可疑 → 退回人工</button>`:''}</div>${routing.resultSource==='human'?uiLiteral('<p>人工确认结果为最终结论；AI原判与操作历史保留。</p>'):session.aiDecision?uiHtml`<p>${routing.aiFinal&&session.reviewPolicy?.version===2?uiT('本会话全部规则均为有效规则级免审，原判定与抽检分配留痕。'):routing.aiFinal?uiT('AI终判依据：全部适用项通过，置信度达到门槛，原文引文和规则一致性检查通过。'):uiT('AI原判保留；人工核对后另行确认最终结果。')}</p><p>${session.reviewPolicy?.version===2?uiT('规则独立验证≥30对、一致率≥80%；仅符合项免审。')+' '+samplingDescription(session.reviewPolicy,getLocale()==='en'):uiT('当前门槛 {0}（内测启用，尚未用真实业务基准标定）。',{0:thresholdLabel(session)})}${typeof session.aiDecision.confidence==='number'?uiT(' 最低项目置信度 {0}。',{0:session.aiDecision.confidence.toFixed(2)}):''}</p>${routing.reasons.length?uiHtml`<ul>${routing.reasons.map(reason=>uiHtml`<li>${e(uiT(reason))}</li>`).join('')}</ul>`:''}`:getReviewPresentation(session).aiCount?uiHtml`<p>已保存的AI初判可逐项审核；人工确认后形成最终结果。</p>`:uiLiteral('<p>未执行的记录不计为审核完成。可从全部记录开始独立人工检查。</p>')}${returned?uiHtml`<p class="returned-review-note"><strong>退回原因</strong> ${e(returned.reason)}<br>${e(returned.reviewer)} · ${dateTime(returned.at)}</p>`:''}</div>`;
 }
 
 export function aiFinalFooter(session,ui){

@@ -1,0 +1,42 @@
+import {chromium} from 'playwright';
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import {pathToFileURL} from 'node:url';
+const appRoot=process.env.VERIFY_APP_ROOT||path.resolve('.'),mod=rel=>import(pathToFileURL(path.join(appRoot,rel)));
+const {createWorkbenchServer}=await mod('server.mjs');
+const {createWorkspaceStore}=await mod('server/workspace-store.mjs');
+const {createBusinessState,createImportedTask}=await mod('public/domain.mjs');
+const {createCatalog}=await mod('public/catalog.mjs');
+const {createBasisSnapshot}=await mod('public/task-basis.mjs');
+const {createAiService}=await mod('server/ai-service.mjs');
+const out=path.resolve('../outputs/service0118-20261118/review-browser');await fs.mkdir(out,{recursive:true});
+const dataDir=await fs.mkdtemp(path.join(out,'workspace-')),store=await createWorkspaceStore({dataDir,catalogSeed:null,sceneSeed:null,storageMode:'sharded'});
+const catalog=createCatalog(),source=await store.putSource(Buffer.from('Synthetic original only'),'synthetic.json'),basisSnapshot=createBasisSnapshot(catalog,{effectiveDate:'2026-11-18',ruleIds:['R004']});
+const rows=['FAIL','FINAL','FAIL2'].map(id=>({id,scene:'新品产品咨询',startedAt:'2026-11-18T09:00:00+08:00',topic:'Synthetic review',channel:'Synthetic',product:'Synthetic',agent:'Synthetic reviewer',customer:'Synthetic',completeness:'完整',missingNote:'',turns:[{id:1,role:'客户',text:'Synthetic question'},{id:2,role:'客服',text:'Synthetic answer'}]}));
+let state=createImportedTask(createBusinessState(),{name:'Synthetic completed',sessions:rows,source,basisSnapshot,reviewer:'Synthetic reviewer',reviewPolicy:{version:1,enabled:true,confidenceThreshold:.9,calibrationStatus:'unvalidated'}});
+const completedId=state.tasks[0].id;await store.save({state,catalog,baseRevision:0,mutationId:'init'});
+const ai=await createAiService({store,modelConfig:{getPrivate:()=>({connectionTested:true,model:'synthetic',authMode:'none',baseUrl:'http://127.0.0.1:1'})},client:{inspect:async req=>({results:req.basis.rules.map(r=>({ruleId:r.id,verdict:req.session.externalId.includes('FINAL')?'符合':'不符合',reason:'Synthetic evidence',evidence:[2],evidenceQuotes:[{turnId:2,role:'客服',quote:'Synthetic answer'}],referenceIds:r.policyIds.map(id=>id+'@V1.0#'),confidence:.95,conflictsWith:[]})),modelId:'synthetic'})},maxAttempts:1});
+try{await ai.start(completedId,'synthetic-browser');await ai.waitForIdle();}finally{await ai.close();}
+let doc=await store.read();assert.equal(doc.state.tasks[0].aiStatus,'completed');
+state=createImportedTask(doc.state,{name:'Synthetic waiting',sessions:[{...rows[0],id:'WAIT'}],source,basisSnapshot,reviewer:'Synthetic reviewer',reviewPolicy:{version:1,enabled:true,confidenceThreshold:.9,calibrationStatus:'unvalidated'}});
+const waitingId=state.tasks[0].id;await store.save({state,catalog,baseRevision:doc.revision,mutationId:'add-wait'});await store.close();
+const server=await createWorkbenchServer({dataDir,catalogSeed:null,sceneSeed:null,storageMode:'sharded'});await new Promise(r=>server.listen(0,'127.0.0.1',r));const origin=`http://127.0.0.1:${server.address().port}`;
+const browser=await chromium.launch({headless:true,executablePath:'C:/Users/42910/AppData/Local/ms-playwright/chromium-1228/chrome-win64/chrome.exe'}),page=await browser.newPage({viewport:{width:1440,height:1000},reducedMotion:'reduce'});page.setDefaultTimeout(12000);const errors=[];page.on('pageerror',e=>errors.push(e.message));
+const act=name=>page.locator(`[data-act="${name}"]`).first();
+try{
+ await page.goto(origin+'/#review');await page.locator('[data-act="review-status"][data-value="待确认"].active').waitFor();
+ assert.equal(await page.locator('.session-item').count(),2);assert.doesNotMatch(await page.locator('.conversation-pane').innerText(),/WAIT/);
+ assert.match(await page.locator('[data-act="review-status"][data-value="AI初判待确认"]').innerText(),/2/);
+ assert.match(await page.locator('[data-act="review-status"][data-value="AI终判免审"]').innerText(),/1/);
+ assert.match(await page.locator('.review-routing-summary').innerText(),/待人工确认 1 项/);
+ await page.screenshot({path:path.join(out,'default-pending.png'),fullPage:true});
+ await page.locator('[data-act="review-status"][data-value="AI终判免审"]').click();assert.equal(await page.locator('.session-item').count(),1);assert.match(await page.locator('.review-routing-summary').innerText(),/AI终判免审/);
+ await page.locator('[data-act="review-status"][data-value="待确认"]').click();await act('accept-ai').click();await act('confirm-review').click();await act('do-confirm-review').click();await page.waitForFunction(()=>!document.querySelector('.modal'));
+ const after=await(await fetch(origin+'/api/workspace')).json();assert.equal(after.state.sessions.filter(s=>s.review.status==='已确认').length,1);
+ await page.reload();await page.locator('[data-act="review-status"][data-value="待确认"].active').waitFor();assert.equal(await page.locator('.session-item').count(),1);
+ await page.locator('#review-task').selectOption(waitingId);await page.locator('.review-waiting').waitFor();assert.match(await page.locator('.review-waiting').innerText(),/查看全部记录/);
+ await page.locator('.nav-link').filter({hasText:'质检任务'}).click();await page.locator(`[data-act="task-review"][data-id="${completedId}"]`).click();assert.equal(await page.locator('.session-item').count(),1);
+ await page.screenshot({path:path.join(out,'saved-and-reloaded.png'),fullPage:true});
+ assert.deepEqual(errors,[]);await fs.writeFile(path.join(out,'verification.json'),JSON.stringify({status:'passed',appRoot,defaultPending:true,skipsWaiting:true,filterCounts:true,savedAndReloaded:true,taskEntry:true,pageErrors:errors,externalModelCalls:0},null,2));console.log('review browser passed');
+}catch(e){await fs.writeFile(path.join(out,'failure.txt'),await page.locator('body').innerText());await page.screenshot({path:path.join(out,'failure.png'),fullPage:true});throw e;}finally{await browser.close();await new Promise(r=>server.close(r));}

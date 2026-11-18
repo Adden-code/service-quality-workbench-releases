@@ -9,7 +9,7 @@ import {prepareCleaningPrompt,parseCleaningResult,CLEANING_PROMPT_VERSION} from 
 import {prepareImportMappingPrompt,parseImportMappingResult,ImportMappingError,IMPORT_MAPPING_PROMPT_VERSION} from './import-mapping.mjs';
 import {prepareRawInspection,parseRawInspectionResult,RawInspectionError,RAW_INSPECTION_PROMPT_VERSION} from './raw-inspection.mjs';
 import {sourceQuoteSlice} from '../public/raw-evidence.mjs';
-import {normalizeConfidenceValue} from '../public/model-output-values.mjs';
+import {normalizeConfidenceValue,parseModelJson} from '../public/model-output-values.mjs';
 import {RULE_KINDS} from '../public/rule-kind.mjs';
 
 import {prepareScenePackagePrompt,parseScenePackage} from './scene-package-preparation.mjs';
@@ -79,10 +79,7 @@ function prepareInspection(session,basis){
 }
 function parseResults(content,expected) {
   if(typeof content!=='string')throw invalidOutput();
-  let source=content.trim();
-  const fence=source.match(/^```json\s*\r?\n([\s\S]*?)\r?\n```$/);
-  if(fence)source=fence[1];
-  let result;try{result=JSON.parse(source);}catch{throw invalidOutput();}
+  let result;try{result=parseModelJson(content);}catch{throw invalidOutput();}
   if(!object(result)||!Array.isArray(result.results)||result.results.length!==expected.rules.size)throw invalidOutput();
   const seen=new Set(),output=[];
   for(const item of result.results){
@@ -251,7 +248,7 @@ export function createArkClient({fetchImpl=fetch,timeoutMs=120000,maxResponseByt
         {role:'user',content:JSON.stringify({basis:data[0].basis,sessions:data.map(item=>item.session),comparisonScope:'本次完整导入批次，按相同非空agent分别比较'})}];
       const {content,...meta}=await request(config,messages,16384,signal,trace);
       return traced(trace,'validation',{content,expectedSessionIds:sessions.map(s=>s.id),expectedRuleIds:semanticBasis.rules.map(r=>r.id),basis:JSON.parse(expected[0].messages[1].content).basis},()=>{
-      let body;try{body=JSON.parse(content.trim().replace(/^```json\s*\n|\n```$/g,''));}catch{throw invalidOutput();}
+      let body;try{body=parseModelJson(content);}catch{throw invalidOutput();}
       const ids=new Set(sessions.map(s=>s.id));
       if(!object(body)||!Array.isArray(body.records)||body.records.length!==ids.size||new Set(body.records.map(r=>r.sessionId)).size!==ids.size||!Array.isArray(body.checkedSessionIds)||body.checkedSessionIds.length!==ids.size||new Set(body.checkedSessionIds).size!==ids.size||body.checkedSessionIds.some(id=>!ids.has(id)))throw invalidOutput();
       const records=body.records.map(row=>{const index=sessions.findIndex(s=>s.id===row.sessionId);if(index<0)throw invalidOutput();return{sessionId:row.sessionId,results:parseResults(JSON.stringify({results:row.results}),expected[index])};});

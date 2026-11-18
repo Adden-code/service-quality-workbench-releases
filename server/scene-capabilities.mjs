@@ -1,7 +1,7 @@
 import {createHash} from 'node:crypto';
 import {setTimeout as delay} from 'node:timers/promises';
 import {sceneCapabilitySchema} from './scene-capability-schema.mjs';
-import {normalizeConfidenceValue} from '../public/model-output-values.mjs';
+import {normalizeConfidenceValue,parseModelJson} from '../public/model-output-values.mjs';
 import {safeSceneJson,SCENE_METRICS} from '../public/scene-configuration.mjs';
 import {matchRawQuote,RAW_QUOTE_MATCHING_VERSION,rawTimeRuleIds} from '../public/raw-evidence.mjs';
 import {stable} from '../public/rule-calibration-policy.mjs';
@@ -30,7 +30,7 @@ export function prepareSceneCapability(input,retryFeedback){
  return{messages:[{role:'system',content:system+contract+correction},{role:'user',content:JSON.stringify(input)}],maxTokens:12000,outputSchema,responseFormat:{type:'json_object'}};
 }
 export function parseSceneCapability(content,input){
- let body;try{const source=content.trim(),fence=source.match(/^```(?:json)?[ \t]*\r?\n([\s\S]*?)\r?\n```$/i);body=JSON.parse(fence?fence[1]:source);}catch{throw error('辅助能力未返回JSON。');}safeSceneJson(body);exactKeys(body,['status','value','confidence','reason','evidence']);
+ let body;try{body=parseModelJson(content);}catch{throw error('辅助能力未返回JSON。');}safeSceneJson(body);exactKeys(body,['status','value','confidence','reason','evidence']);
  body.confidence=normalizeConfidenceValue(body.confidence);
  if(typeof body.confidence!=='number'||!Number.isFinite(body.confidence)||body.confidence<0||body.confidence>1)throw error('能力置信度无效：confidence须为0至1的数值或规范数值字符串，不能为空白或等级文字。');
  if(!['completed','uncertain'].includes(body.status)||typeof body.reason!=='string'||!body.reason.trim())throw error('能力状态或理由无效。');

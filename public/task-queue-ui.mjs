@@ -1,3 +1,4 @@
+import {capabilityPauseSummary,capabilityHelpActions} from './task-diagnostics.mjs';
 import {samplingDescription} from './rule-calibration-policy.mjs';
 import {html as uiHtml,uiLiteral,t as uiT,getLocale} from './i18n.mjs';
 import {e,badge,dateTime} from './ui.mjs';
@@ -15,7 +16,7 @@ export function taskQueueInfo(state,task){
   const previousIds=new Set(entries.filter(item=>item.sequence<(entry?.sequence??Infinity)&&item.taskId!==task.id&&['partial','failed'].includes(item.status)).map(item=>item.taskId));
   const unfinished=(state.sessions||[]).filter(session=>previousIds.has(session.taskId)&&session.aiExecution?.status!=='completed'&&session.review?.status!=='已确认');
   const queueStatus=state.aiTaskQueue?.status||'ready',pauseReason=state.aiTaskQueue?.pauseReason||null;
-  return {status,hasEntry:Boolean(entry),position:index<0?null:index+1,pendingCount:pending.length,queueStatus,pauseReason,blockedReason:entry?.blockedReason||pauseReason,
+  return {status,hasEntry:Boolean(entry),position:index<0?null:index+1,pendingCount:pending.length,queueStatus,pauseReason,blockedReason:entry?.blockedReason||task.aiQueue?.stopReason||pauseReason,
     canCancel:['queued','paused','interrupted'].includes(status)&&!(state.sessions||[]).some(session=>session.taskId===task.id&&session.aiExecution?.status==='running'),canResumeQueue:(queueStatus==='paused'&&pending.length>0)||status==='paused'||status==='interrupted',
     previousIncompleteSessions:unfinished.length,previousIncompleteTasks:new Set(unfinished.map(session=>session.taskId)).size};
 }
@@ -52,9 +53,9 @@ export function taskQueueNotice(state,task,options={}){
   const eta=taskEtaNotice(state,task,options);
   if(!relevant)return eta;
   const reason=info.blockedReason;
-  const explanation=reason==='capability_failure_rate'?(getLocale()==='en'?'Auxiliary technical failures exceeded the frozen limit. Check the capability health table and execution logs, fix the cause, then resume.':'辅助能力技术失败率超过冻结上限，已暂停。请核对能力统计与运行记录，排查原因后再继续。'):reason==='capability_unavailable'?(getLocale()==='en'?'An auxiliary executor or model service is unavailable. Fix the reported configuration or authentication failure before resuming.':'辅助执行器或模型服务整体不可用，已暂停。请先修复配置、鉴权或执行器问题。'):reason==='config_changed'?'当前模型配置与任务冻结配置不同。请在模型设置恢复任务原配置并测试连接，再点击“继续任务队列”。':reason==='connection_required'?'当前模型配置尚未通过连接测试。请在模型设置保存并测试连接，再点击“继续任务队列”。':reason==='interrupted'||info.status==='interrupted'?'服务重启或执行中断后，任务队列保持暂停。已保存的结果与顺序保留；核对后点击“继续任务队列”。':reason==='storage_error'?'保存调度状态时出现错误，任务队列已暂停。请先恢复工作区保存，再点击“继续任务队列”。':reason==='user'||info.queueStatus==='paused'?'任务队列已暂停，后续任务不会启动。当前请求结束后保留结果；点击“继续任务队列”恢复整个队列。':'任务按加入顺序逐个执行，同一时间只执行一个任务。';
+  const explanation=reason==='capability_failure_rate'?(getLocale()==='en'?`${capabilityPauseSummary(task)}. Paused because technical failures exceeded the limit. Ask the local administrator to check model settings or send the problem summary to development. Saved results remain reviewable. Resume after the cause is fixed.`:`${capabilityPauseSummary(task)}。辅助能力技术失败率超过冻结上限，已暂停。请联系本机管理员检查模型设置；仍失败时复制问题摘要反馈开发。其余已完成结果可正常审核，原因修复后再继续任务队列。`):reason==='capability_unavailable'?(getLocale()==='en'?'An auxiliary executor or model service is unavailable. Fix the reported configuration or authentication failure before resuming.':'辅助执行器或模型服务整体不可用，已暂停。请先修复配置、鉴权或执行器问题。'):reason==='config_changed'?'当前模型配置与任务冻结配置不同。请在模型设置恢复任务原配置并测试连接，再点击“继续任务队列”。':reason==='connection_required'?'当前模型配置尚未通过连接测试。请在模型设置保存并测试连接，再点击“继续任务队列”。':reason==='interrupted'||info.status==='interrupted'?'服务重启或执行中断后，任务队列保持暂停。已保存的结果与顺序保留；核对后点击“继续任务队列”。':reason==='storage_error'?'保存调度状态时出现错误，任务队列已暂停。请先恢复工作区保存，再点击“继续任务队列”。':reason==='user'||info.queueStatus==='paused'?'任务队列已暂停，后续任务不会启动。当前请求结束后保留结果；点击“继续任务队列”恢复整个队列。':'任务按加入顺序逐个执行，同一时间只执行一个任务。';
   const configBlocked=['config_changed','connection_required'].includes(reason);
-  return uiHtml`<div class="task-queue-notice ${info.queueStatus==='paused'?'is-paused':''}" role="status"><p>${e(uiT(explanation))}</p>${explanation!=='任务按加入顺序逐个执行，同一时间只执行一个任务。'?uiLiteral('<p>任务按加入顺序逐个执行，同一时间只执行一个任务。</p>'):''}${info.previousIncompleteSessions?uiHtml`<p>${uiT('前序仍有 {0} 条会话未完成；不含已完成AI执行或已人工确认的会话。',{0:info.previousIncompleteSessions})}</p>`:''}${configBlocked?uiLiteral('<button class="btn small" data-act="model-settings">打开模型设置</button>'):''}${eta}</div>`;
+  return uiHtml`<div class="task-queue-notice ${info.queueStatus==='paused'?'is-paused':''}" role="status"><p>${e(uiT(explanation))}</p>${explanation!=='任务按加入顺序逐个执行，同一时间只执行一个任务。'?uiLiteral('<p>任务按加入顺序逐个执行，同一时间只执行一个任务。</p>'):''}${info.previousIncompleteSessions?uiHtml`<p>${uiT('前序仍有 {0} 条会话未完成；不含已完成AI执行或已人工确认的会话。',{0:info.previousIncompleteSessions})}</p>`:''}${['capability_failure_rate','capability_unavailable'].includes(reason)?capabilityHelpActions(task):''}${configBlocked?uiLiteral('<button class="btn small" data-act="model-settings">打开模型设置</button>'):''}${eta}</div>`;
 }
 
 export function cleaningReportSummary(task){

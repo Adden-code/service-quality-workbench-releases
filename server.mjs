@@ -56,6 +56,7 @@ export async function createWorkbenchServer({dataDir=process.env.DEMO_DATA_DIR||
   const busy=()=>connectionTests.size>0||[ai,reportJobs,translationJobs,rawStructureJobs].some(service=>service.isBusy());
   async function assertTaskNotVoided(taskId){if(!taskId)return;const task=(await store.read()).state?.tasks.find(t=>t.id===taskId);if(task?.lifecycle?.voidedAt)throw new WorkspaceError('作废任务只读，不能继续生成、翻译或重跑。',409);}
   async function assertTranslationTask(source){if(source?.taskId)await assertTaskNotVoided(source.taskId);if(source?.kind==='report')await assertTaskNotVoided((await reportJobs.get(source.jobId)).taskId);}
+  let buildInfo;try{buildInfo=JSON.parse(await fs.readFile(path.join(project,'packaging/build-identity.json'),'utf8'));}catch{buildInfo={version:PRODUCT_VERSION,buildId:'development',sourceCommit:null,resourceFingerprint:null};}
   const server=http.createServer(async(req,res)=>{
     let counted=false,ownsMaintenance=false,backupRequest=false;
     try{
@@ -74,6 +75,7 @@ export async function createWorkbenchServer({dataDir=process.env.DEMO_DATA_DIR||
         if((req.headers['content-type']||'').split(';')[0].trim().toLowerCase()!==type)throw new WorkspaceError(`请求类型须为 ${type}。`,415);
       };
       const parseJson=async limit=>{const bytes=await body(req,limit);try{return JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(bytes));}catch{throw new WorkspaceError('请求不是有效 JSON。');}};
+      if(pathname==='/api/build-info'&&req.method==='GET'){json(res,200,buildInfo);return;}
       if(pathname.startsWith('/api/workspace-backup/')){
         if(req.method!=='POST')throw new WorkspaceError('Method not allowed',405);
         if(!['/api/workspace-backup/export','/api/workspace-backup/preview','/api/workspace-backup/restore'].includes(pathname))throw new WorkspaceError('Resource unavailable',404);

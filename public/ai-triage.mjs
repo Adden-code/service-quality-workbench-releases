@@ -1,3 +1,5 @@
+import {hasCompletedAI,hasRawFallback} from './session-result-availability.mjs';
+import {isInactiveTask,isVoidedTask} from './task-lifecycle.mjs';
 import {hasEcommerceClassification,classificationReviewed} from './ecommerce-classification-review.mjs';
 /** Shared routing contract. AI adjudications never masquerade as human reviews. */
 import {isRawTranscriptSession} from './raw-transcript.mjs';
@@ -78,14 +80,24 @@ export function requiresHumanReview(session){
  if(hasEcommerceClassification(session)&&!classificationReviewed(session))return true;
  if(isReviewWorkComplete(session))return false;
  if(!enabled(session))return true;
- return Boolean(session.review?.returned||session.aiDecision||session.aiExecution?.status==='failed'||Object.keys(session.review?.drafts||{}).length||['已暂存','待补充'].includes(session.review?.status));
+ return Boolean(hasCompletedAI(session)||session.review?.returned||session.aiDecision||session.aiExecution?.status==='failed'||Object.keys(session.review?.drafts||{}).length||['已暂存','待补充'].includes(session.review?.status));
+}
+/** Read-only business projection used by all review entry points and displays. */
+export function getReviewPresentation(session,task){
+ const human=session.review?.status==='已确认',processedUnknown=isProcessedUnknown(session),aiFinal=isAIFinal(session),inactive=isInactiveTask(task);
+ const expected=session.expectedRuleIds||session.aiResults?.map(r=>r.ruleId)||[],ready=hasCompletedAI(session),fallback=hasRawFallback(session);
+ const aiCount=ready?session.aiResults.length:0,draftCount=Object.keys(session.review?.drafts||{}).length;
+ const needsReview=!inactive&&requiresHumanReview(session),pendingCount=human||processedUnknown||aiFinal?0:expected.filter(id=>!ruleExemption(session,id)).length;
+ const returned=Boolean(session.review?.returned),execution=session.aiExecution?.status||'not_run';
+ const kind=human?'human':processedUnknown?'processed-unknown':aiFinal?'ai-final':returned?'returned':aiCount?'pending-ai':draftCount?'pending-draft':fallback||execution==='failed'?'pending-manual':needsReview?'pending-manual':'waiting';
+ return {kind,aiCount,draftCount,pendingCount,needsReview,aiFinal,human,processedUnknown,returned,execution,inactive,lifecycle:isVoidedTask(task)?'voided':inactive?'archived':'active',ready:aiCount>0||draftCount>0||fallback,initialPending:needsReview&&aiCount>0};
 }
 export function getReviewRouting(session){
  const aiFinal=isAIFinal(session),human=session.review?.status==='已确认';
- return {status:enabled(session)?session.aiDecision?.status||(session.aiExecution?.status==='failed'?'UNCERTAIN':'NOT_RUN'):'LEGACY',aiFinal,needsReview:requiresHumanReview(session),...(isProcessedUnknown(session)?{processedUnknown:true}:{}),resultSource:human?'human':aiFinal?'ai':null,returned:Boolean(session.review?.returned),reasons:clone(session.aiDecision?.reasons||[])};
+ return {status:enabled(session)?session.aiDecision?.status||(hasCompletedAI(session)||session.aiExecution?.status==='failed'?'UNCERTAIN':'NOT_RUN'):'LEGACY',aiFinal,needsReview:requiresHumanReview(session),...(isProcessedUnknown(session)?{processedUnknown:true}:{}),resultSource:human?'human':aiFinal?'ai':null,returned:Boolean(session.review?.returned),reasons:clone(session.aiDecision?.reasons||[])};
 }
 export function reviewQueueBreakdown(state){
- const byTask=(state.tasks||[]).map(task=>{const items=(state.sessions||[]).filter(s=>s.taskId===task.id&&requiresHumanReview(s));return {taskId:task.id,name:task.name,scene:task.scene||items[0]?.scene||'',count:items.length,fail:items.filter(s=>s.aiDecision?.status==='FAIL'&&!s.review?.returned).length,uncertain:items.filter(s=>s.aiDecision?.status==='UNCERTAIN'&&!s.review?.returned).length,returned:items.filter(s=>s.review?.returned).length};}).filter(t=>t.count);
+ const byTask=(state.tasks||[]).map(task=>{const items=(state.sessions||[]).filter(s=>s.taskId===task.id&&getReviewPresentation(s,task).needsReview);return {taskId:task.id,name:task.name,scene:task.scene||items[0]?.scene||'',count:items.length,fail:items.filter(s=>s.aiDecision?.status==='FAIL'&&!s.review?.returned).length,uncertain:items.filter(s=>s.aiDecision?.status==='UNCERTAIN'&&!s.review?.returned).length,returned:items.filter(s=>s.review?.returned).length};}).filter(t=>t.count);
  const byScene=[];for(const task of byTask){let row=byScene.find(s=>s.scene===task.scene);if(!row){row={scene:task.scene,count:0};byScene.push(row);}row.count+=task.count;}
  return {total:byTask.reduce((n,t)=>n+t.count,0),aiFinal:(state.sessions||[]).filter(isAIFinal).length,humanConfirmed:(state.sessions||[]).filter(s=>s.review?.status==='已确认').length,byTask,byScene};
 }

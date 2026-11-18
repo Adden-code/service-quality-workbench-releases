@@ -94,7 +94,7 @@ test('blank threshold is rejected instead of silently becoming zero',()=>{
 test('routing, breakdown, return and threshold controls have English UI while preserving source records',()=>{
   const state=fixture(),before=JSON.stringify(state),dialog={type:'return-ai',sessionIds:['S-PASS'],reason:'原始人工输入'};
   setLocale('en');try{
-    const routing=reviewRoutingSummary(state.sessions[0]);assert.match(routing,/Completed by AI/);assert.match(routing,/Threshold 0\.90/);assert.doesNotMatch(routing,/尚未用真实|标记可疑/);
+    const routing=reviewRoutingSummary(state.sessions[0]);assert.match(routing,/AI final · exempt/);assert.match(routing,/Threshold 0\.90/);assert.doesNotMatch(routing,/尚未用真实|标记可疑/);
     const navigation=reviewNavigationBadge(reviewQueueBreakdown(state));assert.match(navigation,/By task/);assert.match(navigation,/AI failures/);assert.doesNotMatch(navigation,/待审构成|按场景/);
     const fields=triagePolicyFields();assert.match(fields,/Review routing \(pilot\)/);assert.match(fields,/has not been calibrated/);assert.doesNotMatch(fields,/内测|门槛/);
     const body=returnReviewDialog(dialog,state).body;assert.match(body,/Return reason \(required\)/);assert.match(body,/Submit for human review/);assert.match(body,/原始人工输入/);assert.doesNotMatch(body,/退回原因（必填）|操作人标签（必填）/);

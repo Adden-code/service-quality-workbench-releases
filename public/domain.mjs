@@ -1,3 +1,4 @@
+import {hasCompletedAI,hasRawFallback} from './session-result-availability.mjs';
 import {newImportLineage,isRepeatedImport} from './import-lineage.mjs';
 import {hasEcommerceClassification,classificationReviewed,classificationNeedsJudgment} from './ecommerce-classification-review.mjs';
 import {ruleExemption,calibratedReviewPolicy} from './rule-calibration-policy.mjs';
@@ -239,12 +240,7 @@ const nextId = (records, prefix) => {
   return `${prefix}${number}`;
 };
 const manual = (state,item) => getTask(state,item.taskId).mode==='manual';
-export function hasCompletedAI(session){
-  const expected=session.expectedRuleIds;
-  if(!expected)return session.aiResults.some(result=>VERDICTS.includes(result.verdict));
-  return session.aiExecution?.status==='completed'&&Array.isArray(expected)&&expected.length>0&&new Set(expected).size===expected.length&&session.aiResults.length===expected.length&&new Set(session.aiResults.map(result=>result.ruleId)).size===expected.length&&session.aiResults.every(result=>expected.includes(result.ruleId)&&VERDICTS.includes(result.verdict)&&typeof result.reason==='string'&&result.reason.trim()&&Array.isArray(result.evidence)&&(isRawTranscriptSession(session)?result.rawValidation?.status!=='program-fallback'&&validateRawResultAssurance(result,session).valid:result.evidence.every(id=>session.turns.some(turn=>turn.id===id))));
-}
-const hasRawFallback=session=>isRawTranscriptSession(session)&&session.aiExecution?.status==='failed'&&session.aiResults?.length===session.expectedRuleIds?.length&&new Set(session.aiResults.map(result=>result.ruleId)).size===session.expectedRuleIds.length&&session.aiResults.every(result=>session.expectedRuleIds.includes(result.ruleId)&&result.verdict==='无法判定'&&result.rawValidation?.status==='program-fallback'&&validateRawResultAssurance(result,session).valid);
+export {hasCompletedAI} from './session-result-availability.mjs';
 export const getReviewDisposition=session=>session.review?.disposition==='unreplied'?'unreplied':'quality';
 export function isUnrepliedSession(state,session){
  const basis=state.tasks.find(t=>t.id===session.taskId)?.basisSnapshot,r=session.ecommerce;
@@ -729,7 +725,7 @@ export function getDashboard(state, options = {}) {
   const aiProcessed = sessions.filter(item => hasCompletedAI(item)&&(getTask(state,item.taskId).mode==='manual'||getTask(state,item.taskId).progress===100)&&item.aiResults.length===getSessionRules(state,item).length).length;
   const aiReviewed=qualityReviewed.filter(hasCompletedAI).length;
   return {
-    totalSessions: sessions.length, unknownDateCount, aiProcessed, aiProcessedCount:aiProcessed, reviewedCount: reviewed.length, pendingCount: sessions.filter(row=>!isInactiveTask(state.tasks.find(t=>t.id===row.taskId))&&requiresHumanReview(row)).length,processedUnknownCount:sessions.filter(isProcessedUnknown).length,workCompletedCount:sessions.filter(isReviewWorkComplete).length,aiFinalCount:sessions.filter(isAIFinal).length,humanConfirmedCount:sessions.filter(s=>s.review.status==='已确认').length,unprocessedCount:sessions.filter(s=>s.reviewPolicy?.enabled&&!s.aiDecision&&s.aiExecution?.status!=='failed'&&!isReviewWorkComplete(s)).length,
+    totalSessions: sessions.length, unknownDateCount, aiProcessed, aiProcessedCount:aiProcessed, reviewedCount: reviewed.length, pendingCount: sessions.filter(row=>!isInactiveTask(state.tasks.find(t=>t.id===row.taskId))&&requiresHumanReview(row)).length,processedUnknownCount:sessions.filter(isProcessedUnknown).length,workCompletedCount:sessions.filter(isReviewWorkComplete).length,aiFinalCount:sessions.filter(isAIFinal).length,humanConfirmedCount:sessions.filter(s=>s.review.status==='已确认').length,unprocessedCount:sessions.filter(s=>s.reviewPolicy?.enabled&&!s.aiDecision&&!hasCompletedAI(s)&&s.aiExecution?.status!=='failed'&&!isReviewWorkComplete(s)).length,
     unrepliedCount:unreplied.length,confirmedUnrepliedCount:reviewed.filter(item=>isUnrepliedSession(state,item)&&getReviewDisposition(item)==='unreplied').length,qualityReviewedCount:qualityReviewed.length,
     problemSessions, issueCount, passCount, undeterminedCount, determinateReviewedCount:qualityReviewed.length-undeterminedCount, passRate: percentage(passCount, qualityReviewed.length), reviewRate: percentage(reviewed.length, sessions.length),
     changedCount, changeRate: percentage(changedCount, aiReviewed), unknownCount,

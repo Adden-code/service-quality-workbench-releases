@@ -41,6 +41,6 @@ test('reopening from completed history keeps the reopened conversation editable 
  const {reopenReviewContext}=await api();assert.equal(typeof reopenReviewContext,'function');
  const controls=ui({selectedId:'DEMO_PRE008',reviewStatus:'已确认',reviewQuery:'old filter',showReviewRecords:true});
  const nextUi=reopenReviewContext(controls),state=reopenReview(completed(),'DEMO_PRE008');
- assert.equal(controls.reviewStatus,'已确认');assert.equal(nextUi.reviewStatus,'全部');assert.equal(nextUi.selectedId,'DEMO_PRE008');
+ assert.equal(controls.reviewStatus,'已确认');assert.equal(nextUi.reviewStatus,'待确认');assert.equal(nextUi.selectedId,'DEMO_PRE008');
  const html=reviewView(state,nextUi);assert.match(html,/确认本会话/);assert.match(html,/低价促单与私人收款/);assert.doesNotMatch(html,/全部审核完成/);
 });

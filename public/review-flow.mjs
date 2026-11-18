@@ -3,11 +3,11 @@ import {html as uiHtml,uiLiteral,uiAttributes,t as uiT,translateError as uiError
 import {getSessionResults} from './domain.mjs';
 import {e,icon} from './ui.mjs';
 import {d as businessText,scenarioName} from './content-translation-ui.mjs';
-import {requiresHumanReview,isAIFinal,isFinalSession,isReviewWorkComplete,getReviewRouting} from './ai-triage.mjs';
+import {requiresHumanReview,isAIFinal,isFinalSession,isReviewWorkComplete,getReviewRouting,getReviewPresentation} from './ai-triage.mjs';
 import {sceneLabel} from './scenarios.mjs';
 
 import {isInactiveTask} from './task-lifecycle.mjs';
-const processable=state=>state.sessions.filter(session=>!isInactiveTask(state.tasks.find(task=>task.id===session.taskId))&&!['待质检','质检中'].includes(state.tasks.find(task=>task.id===session.taskId)?.status));
+const processable=state=>state.sessions.filter(session=>!isInactiveTask(state.tasks.find(task=>task.id===session.taskId))&&(!['待质检','质检中'].includes(state.tasks.find(task=>task.id===session.taskId)?.status)||state.tasks.find(t=>t.id===session.taskId)?.mode==='manual'&&getReviewPresentation(session).ready));
 const withinScope=(session,ui)=>(!ui.reviewTaskId||session.taskId===ui.reviewTaskId)&&(!ui.reviewSceneFilter||session.scene===ui.reviewSceneFilter);
 export function reviewCompletion(state,ui){
   const all=processable(state),scope=all.filter(session=>withinScope(session,ui));
@@ -32,7 +32,7 @@ export function nextPendingSession(state,ui){
   const index=scope.findIndex(session=>session.id===ui.selectedId);
   return [...scope.slice(index+1),...scope.slice(0,index+1)].find(requiresHumanReview)||null;
 }
-export function reopenReviewContext(ui){return {...ui,showReviewRecords:false,reviewStatus:'全部',reviewQuery:''};}
+export function reopenReviewContext(ui){return {...ui,showReviewRecords:false,reviewStatus:'待确认',reviewQuery:''};}
 export function completionView(info){
   const sceneScoped=Boolean(info.scopeSceneId);
   const title=info.processedUnknown?'本批次审核工作已处理':sceneScoped?(info.scopeTaskName?'当前任务与场景审核完成':'本场景审核完成'):info.globalPending===0?(info.waitingTasks||info.globalNotRun?'当前可审核会话已完成':'全部审核完成'):'本批次审核完成';

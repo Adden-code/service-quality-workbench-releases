@@ -1,3 +1,4 @@
+import {writeBuildIdentity} from './build-identity.mjs';
 import fs from 'node:fs/promises';
 import {createReadStream,createWriteStream} from 'node:fs';
 import path from 'node:path';
@@ -107,6 +108,7 @@ export async function buildPortable({outputDir,nodeExe,nodeLicense,javaRuntime,j
  await fs.copyFile(path.join(root,'启动会话质检工作台.exe'),path.join(root,'Start Quality Workbench.exe'));
  await fs.copyFile(path.join(root,'停止会话质检工作台.exe'),path.join(root,'Stop Quality Workbench.exe'));
  await fs.writeFile(path.join(root,'portable-info.json'),JSON.stringify({schemaVersion:1,version:portableVersion,engine:'spring-ai',modelProvider:'openai-compatible',platform:'windows-x64',rules:factoryProfile==='builtin-two-scenes'?'NP 17 entities / 16 checks + derived overall; EC business-v1 / manual site working calendars / >=2 distinct rows at 85%; historical tasks frozen':'Sheet4 V1; V2.1-A time upgrade / four other checks V1 / configured workingHours or continuous / same agent >=3',modules:portableModules,...factory,manifestExcludes:['文件校验清单.json']},null,2));
+ await writeBuildIdentity({root,sourceDir:project,version:portableVersion});
  const files=(await walk(root)).sort((a,b)=>a.relative.localeCompare(b.relative));
  const manifest=[];for(const file of files)manifest.push({path:file.relative,bytes:file.bytes,sha256:await hashFile(file.file)});
  await fs.writeFile(path.join(root,'文件校验清单.json'),JSON.stringify({schemaVersion:1,version:portableVersion,files:manifest},null,2));

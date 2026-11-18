@@ -1,3 +1,5 @@
+import {clientBuild} from './build-identity.mjs';
+import {taskProblemSummary} from './task-diagnostics.mjs';
 import {renderUpdate} from './render-update.mjs';
 import {usesInlineEcommerce,saveInlineEcommerce,inlineDrafts} from './ecommerce-inline-review.mjs';
 import {localBasisDate,defaultSceneRuleIds} from './catalog-scenes.mjs';
@@ -65,7 +67,7 @@ let composingInput=null,suspendedTaskDraft=null;
 let lastPage=null,lastSession=null,keyboardInput=false;
 let overlayEpoch=0,closingOverlay=false,finishOverlayClose=null;
 const searchKeys={'task-search':'taskQuery','review-search':'reviewQuery','catalog-search':'catalogQuery'};
-const ui={dataMode:'manual',page:'overview',period:'month',dashboardTaskId:INITIAL_TASK_ID,taskStatus:'全部',taskQuery:'',catalogQuery:'',reviewTaskId:INITIAL_TASK_ID,reviewStatus:'全部',reviewQuery:'',selectedId:'',openRules:[],highlightedTurns:[],resultFilter:'全部',exportTaskId:INITIAL_TASK_ID,includePending:false,reportPeriod:'month',reportTaskId:INITIAL_TASK_ID};
+const ui={dataMode:'manual',page:'overview',period:'month',dashboardTaskId:INITIAL_TASK_ID,taskStatus:'全部',taskQuery:'',catalogQuery:'',reviewTaskId:INITIAL_TASK_ID,reviewStatus:'待确认',reviewQuery:'',selectedId:'',openRules:[],highlightedTurns:[],resultFilter:'全部',exportTaskId:INITIAL_TASK_ID,includePending:false,reportPeriod:'month',reportTaskId:INITIAL_TASK_ID};
 const workspace=createWorkspaceClient({structuralSharing:true,storage:{getItem:key=>localStorage.getItem(key)}});
 const contentTranslations=createContentTranslationController({getToken:()=>workspace.token,onChange:()=>redrawLocalized()});
 const workflowManager=createWorkflowManager({getToken:()=>workspace.token,openModal:openDialog,closeModal:()=>closeDialog({force:true}),onChange:()=>{if(dialog?.type==='workflow')renderDialog();},toast,download});
@@ -82,6 +84,7 @@ async function businessExportApi(url,{method='GET',body,signal}={}){
 }
 try{const loaded=await workspace.load();state=loaded.state;catalog=loaded.catalog;applyBundledRuleEnglish(catalog,state);}
 catch(error){storageWarning=`工作区未加载：${error.message} 当前工作区只读，请检查本地服务后重试。`;persistenceBlocked=true;}
+try{const response=await fetch('/api/build-info',{cache:'no-store'});if(response.ok)ui.buildInfo=await response.json();}catch{}
 const reviewRoutingController=createReviewRoutingController({getState:()=>scoped(),getUI:()=>ui,getDialog:()=>dialog,getRoot:()=>document.getElementById('overlay-root'),openDialog,closeDialog,commit,render,renderDialog,navigate:()=>go('review'),selectSession,now:reviewNow});
 const qualityInsightsManager=createQualityInsightsManager({getState:()=>state,getDialog:()=>dialog,openDialog,renderDialog,download,beforeAuditDownload:async({taskIds})=>{const ids=taskIds.filter(id=>!isVoidedTask(state.tasks.find(task=>task.id===id)));await registerAuditDelivery(ids,'review-audit');}});
 const workspaceBackupManager=createWorkspaceBackupManager({getToken:()=>workspace.token,getDialog:()=>dialog,openDialog,renderDialog,download,reload:()=>location.reload(),getStatus:()=>({saving,hasPending:workspace.hasPending,conflicted:workspace.conflicted,readOnly:persistenceBlocked,revision:workspace.revision,editing:Boolean(dialog&&!['workspace-backup','workspace-usage','shortcuts-help','help'].includes(dialog.type)),suspendedDraft:Boolean(suspendedTaskDraft),composing:Boolean(composingInput),timerPending:rawReviewTimer.pendingCount>0}),onReloadRequired:()=>{clearTimeout(pollTimer);persistenceBlocked=true;contentTranslations.stop();workflowManager.stop();rawWorkbenchManager.stop();businessExportManager.setActive(false);}});
@@ -168,8 +171,9 @@ async function createEcommerceTask({file,parsed,name,reviewer,basisVersion,execu
 function scoped(){const selected=scopeState(state,ui.dataMode);return ui.page==='tasks'||ui.page==='review'?selected:usableTaskState(selected);}
 function setMode(mode){
   ui.dataMode='manual';const first=scoped().tasks[0];
-  for(const key of ['dashboardTaskId','reviewTaskId','exportTaskId','reportTaskId'])ui[key]=first?.id||'';
-  Object.assign(ui,{reviewStatus:'全部',reviewQuery:'',taskQuery:'',taskStatus:'全部',showReviewRecords:false,selectedId:'',openRules:[],highlightedTurns:[]});
+  for(const key of ['dashboardTaskId','exportTaskId','reportTaskId'])ui[key]=first?.id||'';
+  ui.reviewTaskId='';
+  Object.assign(ui,{reviewStatus:'待确认',reviewQuery:'',taskQuery:'',taskStatus:'全部',showReviewRecords:false,selectedId:'',openRules:[],highlightedTurns:[]});
   const session=scoped().sessions[0];if(session)selectSession(session.id,false);
 }
 function adoptWorkspace(value){state=value.state;catalog=value.catalog;applyBundledRuleEnglish(catalog,state);ui.aiRuntime=value.aiRuntime||ui.aiRuntime;catalogManager.replaceCatalog(catalog);storageWarning=value.aiRuntime?.error||'';persistenceBlocked=false;}
@@ -244,11 +248,11 @@ function render(){
   renderUpdate(document.getElementById('app'),uiHtml`<div class="layout" data-page="${page[0]}">
     <aside class="sidebar" aria-label="主导航"><a href="#overview" class="brand" data-act="nav" data-page="overview" aria-label="返回工作概览"><div class="brand-mark">质</div><strong>会话质检工作台</strong></a>
       <nav class="nav-list">${navigation.map(([id,label])=>{const link=uiHtml`<button class="nav-link ${page[0]===id?'active':''}" data-act="nav" data-page="${id}" aria-label="${uiT(label)}" aria-current="${page[0]===id?'page':'false'}">${icon(id==='exports'?'export':id,21)}<span>${uiT(label)}</span></button>`;return id==='review'?uiHtml`<div class="review-nav-item">${link}${reviewNavigationBadge(reviewBreakdown)}</div>`:link;}).join('')}</nav>
-      <div class="sidebar-bottom"><div class="sidebar-foot"><span>本机业务工作区</span><span class="tiny">${e(workspace.snapshot?.productVersion||'')}</span></div><button class="btn small" data-act="workspace-backup-open">${workspaceBackupText('备份与恢复','Backup and restore')}</button></div>
+      <div class="sidebar-bottom"><div class="sidebar-foot"><span>本机业务工作区</span><details class="build-identity"><summary>${e(workspace.snapshot?.productVersion||clientBuild.version)}</summary><p>${e(ui.buildInfo?.buildId||clientBuild.buildId)}</p><p>${e(ui.buildInfo?.sourceCommit?.slice(0,12)||'development')}</p><p>${e(ui.buildInfo?.resourceFingerprint?.slice(0,16)||'')}</p></details></div><button class="btn small" data-act="workspace-backup-open">${workspaceBackupText('备份与恢复','Backup and restore')}</button></div>
     </aside>
     <main class="main"><header class="topbar ${isReview?'review-topbar':''}">${isReview?reviewHeader(viewState,ui):uiHtml`<div class="breadcrumb"><span>服务领域</span>${icon('chevron',11)}<span>会话质检</span>${icon('chevron',11)}<strong>${uiT(page[1])}</strong></div>`}
       <div class="top-tools">${isReview?uiHtml`<button class="text-btn" data-act="review-shortcuts-help">审核快捷键</button>`:''}<div class="locale-switch" role="group" aria-label="${getLocale()==='en'?'Interface language':'界面语言'}"><button data-act="ui-locale" data-locale="zh" aria-pressed="${getLocale()==='zh'}" lang="zh-CN">中文</button><button data-act="ui-locale" data-locale="en" aria-pressed="${getLocale()==='en'}" lang="en">English</button></div><span class="workspace-timezone" title="${getLocale()==='en'?'All displayed dates and timing use UTC+08:00':'所有日期及计时使用北京时间 UTC+08:00'}">UTC+08:00</span><button class="btn small" data-act="model-settings" aria-label="模型设置">模型设置</button><button class="icon-btn" data-act="help" title="使用指引" aria-label="使用指引">${icon('info',18)}</button>${isReview?'':uiHtml`<button class="profile text-btn" data-act="workspace-usage" aria-label="工作区用量"><span class="avatar">质检</span><span>本机工作区</span></button>`}</div>
-    </header><div id="workspace-warning"></div><div class="content">${content}</div></main></div>`,{reuse:samePage&&isReview});
+    </header>${ui.buildInfo&&clientBuild.buildId!==ui.buildInfo.buildId?uiHtml`<div class="notice-banner warning" role="alert">页面与本机服务版本不同，请重新加载页面。<button class="btn" data-act="reload-build">重新加载页面</button></div>`:''}<div id="workspace-warning"></div><div class="content">${content}</div></main></div>`,{reuse:samePage&&isReview});
   renderStorageWarning();
   for(const key of disclosures){const node=document.querySelector(`#app details[data-disclosure="${CSS.escape(key)}"]`);if(node)node.open=true;}
   for(const saved of scrolls){
@@ -366,7 +370,7 @@ function closeDialog({immediate=false,force=false}={}){
   if(!animations.length)finish();else Promise.all(animations.map(animation=>animation.finished.catch(()=>{}))).then(finish);
 }
 function formError(message){const target=document.getElementById('form-error');if(target)target.innerHTML=`${e(uiError(message))}${workspace.hasPending||workspace.conflicted?uiHtml` <button class="text-btn" data-act="${workspace.hasPending?'workspace-retry':'workspace-reload'}">${workspace.hasPending?uiT('重试保存'):uiT('重新加载工作区（保留当前输入）')}</button>`:''}`;else toast(message,true);}
-function go(page,id){if(!navigation.some(n=>n[0]===page))page='overview';if(page==='review'&&ui.page!==page)ui.showReviewRecords=false;if(page!==ui.page){ui.catalogCategory='';ui.catalogStatus='';}ui.page=page;if(id)selectSession(id,false);if(location.hash!==`#${page}`)history.replaceState(null,'',`#${page}`);closeDialog({immediate:true});render();window.scrollTo({top:0,behavior:'instant'});}
+function go(page,id){if(!navigation.some(n=>n[0]===page))page='overview';if(page==='review'&&ui.page!==page){ui.showReviewRecords=false;if(!id){ui.reviewStatus='待确认';ui.reviewQuery='';ui.selectedId='';}}if(page!==ui.page){ui.catalogCategory='';ui.catalogStatus='';}ui.page=page;if(id)selectSession(id,false);if(location.hash!==`#${page}`)history.replaceState(null,'',`#${page}`);closeDialog({immediate:true});render();window.scrollTo({top:0,behavior:'instant'});}
 function selectSession(id,redraw=true){
   const s=state.sessions.find(s=>s.id===id);if(!s)return;
   const results=getSessionResults(s);
@@ -377,7 +381,7 @@ function selectSession(id,redraw=true){
   if(redraw)render();
 }
 function showTaskDetail(id){ui.taskDetailId=id;go('tasks');}
-function taskReview(id){ui.showReviewRecords=false;ui.reviewSceneFilter='';ui.reviewTaskId=id;ui.reviewStatus='全部';ui.reviewQuery='';const sessions=state.sessions.filter(s=>s.taskId===id);const next=sessions.find(requiresHumanReview)||sessions[0];if(next)selectSession(next.id,false);go('review');}
+function taskReview(id){ui.showReviewRecords=false;ui.reviewSceneFilter='';ui.reviewTaskId=id;ui.reviewStatus='待确认';ui.reviewQuery='';const sessions=state.sessions.filter(s=>s.taskId===id);const next=sessions.find(requiresHumanReview)||sessions[0];if(next)selectSession(next.id,false);go('review');}
 function nextSession(){const session=nextPendingSession(scoped(),ui);if(!session){ui.showReviewRecords=false;render();return;}ui.reviewStatus='待确认';ui.reviewQuery='';ui.showReviewRecords=false;selectSession(session.id);}
 function download(data,name,mime){if(typeof data==='string'&&mime?.startsWith('text/html'))data=printableReport(data);const blob=data instanceof Blob?data:new Blob([data],{type:mime});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),5000);}
 async function io(){return import('./io.mjs');}
@@ -534,6 +538,8 @@ document.addEventListener('click',async event=>{
       lockSaving(true);try{adoptWorkspace(dialog.action==='delete'?await workspace.deleteTask({taskId:dialog.taskId,confirmTaskId:dialog.confirmTaskId,actor:dialog.actor,reason:dialog.reason,administratorConfirmed}):await workspace.taskLifecycle([dialog.taskId],dialog.action,{actor:dialog.actor,reason:dialog.reason,administratorConfirmed}));}finally{lockSaving(false);}
       const deleted=dialog.action==='delete';closeDialog({force:true});render();toast(deleted?'任务已删除，完整备份位置可在任务页删除审计查看':'任务状态已保存，原文与结果完整保留');return;
     }
+    if(action==='reload-build'){location.reload();return;}
+    if(action==='task-problem-summary'){const task=state.tasks.find(t=>t.id===id);if(task){const text=taskProblemSummary(task,ui.buildInfo||{version:workspace.snapshot?.productVersion});try{await navigator.clipboard.writeText(text);toast(getLocale()==='en'?'Problem summary copied':'问题摘要已复制');}catch{download(text,'quality-problem-summary.json','application/json');}}return;}
     if(action==='ui-locale'){setLocale(button.dataset.locale);document.title=uiT('会话质检工作台');redrawLocalized();return;}
     if(await ecommerceConversionManager.action(action,button))return;
     if(await importDraftManager.action(action,button))return;
@@ -576,7 +582,7 @@ document.addEventListener('click',async event=>{
     if(await qualityInsightsManager.action(action,button))return;
     if(await reviewRoutingController.handleAction(action,button))return;
     if(handleTaskRuleSelectionAction(action,{dialog,root:document.getElementById('overlay-root'),refreshBasis}))return;
-    if(action==='nav'){ui.taskDetailId='';go(button.dataset.page);}
+    if(action==='nav'){ui.taskDetailId='';if(button.dataset.page==='review'){ui.reviewTaskId='';ui.reviewSceneFilter='';}go(button.dataset.page);}
     else if(action==='new-task'){if(dialog?.file){openDialog({type:'import-change-confirm',origin:dialog,nextAction:'scene'});}else openDialog({type:'task-scene'});}
     else if(action==='task-scene'){const scene=button.dataset.scene==='ecommerce'?'电商评论回复':button.dataset.scene==='consultation'?'新品产品咨询':button.dataset.scene,config=findScenario(state,scene,{includeDisabled:false});if(!config)throw new Error('场景已停用或不存在，请重新选择。');if(config.engine==='ecommerce')await ecommerceManager.action('ec-open');else{const scenarioSnapshot=freezeScenario(state,scene);openDialog({type:'new-task',scene,scenarioSnapshot,mode:'manual',step:1,requirePreviewConfirmation:true,reviewer:uiT('本机操作人'),catalog:catalogManager.getCatalog(),effectiveDate:localBasisDate(),ruleIds:[...config.ruleIds]});if(!config.builtin||config.inputProfileId)await importManager.action('input-import');}}
     else if(action==='task-detail')showTaskDetail(id);
@@ -745,7 +751,7 @@ document.addEventListener('change',async event=>{
   if(handleTaskRuleSelectionChange(event,{dialog,root:document.getElementById('overlay-root'),refreshBasis,renderDialog}))return;
   if(event.target.id==='input-upload'){parseFile(event.target.files[0]);return;}
   if(event.target.id==='dashboard-task')ui.dashboardTaskId=value;
-  else if(event.target.id==='review-task'){ui.showReviewRecords=false;ui.reviewSceneFilter='';ui.reviewTaskId=value;ui.reviewStatus='全部';ui.reviewQuery='';ui.selectedId='';}
+  else if(event.target.id==='review-task'){ui.showReviewRecords=false;ui.reviewSceneFilter='';ui.reviewTaskId=value;ui.reviewStatus='待确认';ui.reviewQuery='';ui.selectedId='';}
   else if(event.target.id==='task-folder-filter')ui.taskFolder=value;
   else if(event.target.id==='export-task')ui.exportTaskId=value;
   else if(event.target.id==='report-repeat-imports')ui.reportRepeatImports=value;

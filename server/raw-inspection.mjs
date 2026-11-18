@@ -1,7 +1,7 @@
 import {createHash} from 'node:crypto';
 import {validateRawTranscript} from '../public/raw-transcript.mjs';
 import {matchRawQuote,rawTimeRuleIds,MAX_RAW_MATCHES_PER_RULE,RAW_QUOTE_MATCHING_VERSION} from '../public/raw-evidence.mjs';
-import {normalizeConfidenceValue} from '../public/model-output-values.mjs';
+import {normalizeConfidenceValue,parseModelJson} from '../public/model-output-values.mjs';
 import {RULE_KINDS} from '../public/rule-kind.mjs';
 import {unicodeSourceQuoteFinder} from './unicode-source-quote.mjs';
 
@@ -91,8 +91,7 @@ export function parseRawInspectionResult(content,{session,basis,outputLanguage='
  if(!['zh','en'].includes(outputLanguage)||typeof allowDegraded!=='boolean')invalidInput();
  try{
   if(typeof content!=='string'||!content.trim()||content.length>MAX_CONTENT_CHARS)invalidOutput(['invalid_json']);
-  let source=content.trim();const fence=source.match(/^```json\s*\r?\n([\s\S]*?)\r?\n```$/);if(fence)source=fence[1];
-  let body;try{body=JSON.parse(source);}catch{invalidOutput(['invalid_json']);}
+  let body;try{body=parseModelJson(content);}catch{invalidOutput(['invalid_json']);}
   if(!object(body)||Object.keys(body).some(key=>!['recordId','results'].includes(key))||body.recordId!==session.id||!Array.isArray(body.results))invalidOutput(['invalid_envelope_or_identity']);
   const programTimeIds=new Set(expected.raw.timePolicy.mode==='unavailable'?expected.timeRuleIds:[]);
   const items=new Map(),confidenceValues=new Map();
