@@ -1,6 +1,20 @@
 # 会话质检工作台
 
-## 当前完整安装包：0.11.7 置信度修复与任务管理
+## 0.11.8 稳定候选版 · 完整内置
+
+**[免登录下载完整安装包（17条规则＋两场景）](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.8-full/QualityWorkbench-0.11.8-Full-Setup-Windows-x64.exe)**
+
+[发布与验收说明](https://github.com/Adden-code/service-quality-workbench-releases/releases/tag/v0.11.8-full) · [升级指引](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.8-full/Hotfix-Guide-zh.txt) · [SHA256](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.8-full/SHA256.txt) · [实际应用源码提交](https://github.com/Adden-code/service-quality-workbench-releases/commit/06ad23ee0a8cecfd4e6695e793be271f0e7bf361)
+
+本版集中修复审核默认入口、初判/终判筛选与计数、暂停与重启指引、历史管理入口、首次导入关联及下载灰置说明。保留完整种子、严格证据校验、备份与审计。左下角可展开构建ID核对安装内容。
+
+本地2555通过/0失败/1既有环境跳过；真正安装候选exe后验证新装、升级、重启、审核保存与任务生命周期。合成阿语/电商148项辅助能力经包内Node→Java→本机替身通过；未调用外部模型，不代表真实GLM准确率。本版标记为候选，保留下方上一版入口和latest指向，内网只需定点复核已列场景。
+
+安装器97716932字节；SHA256：`6410e8293c8fb758f8fb5a9491948d9b64091ab6d9c1a8802eb7e2c29a5d58ef`。7附件均无认证、无cookie完整下载并核验。
+
+源码分支`source-v0.11.8`；构建`0.11.8-4fde2b41538670a4`。含授权公开的规则与示例，不含真实会话、评价数据、工作区或密钥。
+
+## 上一已发布完整安装包：0.11.7 置信度修复与任务管理
 
 **[免登录下载完整安装包（17条规则＋两场景）](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.7-full/QualityWorkbench-0.11.7-Full-Setup-Windows-x64.exe)**
 
