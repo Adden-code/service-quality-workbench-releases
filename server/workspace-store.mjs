@@ -1,0 +1,288 @@
+import {createRecordWriter,isRecordIndex,readRecordDocument} from './workspace-records.mjs';
+import {applyReviewCommand} from '../public/review-command.mjs';
+import {workspacePatch} from '../public/workspace-patch.mjs';
+import {installBuiltinSceneUpgrade} from './builtin-scene-upgrade.mjs';
+import * as fs from 'node:fs/promises';
+import path from 'node:path';
+import {createHash,randomBytes} from 'node:crypto';
+import {WorkspaceError,object,canonical,validateWorkspace} from './workspace-validation.mjs';
+import {migrateBusinessWorkspace} from '../public/business-state.mjs';
+import {validateRuleSetCatalogTransition} from '../public/ecommerce-rule-sets.mjs';
+import {createBusinessState} from '../public/domain.mjs';
+import {validateCatalogSeed} from './catalog-seed.mjs';
+import {installSceneSeed,sceneSeedSources} from './scene-seed.mjs';
+import {validateCleaningSource} from './conversation-cleaning-source.mjs';
+import {migrateCatalogScenes} from '../public/catalog-scenes.mjs';
+import {RAW_INPUT_MODE} from '../public/raw-transcript.mjs';
+import {validateRawSource} from './raw-source.mjs';
+import {migrateRuleKinds} from '../public/rule-kind.mjs';
+import {applyTaskLifecycle,migrateTaskLifecycleStatus} from '../public/task-lifecycle.mjs';
+import {deleteRetiredRule} from '../public/rule-deletion.mjs';
+import {calibrationPreview,recordCalibration,changeCalibration,monitorCalibrations,calibrationMonitoring} from './rule-calibration.mjs';
+import {migrateSceneConfigurations,sceneConfigurationMutation} from './scene-configuration-service.mjs';
+
+const digest=value=>createHash('sha256').update(value).digest('hex');
+const clone=value=>structuredClone(value);
+const equalCatalog=(left,right)=>canonical(left)===canonical(right);
+const HASH=/^[a-f0-9]{64}$/;
+export const MAX_SOURCE_BYTES=8*1024*1024;
+const MAX_WORKSPACE_BYTES=64*1024*1024;
+function safeName(name){
+  if(typeof name!=='string'||!name.trim()||name.length>200||/[\\/\u0000-\u001f\u007f]/.test(name)||['.','..'].includes(name))throw new WorkspaceError('原文件名称无效，不可包含目录或控制字符。');
+  return name;
+}
+async function acquireLock(fsOps,lockPath){
+  const unavailable=()=>new WorkspaceError('数据目录已有进程锁，无法启动第二个写入进程。无法确认归属的遗留锁需要人工检查。',409);
+  try{return await fsOps.open(lockPath,'wx',0o600);}catch(error){if(error.code!=='EEXIST')throw error;}
+  // 只回收可确认进程已经退出的锁；回收锁使多个启动者不能同时移除旧锁。
+  async function deadOwner(expected){
+    let owner,raw;try{raw=await fsOps.readFile(lockPath,'utf8');owner=JSON.parse(raw);}catch{throw unavailable();}
+    if(!object(owner)||!Number.isSafeInteger(owner.pid)||owner.pid<1||typeof owner.nonce!=='string'||!owner.nonce||(expected!==undefined&&raw!==expected))throw unavailable();
+    try{process.kill(owner.pid,0);}catch(error){if(error.code==='ESRCH')return raw;}
+    throw unavailable();
+  }
+  const original=await deadOwner();const recoveryPath=`${lockPath}.recovery`;let recovery;
+  try{recovery=await fsOps.open(recoveryPath,'wx',0o600);}catch{throw unavailable();}
+  try{await deadOwner(original);await fsOps.unlink(lockPath);return await fsOps.open(lockPath,'wx',0o600);}
+  finally{await recovery.close();await fsOps.unlink(recoveryPath).catch(()=>{});}
+}
+
+export async function createWorkspaceStore({dataDir,fsOps=fs,catalogSeed=null,sceneSeed=null,storageMode='single'}={}){
+  if(typeof dataDir!=='string'||!dataDir.trim())throw new WorkspaceError('请指定工作区数据目录。');
+  const directory=path.resolve(dataDir),file=path.join(directory,'workspace.json'),lockPath=path.join(directory,'.workspace.lock'),sources=path.join(directory,'sources');
+  await fsOps.mkdir(directory,{recursive:true});
+  const lock=await acquireLock(fsOps,lockPath);
+  let closed=false,closing=false,closePromise,queue=Promise.resolve();
+  const nonce=randomBytes(16).toString('hex');
+  const validatedCleaningSources=new Set();
+  const validatedRawSources=new Set();
+  async function release(){if(closed)return;closed=true;await lock.close();await fsOps.unlink(lockPath).catch(error=>{if(error.code!=='ENOENT')throw error;});}
+  let document={schemaVersion:1,revision:0,state:null,catalog:null,mutations:[]};
+  let workspaceExists=false,split=storageMode==='sharded';const changes=[];const writeRecords=createRecordWriter(directory,{fsOps,atomicWrite});
+  try{
+    await lock.writeFile(JSON.stringify({pid:process.pid,nonce}));await lock.sync();
+    try{
+      const stat=await fsOps.stat(file);workspaceExists=true;if(stat.size>MAX_WORKSPACE_BYTES)throw new Error('文件超出大小限制');
+      const originalBytes=await fsOps.readFile(file),disk=JSON.parse(originalBytes.toString('utf8'));if(isRecordIndex(disk))split=true;const loaded=isRecordIndex(disk)?await readRecordDocument(directory,disk,{fsOps}):disk;
+      if(!object(loaded)||loaded.schemaVersion!==1||!Number.isSafeInteger(loaded.revision)||loaded.revision<1||!Array.isArray(loaded.mutations)||new Set(loaded.mutations.map(item=>item.id)).size!==loaded.mutations.length||loaded.mutations.some(item=>!object(item)||typeof item.id!=='string'||!HASH.test(item.digest)))throw new Error('保存结构不匹配');
+      validateWorkspace(loaded.state,loaded.catalog);
+      await checkRawSources(loaded.state);
+      const business=migrateBusinessWorkspace({state:loaded.state,catalog:loaded.catalog});
+      const scenes=migrateCatalogScenes({state:business.state,catalog:business.catalog});
+      const kinds=migrateRuleKinds(scenes);
+      const lifecycle=migrateTaskLifecycleStatus(kinds);
+      const migrated={...lifecycle,changed:business.changed||scenes.changed||kinds.changed||lifecycle.changed};
+      if(migrated.changed){
+        validateWorkspace(migrated.state,migrated.catalog);
+        // A new exclusive file preserves the exact pre-migration bytes, including whitespace.
+        const backupDirectory=path.join(directory,'backups');await fsOps.mkdir(backupDirectory,{recursive:true});
+        const backupFile=path.join(backupDirectory,`workspace-before-business-v1-${new Date().toISOString().replaceAll(':','-')}-${randomBytes(12).toString('hex')}.json`);let backup;
+        try{backup=await fsOps.open(backupFile,'wx',0o600);await backup.writeFile(isRecordIndex(disk)?JSON.stringify(loaded):originalBytes);await backup.sync();await backup.close();backup=null;}
+        catch(error){if(backup)await backup.close().catch(()=>{});throw new Error(`迁移前原字节备份失败，尚未修改原文件：${error.message}`);}
+        const upgraded={...loaded,revision:loaded.revision+1,state:migrated.state,catalog:migrated.catalog};
+        try{if(split)await writeRecords(upgraded);else await atomicWrite(file,JSON.stringify(upgraded));}catch(error){throw new Error(`已生成迁移前备份，但迁移写入失败，原文件保留：${error.message}`);}
+        document=upgraded;
+      }else document=loaded;
+      if(split&&!isRecordIndex(disk)){
+        const backupDirectory=path.join(directory,'backups');await fsOps.mkdir(backupDirectory,{recursive:true});
+        const backup=await fsOps.open(path.join(backupDirectory,`workspace-before-records-${Date.now()}-${randomBytes(8).toString('hex')}.json`),'wx',0o600);
+        try{await backup.writeFile(originalBytes);await backup.sync();}finally{await backup.close();}
+        await writeRecords(document);
+      }
+    }catch(error){
+      if(error.code!=='ENOENT'||workspaceExists)throw new WorkspaceError(`工作区记录读取失败或损坏，原文件保留：${error.message}`,500);
+      const input=typeof catalogSeed==='function'?await catalogSeed():catalogSeed;
+      const sceneInput=typeof sceneSeed==='function'?await sceneSeed():sceneSeed;
+      if(sceneInput&&!input)throw new WorkspaceError('内置场景配置缺少配套目录种子，未创建不完整工作区。',500);
+      if(input!==null&&input!==undefined){
+        let catalog;try{catalog=validateCatalogSeed(input);}catch(error){throw new WorkspaceError(`预置目录种子无效：${error.message}`,500);}
+        const seedState=createBusinessState(),assigned=migrateRuleKinds(migrateCatalogScenes({state:seedState,catalog}));
+        const initial={schemaVersion:1,revision:1,state:sceneInput?installSceneSeed(seedState,assigned.catalog,sceneInput):seedState,catalog:assigned.catalog,mutations:[]};validateWorkspace(initial.state,initial.catalog);
+        if(sceneInput)await ensureSceneSeedSources(sceneInput);
+        if(split)await writeRecords(initial);else await atomicWrite(file,JSON.stringify(initial));document=initial;
+      }
+    }
+    await fsOps.mkdir(sources,{recursive:true});
+  }catch(error){await release();throw error;}
+  function serial(operation){if(closing||closed)return Promise.reject(new WorkspaceError('工作区正在关闭或已关闭，无法接收新写入。',503));const next=queue.then(operation);queue=next.catch(()=>{});return next;}
+  async function atomicWrite(target,bytes){
+    const temporary=path.join(path.dirname(target),`.${path.basename(target)}.${randomBytes(12).toString('hex')}.tmp`);let handle;
+    try{handle=await fsOps.open(temporary,'wx',0o600);await handle.writeFile(bytes);await handle.sync();await handle.close();handle=null;await fsOps.rename(temporary,target);let parent;try{parent=await fsOps.open(path.dirname(target),'r');await parent.sync();}catch(error){if(!['EPERM','EISDIR','EINVAL','ENOTSUP','EBADF','EACCES'].includes(error.code))throw error;}finally{await parent?.close();}}
+    catch(error){if(handle)await handle.close().catch(()=>{});await fsOps.unlink(temporary).catch(()=>{});throw error;}
+  }
+  const read=async()=>({initialized:document.revision>0,revision:document.revision,state:clone(document.state),catalog:clone(document.catalog)});
+  async function sourceRecord(sha256){
+    if(typeof sha256!=='string'||!HASH.test(sha256))throw new WorkspaceError('原文件摘要格式无效。');
+    try{
+      const metadata=JSON.parse(await fsOps.readFile(path.join(sources,`${sha256}.json`),'utf8'));
+      if(!object(metadata)||metadata.sha256!==sha256||!Number.isSafeInteger(metadata.size)||metadata.size<1||metadata.size>MAX_SOURCE_BYTES)throw new Error('元数据损坏');safeName(metadata.name);
+      const bytes=await fsOps.readFile(path.join(sources,sha256));if(bytes.length!==metadata.size||digest(bytes)!==sha256)throw new Error('原文件校验失败');
+      return {metadata:{sha256,name:metadata.name,size:metadata.size,createdAt:metadata.createdAt},bytes};
+    }catch(error){if(error.code==='ENOENT')throw new WorkspaceError('原文件不存在。',404);if(error instanceof WorkspaceError)throw error;throw new WorkspaceError('原文件无法读取或校验失败。',500);}
+  }
+  async function ensureSceneSeedSources(seed){
+    await fsOps.mkdir(sources,{recursive:true});
+    for(const item of sceneSeedSources(seed)){
+      let saved;try{saved=await sourceRecord(item.sha256);}catch(error){if(error.status!==404)throw error;}
+      if(saved){if(saved.metadata.name!==item.name||saved.metadata.size!==item.size)throw new WorkspaceError('内置原文与既有归档名称或大小不一致，原件保留。');continue;}
+      await atomicWrite(path.join(sources,item.sha256),item.bytes);
+      await atomicWrite(path.join(sources,`${item.sha256}.json`),JSON.stringify({sha256:item.sha256,name:item.name,size:item.size,createdAt:new Date().toISOString()}));
+    }
+  }
+  async function checkSources(state,catalog){
+    const sceneSources=[...(state.sceneConfigurations||[]).flatMap(c=>c.sourceRefs||[]),...(state.scenePackageDrafts||[]).flatMap(d=>d.package?.configuration?.sourceRefs||[])];
+    for(const expected of sceneSources){const saved=(await sourceRecord(expected.sha256)).metadata;if(saved.name!==expected.name||saved.size!==expected.size)throw new WorkspaceError('场景规则文档与归档原件不一致。');}
+    for(const task of state.tasks)if(task.source){
+      let source;try{source=(await sourceRecord(task.source.sha256)).metadata;}catch{throw new WorkspaceError('任务关联的原文件尚未保存或已损坏。');}
+      if(task.source.size!==undefined&&task.source.size!==source.size)throw new WorkspaceError('任务原文件大小与已保存文件不一致。');
+      if(task.source.name!==source.name)throw new WorkspaceError('任务原文件名称与已保存元数据不一致。');
+      if(task.cleaningReportSnapshot){
+        const cacheKey=task.source.sha256+':'+digest(Buffer.from(canonical(task.cleaningReportSnapshot)));
+        if(!validatedCleaningSources.has(cacheKey)){
+          try{await validateCleaningSource(task.cleaningReportSnapshot,(await sourceRecord(task.source.sha256)).bytes,source);}catch(error){throw new WorkspaceError(error.message);}
+          validatedCleaningSources.add(cacheKey);
+        }
+      }
+    }
+    for(const rule of [...(catalog?.rules||[]),...(catalog?.deletedRules||[]).map(item=>item.snapshot)])if(rule.provenance?.source){
+      const expected=rule.provenance.source;let saved;
+      try{saved=(await sourceRecord(expected.sha256)).metadata;}catch{throw new WorkspaceError('规则关联的原文件尚未保存或已损坏。');}
+      if(saved.size!==expected.size||saved.name!==expected.name)throw new WorkspaceError('规则来源与已保存原文件不一致。');
+    }
+    await checkRawSources(state);
+  }
+  async function checkRawSources(state){
+    for(const task of state.tasks.filter(task=>task.inputMode===RAW_INPUT_MODE)){
+      try{
+        const saved=await sourceRecord(task.source.sha256);
+        if(task.source.name!==saved.metadata.name||task.source.size!==saved.metadata.size)throw new Error('原文任务归档来源元数据不一致。');
+        const rows=task.sessionIds.map(id=>state.sessions.find(session=>session.id===id));
+        // The archive bytes are hashed above on every save. Cache only the full
+        // already-verified cell snapshot; any row/mapping/policy change gets a new key.
+        const cacheKey=task.source.sha256+':'+digest(canonical({source:task.source,options:task.rawImportOptions,rows:rows.map(session=>session.rawTranscript)}));
+        if(!validatedRawSources.has(cacheKey)){
+          await validateRawSource(task,rows,saved.bytes,saved.metadata);
+          validatedRawSources.add(cacheKey);
+        }
+      }catch(error){throw new WorkspaceError(`原文来源校验失败，原件保留：${error.message}`,error.status??400);}
+    }
+  }
+  async function persist(next,{snapshot=true}={}){
+    const patch=workspacePatch(document,next),baseRevision=document.revision;
+    try{if(split)await writeRecords(next);else{const bytes=JSON.stringify(next);if(Buffer.byteLength(bytes)>MAX_WORKSPACE_BYTES)throw new WorkspaceError('工作区大小超出保存限制。',413);await atomicWrite(file,bytes);}}
+    catch(error){throw new WorkspaceError(`工作区未保存，原记录保留：${error.message}`,500);}
+    document=next;changes.push({baseRevision,revision:next.revision,patch});while(changes.length>32)changes.shift();return snapshot?read():{revision:next.revision};
+  }
+  async function changesSince(revision){
+    if(revision===document.revision)return{initialized:document.revision>0,revision,unchanged:true};
+    const first=changes.findIndex(c=>c.baseRevision===revision);if(first<0)return read();
+    const selected=changes.slice(first),patch={tasks:[],sessions:[],removedTasks:[],removedSessions:[],state:{}},tasks=new Map(),sessions=new Map(),removedTasks=new Set(),removedSessions=new Set();
+    for(const change of selected){const p=change.patch;for(const [key,map,removed]of [['tasks',tasks,removedTasks],['sessions',sessions,removedSessions]]){for(const id of p[key==='tasks'?'removedTasks':'removedSessions']){map.delete(id);removed.add(id);}for(const item of p[key]){removed.delete(item.id);map.set(item.id,item);}}Object.assign(patch.state,p.state);if(p.catalog)patch.catalog=p.catalog;for(const key of ['tasksOrder','sessionsOrder'])if(p[key])patch[key]=p[key];}
+    patch.tasks=[...tasks.values()];patch.sessions=[...sessions.values()];patch.removedTasks=[...removedTasks];patch.removedSessions=[...removedSessions];
+    return clone({initialized:true,baseRevision:revision,revision:document.revision,patch});
+  }
+  return {
+    read,changesSince,
+    reviewCommand(input,{snapshot=true}={}){const request=clone(input);return serial(async()=>{
+      if(!object(request)||typeof request.mutationId!=='string'||!request.mutationId||request.mutationId.length>128)throw new WorkspaceError('审核操作标识无效。');
+      const fingerprint=digest(canonical(request)),replay=document.mutations.find(x=>x.id===request.mutationId);
+      if(replay){if(replay.digest!==fingerprint)throw new WorkspaceError('相同操作标识对应不同请求。',409);return snapshot?read():{revision:document.revision};}
+      const session=document.state?.sessions.find(s=>s.id===request.sessionId);
+      if(!session||typeof request.expected!=='string'||JSON.stringify(session.review)!==request.expected)throw new WorkspaceError('当前会话已被更新，编辑内容保留；请重新加载核对。',409);
+      if(request.expectedAI!==undefined&&JSON.stringify({aiResults:session.aiResults,aiExecution:session.aiExecution,aiDecision:session.aiDecision,sceneCapabilities:session.sceneCapabilities})!==request.expectedAI)throw new WorkspaceError('当前AI结论已更新，请重新核对。',409);
+      let state;try{state=applyReviewCommand(document.state,request);}catch(error){throw new WorkspaceError(error.message,400);}
+      validateWorkspace(state,document.catalog,document.state,{trustedReview:true});
+      if(state.ruleCalibrations?.records?.some(r=>r.enabled&&!r.invalidatedAt)){const monitored=monitorCalibrations(state);validateWorkspace(monitored,document.catalog,state,{trustedCalibration:true});state=monitored;}
+      return persist({...document,state,revision:document.revision+1,mutations:[...document.mutations,{id:request.mutationId,digest:fingerprint}]},{snapshot});
+    });},
+    migrateScenes(input){return serial(async()=>{
+      if(!document.state)throw new WorkspaceError('请先初始化工作区。',409);
+      const next=migrateSceneConfigurations(document,input);if(canonical(next)===canonical(document))return read();
+      validateWorkspace(next.state,next.catalog,document.state,{trustedScene:true});await checkSources(next.state,next.catalog);
+      return persist({...next,revision:document.revision+1});
+    });},
+    installBuiltinScenes(input){return serial(async()=>{const next=installBuiltinSceneUpgrade(document,input);validateWorkspace(next.state,next.catalog,document.state,{trustedScene:true});await ensureSceneSeedSources(input.sceneSeed);await checkSources(next.state,next.catalog);return persist({...next,revision:document.revision+1});});},
+    configureScene(input){return serial(async()=>{
+      const next=sceneConfigurationMutation(document,input);if(canonical(next)===canonical(document))return read();
+      validateWorkspace(next.state,next.catalog,document.state,{trustedScene:true});await checkSources(next.state,next.catalog);
+      return persist({...next,revision:document.revision+1});
+    });},
+    applyScenePreparation(input,preparation){return serial(async()=>{
+      const next=sceneConfigurationMutation(document,{...input,action:'apply-preparation'},{preparation});
+      validateWorkspace(next.state,next.catalog,document.state,{trustedScene:true});await checkSources(next.state,next.catalog);
+      return persist({...next,revision:document.revision+1});
+    });},
+    calibrationPreview(input){return serial(async()=>calibrationPreview(document.state,input));},
+    calibrationSummary(){return serial(async()=>({records:(document.state?.ruleCalibrations?.records||[]).map(record=>({...record,monitoring:calibrationMonitoring(document.state,record.id)})),events:document.state?.ruleCalibrations?.events||[]}));},
+    calibrate(input){return serial(async()=>{
+      let state;try{state=input.action==='calibrate'?recordCalibration(document.state,input):changeCalibration(document.state,input);}catch(error){throw new WorkspaceError(error.message,409);}
+      validateWorkspace(state,document.catalog,document.state,{trustedCalibration:true});await checkSources(state,document.catalog);
+      return persist({...document,revision:document.revision+1,state});
+    });},
+    validateIntegrity(){return serial(async()=>{if(document.revision===0)throw new WorkspaceError('工作区尚未初始化。',409);validateWorkspace(document.state,document.catalog);await checkSources(document.state,document.catalog);return read();});},
+    deleteRule(input){return serial(async()=>{
+      if(!object(input))throw new WorkspaceError('规则删除请求无效。');
+      let catalog;try{catalog=deleteRetiredRule(document.catalog,document.state,input);}catch(error){throw new WorkspaceError(error.message,409);}
+      if(equalCatalog(catalog,document.catalog))return read();
+      validateWorkspace(document.state,catalog,document.state);await checkSources(document.state,catalog);
+      return persist({...document,revision:document.revision+1,catalog});
+    });},
+    updateTaskLifecycle(taskIds,action,options={}){
+      return serial(async()=>{
+        if(!Array.isArray(taskIds)||!taskIds.length||taskIds.length>1000||new Set(taskIds).size!==taskIds.length)throw new WorkspaceError('任务范围无效。');
+        let next=clone(document.state);
+        try{for(const id of taskIds)next=applyTaskLifecycle(next,id,action,options);}catch(error){throw new WorkspaceError(error.message,409);}
+        validateWorkspace(next,document.catalog,document.state,{trustedLifecycle:true});
+        if(canonical(next)===canonical(document.state))return read();
+        return persist({...document,revision:document.revision+1,state:next});
+      });
+    },
+    updateAI(updater){
+      return serial(async()=>{
+        if(document.revision===0)throw new WorkspaceError('工作区尚未初始化，无法保存AI执行状态。',409);
+        if(typeof updater!=='function')throw new WorkspaceError('AI更新须使用服务端回调。');
+        const next=clone(await updater({state:clone(document.state),catalog:clone(document.catalog)}));
+        if(!object(next)||!object(next.state)||!equalCatalog(next.catalog,document.catalog))throw new WorkspaceError('AI更新不可修改资料目录。');
+        validateWorkspace(next.state,next.catalog,document.state,{trustedAI:true});
+        await checkSources(next.state,next.catalog);
+        return persist({...document,revision:document.revision+1,state:next.state,catalog:next.catalog});
+      });
+    },
+    save(input){
+      const request=clone(input);
+      return serial(async()=>{
+        if(!object(request)||!Number.isSafeInteger(request.baseRevision)||request.baseRevision<0||typeof request.mutationId!=='string'||!request.mutationId.trim()||request.mutationId.length>128)throw new WorkspaceError('保存请求版本或 mutationId 无效。');
+        const fingerprint=digest(canonical({baseRevision:request.baseRevision,state:request.state,catalog:request.catalog}));
+        const replay=document.mutations.find(item=>item.id===request.mutationId);
+        if(replay){if(replay.digest!==fingerprint)throw new WorkspaceError('相同 mutationId 对应不同请求。',409);return {...await read(),replayed:true};}
+        if(request.baseRevision!==document.revision)throw new WorkspaceError('工作区已由另一页面更新，请保留编辑内容后重新加载。',409);
+        if(canonical(request.catalog?.deletedRules||[])!==canonical(document.catalog?.deletedRules||[]))throw new WorkspaceError('规则删除审计只能通过专用删除入口追加，历史内容不可改写。');
+        const deletedEvents=catalog=>(catalog?.events||[]).filter(event=>(document.catalog?.deletedRules||[]).some(entry=>event.kind==='rules'&&entry.id===event.id&&entry.version===event.version));
+        if(canonical(deletedEvents(request.catalog))!==canonical(deletedEvents(document.catalog)))throw new WorkspaceError('已删除规则的历史操作记录不可改写。');
+        if((document.catalog?.rules||[]).some(old=>!request.catalog?.rules?.some(next=>next.id===old.id&&next.version===old.version)))throw new WorkspaceError('删除规则须使用专用入口并检查任务引用。');
+        validateWorkspace(request.state,request.catalog,document.state,{authenticateNewSnapshots:true});
+        try{validateRuleSetCatalogTransition(document.catalog,request.catalog);}catch(error){throw new WorkspaceError(error.message);}
+        await checkSources(request.state,request.catalog);
+        const monitored=monitorCalibrations(request.state);
+        validateWorkspace(monitored,request.catalog,request.state,{trustedCalibration:true});
+        const next={schemaVersion:1,revision:document.revision+1,state:monitored,catalog:request.catalog,mutations:[...document.mutations,{id:request.mutationId,digest:fingerprint}]};
+        return persist(next);
+      });
+    },
+    putSource(bytes,name){
+      const copy=Buffer.from(bytes);
+      return serial(async()=>{
+        safeName(name);if(!copy.length)throw new WorkspaceError('原文件不能为空。');if(copy.length>MAX_SOURCE_BYTES)throw new WorkspaceError('原文件大小超过8MB。',413);
+        const sha256=digest(copy);let existing;
+        try{existing=await sourceRecord(sha256);}catch(error){if(error.status!==404)throw error;}
+        if(existing)return existing.metadata;
+        const metadata={sha256,name,size:copy.length,createdAt:new Date().toISOString()};
+        try{await atomicWrite(path.join(sources,sha256),copy);await atomicWrite(path.join(sources,`${sha256}.json`),JSON.stringify(metadata));}
+        catch(error){throw new WorkspaceError(`原文件未保存，请重试：${error.message}`,500);}
+        return clone(metadata);
+      });
+    },
+    async getSource(sha256){const {metadata,bytes}=await sourceRecord(sha256);return {...metadata,bytes};},
+    close(){if(closePromise)return closePromise;closing=true;closePromise=queue.then(release);return closePromise;},
+  };
+}

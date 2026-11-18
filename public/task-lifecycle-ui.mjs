@@ -1,0 +1,17 @@
+import {e,icon,dateTime} from './ui.mjs';
+import {html as h,t} from './i18n.mjs';
+import {isArchivedTask,isVoidedTask,taskVoidBlockers} from './task-lifecycle.mjs';
+export function taskLifecycleControls(task){
+ if(isVoidedTask(task))return h`<span class="badge warning">已作废</span><button class="text-btn" data-act="task-delete" data-id="${e(task.id)}">删除任务</button>`;
+ return h`<button class="text-btn" data-act="${isArchivedTask(task)?'task-restore':'task-archive'}" data-id="${e(task.id)}">${t(isArchivedTask(task)?'恢复任务':'归档任务')}</button><button class="text-btn subtle-btn" data-act="task-void" data-id="${e(task.id)}">作废任务</button>`;
+}
+export function taskLifecycleNotice(task){
+ const life=task.lifecycle;if(!life)return '';
+ return h`${isVoidedTask(task)?h`<div class="notice-banner warning" role="status"><strong>已作废 · 仅供追溯</strong><span>${e(life.voidReason)}</span></div>`:isArchivedTask(task)?h`<div class="notice-banner" role="status">已归档 · 历史只读，可查看和导出；恢复后才能继续审核</div>`:''}${life.events.length?h`<details class="panel" data-disclosure="${e(task.id)}-lifecycle"><summary>任务管理记录</summary><ul>${life.events.map(event=>h`<li>${dateTime(event.at)} · ${e(event.actor)} · ${t({archive:'归档任务',restore:'恢复任务',void:'作废任务'}[event.action])}${event.reason?h` · ${e(event.reason)}`:''}</li>`).join('')}</ul></details>`:''}`;
+}
+export function taskLifecycleDialog(dialog,state){
+ if(dialog?.type!=='task-lifecycle')return '';
+ const task=state.tasks.find(row=>row.id===dialog.taskId);if(!task)return '';
+ const action=dialog.action,title={archive:'归档任务',restore:'恢复任务',void:'作废任务',delete:'删除任务'}[action],blockers=action==='void'?taskVoidBlockers(state,task):[];
+ return h`<div class="modal-backdrop" data-backdrop="true"><section class="modal" role="dialog" aria-modal="true" aria-labelledby="dialog-title" tabindex="-1"><header class="modal-head"><h2 id="dialog-title">${t(title)}</h2><button class="icon-btn" data-act="close-modal" aria-label="关闭弹窗">${icon('close',18)}</button></header><div class="modal-body"><strong>${e(task.name)}</strong><p class="mono">${e(task.id)}</p><p>${t(action==='delete'?'删除将先自动生成完整工作区备份，再清理该任务、原文、运行轨迹与交付物。其他任务共用的源文件保留；可再生缓存会清理。删除审计和备份保留，可通过工作区恢复找回。':action==='void'?'作废后保留原文、结果和审计记录；停止后续运行、审核及新交付，不计入质量统计。':action==='archive'?'归档后移出任务与审核工作流，历史只读可查看和导出；恢复后才能继续审核。原结果与审计记录完整保留。':'恢复后重新显示在默认任务列表，原结果保持不变。')}</p><div id="form-error" class="form-error" role="alert">${e(dialog.error||blockers.join('\n'))}</div><label class="field-label" for="lifecycle-actor">操作人标签</label><input class="field" id="lifecycle-actor" maxlength="80" value="${e(dialog.actor||t('本机操作人'))}">${['void','delete'].includes(action)?h`<label class="field-label" for="lifecycle-reason">操作原因（必填）</label><textarea class="field" id="lifecycle-reason" maxlength="2000" placeholder="例如：测试批次，重复导入">${e(dialog.reason||'')}</textarea><p class="hint">本机管理员确认是操作留痕，不代表登录身份验证。原有审核与交付记录在作废后只读。</p><label><input type="checkbox" id="lifecycle-administrator">我以本机管理员身份确认此操作</label>${action==='delete'?h`<label class="field-label" for="lifecycle-confirm-id">二次确认：输入上方完整任务编号</label><input class="field mono" id="lifecycle-confirm-id" autocomplete="off" value="${e(dialog.confirmTaskId||'')}">`:''}`:''}</div><footer class="modal-footer"><button class="btn" data-act="close-modal">取消</button><button class="btn primary" data-act="task-lifecycle-save" ${blockers.length?'disabled':''}>${t(title)}</button></footer></section></div>`;
+}

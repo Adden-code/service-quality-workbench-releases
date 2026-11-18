@@ -1,0 +1,1 @@
+{"schemaVersion":2,"baseUrl":"http://synthetic.invalid/v1","model":"synthetic-A","authMode":"none","timeoutMs":120000,"reasoningEffort":null,"maxTokens":null,"apiKeyCiphertext":null,"connectionTest":{"binding":"14311d99730587f44b84b4eb2f03226cab85709040fd9a58e6e42089b6838102","testedAt":"2026-11-17T06:59:11.424Z"}}

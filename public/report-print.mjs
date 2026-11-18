@@ -1,0 +1,8 @@
+/** Add local browser print controls to generated standalone reports only. */
+export function printableReport(html){
+ if(typeof html!=='string'||!/<html\b/i.test(html)||!/<body\b/i.test(html)||html.includes('id="workbench-print-controls"'))return html;
+ const en=/<html\b[^>]*\blang\s*=\s*["']en(?:-[^"']*)?["']/i.test(html);
+ const style=`<style id="workbench-print-style">#workbench-print-controls{display:flex;align-items:center;justify-content:space-between;gap:12px;max-width:1180px;margin:18px auto;padding:12px 18px;font:14px/1.5 system-ui,sans-serif;color:#425066;background:#fff;border:1px solid #dce1e8;border-radius:10px}#workbench-print-controls button{padding:9px 15px;background:#a92535;border:0;border-radius:6px;color:white;cursor:pointer;font:inherit;white-space:nowrap}@media print{#workbench-print-controls{display:none!important}thead{display:table-header-group}tfoot{display:table-footer-group}tr,img,figure{break-inside:avoid}th,td{overflow-wrap:anywhere}h1,h2,h3{break-after:avoid}p{orphans:3;widows:3}details>summary{break-after:avoid}details:not([open])>*:not(summary){display:block!important}a{color:inherit}.scroll,.table-wrap,.table-scroll{overflow:visible!important}body{background:white!important}}</style>`;
+ const bar=`<div id="workbench-print-controls"><span>${en?'Use your browser print dialog to save a PDF. Check the preview and page orientation.':'使用浏览器打印对话框另存为 PDF，可在预览中调整纸张方向与页边距。'}</span><button type="button" onclick="window.print()">${en?'Print / Save as PDF':'打印 / 另存 PDF'}</button></div>`;
+ return html.replace(/<\/head>/i,style+'</head>').replace(/<body\b[^>]*>/i,match=>match+bar);
+}

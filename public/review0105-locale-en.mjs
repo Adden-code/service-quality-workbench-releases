@@ -1,0 +1,22 @@
+export const REVIEW0105_EN=Object.freeze({
+ '审核快捷键':'Review shortcuts',
+ 'J / K：下一条 / 上一条；E：编辑首个可处理项；Ctrl+Enter：按当前流程确认。':'J / K: next / previous; E: edit the first available check; Ctrl+Enter: use the current confirmation flow.',
+ '输入、弹窗、保存或未保存修改期间，快捷键不生效。普通 Enter 不会触发确认。':'Shortcuts are inactive while typing, in dialogs, during saving, or with unsaved changes. Enter alone does not confirm.',
+ '逐条检核：{0} / {1}':'Row checks: {0} / {1}',
+ '批次重复比较：{0} / {1} 块':'Batch duplicate comparison: {0} / {1} blocks',
+ '本阶段预计还需 {0}–{1} 秒':'Estimated time left in this stage: {0}–{1} seconds',
+ '本阶段预计还需 {0}–{1} 分钟':'Estimated time left in this stage: {0}–{1} minutes',
+ '本阶段预计还需 {0}–{1} 小时':'Estimated time left in this stage: {0}–{1} hours',
+ '按本次运行最近完成项的实际耗时估算；模型响应速度变化时，区间会调整。':'Estimated from recently completed checks in this run. The range changes with model response times.',
+ '估算中：至少完成 3 条有效耗时样本后显示范围。':'Estimating: a range appears after at least 3 usable timing samples.',
+ '等待任务队列，开始执行后估算。':'Waiting in the task queue. Estimates begin after execution starts.',
+ '已暂停或中断，等待恢复；暂停时间不计入估算。':'Paused or interrupted. Waiting to resume; paused time is excluded from estimates.',
+ '存在失败或未完成项，处理后重新估算。':'Failed or incomplete checks remain. Estimates resume after they are handled.',
+ '正在重试，待后续耗时稳定后重新估算。':'Retrying. Estimates resume when subsequent timings stabilize.',
+ '当前请求耗时较长，暂不显示剩余时间。':'A current request is taking longer than recent checks; remaining time is not estimated.',
+ '正在保存本阶段结果。':'Saving the results of this stage.',
+ '正在比较整批回复，耗时随比较块变化，暂不估算结束时间。':'Comparing replies across the entire batch. Block durations vary, so completion time is not estimated.',
+ '之后仍需整批重复比较；未计入上述逐条检核估算。':'Whole-batch duplicate comparison follows and is not included in the row-check estimate.',
+ '本批 {0} 条将按调度段在后台处理，已完成结果会保存。':'This batch has {0} rows and runs in background segments. Completed results are saved.',
+ '电商重复比较覆盖整批；请保持在同一业务任务内。':'E-commerce duplicate comparison covers the whole batch; keep it in one business task.'
+});

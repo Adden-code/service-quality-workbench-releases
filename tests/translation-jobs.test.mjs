@@ -1,0 +1,134 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+
+const base='D:/Codex project/outputs/service-english-20261105/translation/tests';
+const copy=value=>structuredClone(value);
+const source={kind:'session',taskId:'TASK-1',sessionId:'S-1'};
+function document(){
+ const rule={id:'R-1',version:'V1.0',title:'服务礼貌',category:'服务',scope:'咨询',changeNote:'本版补充服务用语',passCriteria:'尊重用户',failCriteria:'侮辱用户',exceptionCriteria:'无例外',policyIds:['P-1'],apiKey:'DO_NOT_COLLECT'};
+ const policy={id:'P-1',version:'V1.0',title:'服务政策',category:'服务',scope:'咨询',changeNote:'本版政策补充',sections:[{id:'p1',title:'用语',text:'不得侮辱用户'}]};
+ return{revision:5,catalog:{rules:[copy(rule)],policies:[copy(policy)]},state:{tasks:[{id:'TASK-1',name:'合成任务',basisSnapshot:{effectiveDate:'2026-11-05',capturedAt:'2026-11-05T00:00:00Z',rules:[rule],policies:[policy]},sessionIds:['S-1']}],sessions:[{id:'S-1',taskId:'TASK-1',topic:'服务咨询',turns:[{id:1,role:'客户',text:'请帮助我'}],aiResults:[{ruleId:'R-1',verdict:'符合',reason:'尊重用户',hidden:'DO_NOT_COLLECT'}],review:{status:'已确认',drafts:{'R-1':{verdict:'符合',reason:'尊重用户'}},notes:'人工已核实'},contextFields:[{key:'secret',value:'DO_NOT_COLLECT'}],ecommerce:{raw:['DO_NOT_COLLECT']},trace:'DO_NOT_COLLECT'}]}};
+}
+function answer(input){return{items:input.items.map(item=>({id:item.id,translation:input.targetLang==='en'?'Translated '+item.id:'译文 '+item.id,isTargetLanguage:false,detectedLanguage:input.targetLang==='en'?'zh':'en'}))};}
+async function fixture(t,{hook,maxAttempts=2,fsOps}={}){
+ const module=await import('../server/translation-jobs.mjs').catch(()=>({}));assert.equal(typeof module.createTranslationJobs,'function','translation job service must exist');
+ await fs.mkdir(base,{recursive:true});const dir=await fs.mkdtemp(base+'/jobs-');let doc=document(),config={baseUrl:'http://127.0.0.1:1/v1',model:'fixture',authMode:'bearer',apiKey:'SYNTHETIC_KEY_NOT_SAVED',configured:true};
+ const calls=[],store={read:async()=>copy(doc)},modelConfig={getPrivate:()=>copy(config)},client={engine:'synthetic',async enrichBusinessReport(request){calls.push(copy({kind:request.kind,input:request.input,config:{model:request.config.model,timeoutMs:request.config.timeoutMs}}));return hook?hook(request,calls):answer(request.input);}};
+ const options={dataDir:dir,store,modelConfig,client,maxAttempts,retryDelayMs:1,...(fsOps?{fsOps}:{})};let service=await module.createTranslationJobs(options);
+ t.after(async()=>{await service.close();assert.ok(path.resolve(dir).startsWith(path.resolve(base)+path.sep));await fs.rm(dir,{recursive:true,force:true});});
+ return{dir,calls,store,client,modelConfig,get service(){return service;},get doc(){return doc;},setDoc(value){doc=copy(value);},setConfig(value){config={...config,...value};},async restart(){await service.close();service=await module.createTranslationJobs(options);}};
+}
+test('0113 partial valid translation persists across restart and retry sends only missing texts',async t=>{
+ let partial=true,acceptedId;
+ const f=await fixture(t,{maxAttempts:1,hook:({input})=>{const value=answer(input);if(!partial)return value;if(acceptedId)return {items:[]};acceptedId=value.items[0].id;return{items:[value.items[0]]};}});
+ await f.service.create({jobId:'partial-retained',source,targetLang:'en'});await f.service.waitForIdle();let result=await f.service.getResult('partial-retained');
+ assert.equal(result.job.status,'completed_with_warnings');assert.ok(result.translations.some(r=>r.status==='translated'));assert.ok(result.translations.some(r=>r.status==='failed'));
+ await f.restart();result=await f.service.getResult('partial-retained');assert.ok(result.translations.some(r=>r.status==='translated'));
+ partial=false;const at=f.calls.length;await f.service.retry('partial-retained');await f.service.waitForIdle();result=await f.service.getResult('partial-retained');assert.equal(result.job.status,'completed');assert.ok(f.calls.slice(at).every(r=>!r.input.items.some(i=>i.id===acceptedId)));
+});
+test('source is explicitly projected, frozen and versioned; dedup preserves each field reference',async t=>{
+ const f=await fixture(t);const job=await f.service.create({jobId:'first',source,targetLang:'en'});assert.equal(job.status,'running');await f.service.waitForIdle();const result=await f.service.getResult('first');
+ assert.equal(result.job.status,'completed');assert.equal(result.sourceSnapshot.data.basis.rules[0].version,'V1.0');assert.ok(result.translations.length>f.calls.flatMap(call=>call.input.items).length);assert.ok(result.translations.every(item=>item.status==='translated'));
+ assert.ok(!JSON.stringify(result).includes('DO_NOT_COLLECT'));assert.equal(result.sourceSnapshot.sourceRevision,5);const before=copy(result);f.doc.state.tasks[0].basisSnapshot.rules[0].title='已变化';assert.deepEqual(await f.service.getResult('first'),before);
+ await assert.rejects(f.service.create({jobId:'first',source,targetLang:'en'}),error=>error.status===409);const node=await f.service.getNode('first',result.job.nodes[0].id);assert.ok(node.input.items.length&&node.output.items.length);assert.equal(node.attempts.length,1);
+});
+
+test('visible batch evidence reasons are translated without collecting unrelated comparison metadata',async t=>{
+ const f=await fixture(t),doc=document();doc.state.sessions[0].aiResults[0].batchEvidence=[{reason:'同一客服对多条评论使用了相似回复。',internal:{text:'DO_NOT_COLLECT_BATCH_SECRET'},members:[{raw:'DO_NOT_COLLECT_MEMBER'}]}];f.setDoc(doc);
+ await f.service.create({jobId:'batch-reasons',source,targetLang:'en'});await f.service.waitForIdle();const result=await f.service.getResult('batch-reasons');
+ assert.equal(result.job.status,'completed');assert.ok(result.translations.some(item=>item.sourceText==='同一客服对多条评论使用了相似回复。'&&item.status==='translated'));
+ assert.ok(!JSON.stringify(result).includes('DO_NOT_COLLECT_BATCH_SECRET'));assert.ok(!JSON.stringify(result).includes('DO_NOT_COLLECT_MEMBER'));
+});
+test('strict selectors reject client text, unknown fields and missing versions before a model call',async t=>{
+ const f=await fixture(t);for(const invalid of [{kind:'text',text:'do not send'},{kind:'constructor'},{...source,text:'do not send'},{kind:'rule',id:'R-1'},{kind:'policy',id:'P-1',version:'V1.0',all:true},{kind:'catalog',section:'all'}])await assert.rejects(f.service.create({jobId:'bad',source:invalid,targetLang:'en'}),error=>error.status===400);
+ await assert.rejects(f.service.create({jobId:'bad-source',source:{kind:'session',taskId:'TASK-1',sessionId:'unrelated'},targetLang:'en'}),error=>error.status===404);assert.equal(f.calls.length,0);assert.deepEqual(await f.service.list(),[]);
+});
+test('catalog never includes full policy text and individual source requires exact version',async t=>{
+ const f=await fixture(t);await f.service.create({jobId:'catalog',source:{kind:'catalog',section:'policies'},targetLang:'en'});await f.service.waitForIdle();assert.ok(!JSON.stringify(await f.service.getResult('catalog')).includes('不得侮辱用户'));
+ await assert.rejects(f.service.create({jobId:'wrong-version',source:{kind:'rule',id:'R-1',version:'V2.0'},targetLang:'en'}),error=>error.status===404);
+ await f.service.create({jobId:'policy',source:{kind:'policy',id:'P-1',version:'V1.0'},targetLang:'en'});await f.service.waitForIdle();assert.ok((await f.service.getResult('policy')).translations.some(item=>item.sourceText==='不得侮辱用户'));assert.ok((await f.service.getResult('policy')).translations.some(item=>item.sourceText==='本版政策补充'));
+});
+test('translation cache is bound to text, language and all non-secret model options',async t=>{
+ const f=await fixture(t);await f.service.create({jobId:'cache-one',source,targetLang:'en'});await f.service.waitForIdle();const calls=f.calls.length;await f.service.create({jobId:'cache-two',source,targetLang:'en'});await f.service.waitForIdle();assert.equal(f.calls.length,calls);
+ f.setConfig({model:'changed'});await f.service.create({jobId:'cache-three',source,targetLang:'en'});await f.service.waitForIdle();assert.ok(f.calls.length>calls);
+ const saved=[];async function scan(dir){for(const e of await fs.readdir(dir,{withFileTypes:true})){const file=path.join(dir,e.name);if(e.isDirectory())await scan(file);else if(e.name.endsWith('.json'))saved.push(await fs.readFile(file,'utf8'));}}await scan(f.dir);assert.ok(!saved.join('').includes('SYNTHETIC_KEY_NOT_SAVED'));
+});
+test('invalid or contradictory language output retries within a finite budget and cannot claim same',async t=>{
+ let invalid=true;const f=await fixture(t,{hook:({input})=>invalid?{items:input.items.map(item=>({id:item.id,translation:item.text,isTargetLanguage:true,detectedLanguage:'en'}))}:answer(input)});
+ await f.service.create({jobId:'invalid-language',source,targetLang:'en'});await f.service.waitForIdle();let result=await f.service.getResult('invalid-language');assert.equal(result.job.status,'completed_with_warnings');assert.equal(f.calls.length,result.job.nodes.length*2);assert.ok(result.translations.every(item=>item.status==='failed'));invalid=false;await f.service.retry('invalid-language');await f.service.waitForIdle();assert.equal((await f.service.get('invalid-language')).status,'completed');
+});
+test('no-key and provider authentication failure stop remaining dispatch with explicit warnings',async t=>{
+ const f=await fixture(t);f.setConfig({apiKey:null,configured:false});await f.service.create({jobId:'no-key',source,targetLang:'en'});await f.service.waitForIdle();assert.equal(f.calls.length,0);assert.equal((await f.service.get('no-key')).status,'completed_with_warnings');
+ const g=await fixture(t,{hook:()=>{throw Object.assign(new Error('secret error'),{code:'AUTHENTICATION'});}});await g.service.create({jobId:'unauthorized',source,targetLang:'en'});await g.service.waitForIdle();assert.equal(g.calls.length,1);assert.ok((await g.service.getResult('unauthorized')).warnings.some(w=>w.code==='authentication'));
+});
+test('Unicode long text reassembles exactly with at most eight texts and 12000 characters per call',async t=>{
+ const f=await fixture(t,{hook:({input})=>({items:input.items.map(item=>({id:item.id,translation:item.text,isTargetLanguage:true,detectedLanguage:'en'}))})});const original='English sentence 😀 e\u0301\n'.repeat(1600),doc=document();doc.state.tasks[0].basisSnapshot={rules:[],policies:[]};doc.state.tasks[0].name='English task';doc.state.sessions[0]={id:'S-1',taskId:'TASK-1',turns:[{id:1,text:original}],aiResults:[],review:{drafts:{}}};f.setDoc(doc);
+ await f.service.create({jobId:'long',source,targetLang:'en'});await f.service.waitForIdle();const result=await f.service.getResult('long'),item=result.translations.find(item=>item.sourceText===original);assert.equal(item.text,original);assert.equal(item.status,'same');assert.ok(f.calls.length>=3);
+ for(const call of f.calls){assert.ok(call.input.items.length<=8);assert.ok(call.input.items.reduce((n,item)=>n+item.text.length,0)<=12000);for(const part of call.input.items)assert.ok(!/^[\uDC00-\uDFFF]|[\uD800-\uDBFF]$/.test(part.text));}
+});
+test('soft pause checkpoints the active success and restart resumes only pending nodes under the frozen model',async t=>{
+ let enter,release;const entered=new Promise(r=>enter=r),gate=new Promise(r=>release=r);let first=true;const f=await fixture(t,{hook:async({input})=>{if(first){first=false;enter();await gate;}return answer(input);}});await f.service.create({jobId:'pause',source,targetLang:'en'});await entered;await f.service.pause('pause');release();await f.service.waitForIdle();let job=await f.service.get('pause');assert.equal(job.status,'paused');const before=f.calls.length,done=job.nodes.filter(n=>n.status==='completed').map(n=>n.id);assert.ok(done.length);
+ await f.restart();job=await f.service.get('pause');assert.equal(job.status,'paused');f.setConfig({model:'changed'});await assert.rejects(f.service.resume('pause'),error=>error.status===409);f.setConfig({model:'fixture'});await f.service.resume('pause');await f.service.waitForIdle();assert.equal((await f.service.get('pause')).status,'completed');for(const id of done)assert.equal((await f.service.getNode('pause',id)).attempts.length,1);assert.ok(f.calls.length>=before);
+});
+
+test('backup busy probe covers soft pause and an internal queued configuration-failure write',async t=>{
+ let enter,release,writeEnter,writeRelease,blockWrite=false;
+ const entered=new Promise(resolve=>enter=resolve),gate=new Promise(resolve=>release=resolve),writing=new Promise(resolve=>writeEnter=resolve),writeGate=new Promise(resolve=>writeRelease=resolve);
+ const fsOps={...fs,async rename(from,to){if(blockWrite&&/[/\\]queued-b[/\\]job\.json$/.test(to)){writeEnter();await writeGate;}return fs.rename(from,to);}};
+ const f=await fixture(t,{fsOps,hook:async({input})=>{enter();await gate;return answer(input);}});
+ try{
+  assert.equal(f.service.isBusy(),false);const creation=f.service.create({jobId:'queued-a',source,targetLang:'en'});assert.equal(f.service.isBusy(),true);await creation;await entered;
+  await f.service.pause('queued-a');assert.equal(f.service.isBusy(),true,'paused request is still executing');
+  await f.service.create({jobId:'queued-b',source,targetLang:'en'});blockWrite=true;f.setConfig({model:'changed-after-queueing'});release();await writing;
+  assert.equal((await f.service.get('queued-b')).status,'paused');assert.equal(f.service.isBusy(),true,'kick changed all jobs to paused but its durable write is still pending');
+  writeRelease();await f.service.waitForIdle();assert.equal(f.service.isBusy(),false);assert.equal(f.calls.length,1,'backup probe never dispatches queued work');
+ }finally{release();writeRelease();}
+});
+test('cache storage failure pauses without replaying the completed model output after restart',async t=>{
+ let failed=false;const fsOps={...fs,async rename(from,to){if(!failed&&to.includes('translation-cache')){failed=true;throw Object.assign(new Error('synthetic disk failure'),{code:'EIO'});}return fs.rename(from,to);}};
+ const f=await fixture(t,{fsOps});await f.service.create({jobId:'cache-storage-fault',source,targetLang:'en'});await f.service.waitForIdle();const job=await f.service.get('cache-storage-fault');assert.equal(job.status,'paused');assert.equal(job.stopReason,'storage_error');assert.ok(job.nodes.some(node=>node.status==='completed'),'validated successful output must be checkpointed before cache writes');const completedTexts=new Set(f.calls.flatMap(call=>call.input.items.map(item=>item.text)));
+ await f.restart();await f.service.resume('cache-storage-fault');await f.service.waitForIdle();assert.equal((await f.service.get('cache-storage-fault')).status,'completed');for(const call of f.calls.slice(1))assert.ok(call.input.items.every(item=>!completedTexts.has(item.text)),'completed model output cannot be sent again');
+});
+test('a result checkpoint write failure retains the validated output in memory and resumes without a model replay',async t=>{
+ let blocked=true;const fsOps={...fs,async rename(from,to){if(blocked&&/[/\\]n1\.json$/.test(to))throw Object.assign(new Error('synthetic disk failure'),{code:'EIO'});return fs.rename(from,to);}};
+ const f=await fixture(t,{fsOps});await f.service.create({jobId:'result-storage-fault',source,targetLang:'en'});await f.service.waitForIdle();assert.equal((await f.service.get('result-storage-fault')).status,'paused');const sent=new Set(f.calls.flatMap(call=>call.input.items.map(item=>item.text)));blocked=false;const count=f.calls.length;await f.service.resume('result-storage-fault');await f.service.waitForIdle();assert.equal((await f.service.get('result-storage-fault')).status,'completed');for(const call of f.calls.slice(count))assert.ok(call.input.items.every(item=>!sent.has(item.text)));
+});
+test('numeric and code text cannot be claimed same without model language detection',async t=>{
+ const f=await fixture(t,{hook:({input})=>({items:input.items.map(item=>({id:item.id,translation:item.text,isTargetLanguage:true,detectedLanguage:'en'}))})});const doc=document();doc.state.tasks[0].basisSnapshot={rules:[],policies:[]};doc.state.tasks[0].name='123456';doc.state.sessions=[];f.setDoc(doc);await f.service.create({jobId:'numeric',source:{kind:'task',taskId:'TASK-1'},targetLang:'en'});await f.service.waitForIdle();const result=await f.service.getResult('numeric');assert.equal(result.translations[0].status,'failed');assert.equal(result.job.status,'completed_with_warnings');
+});
+test('und language output cannot bypass validation to label Chinese source as a translation',async t=>{
+ const f=await fixture(t,{hook:({input})=>({items:input.items.map(item=>({id:item.id,translation:item.text,isTargetLanguage:false,detectedLanguage:'und'}))})});await f.service.create({jobId:'und-bypass',source,targetLang:'en'});await f.service.waitForIdle();const result=await f.service.getResult('und-bypass');assert.equal(result.job.status,'completed_with_warnings');assert.ok(result.translations.every(item=>item.status==='failed'));
+});
+test('closing an active model request aborts and restart stays paused without automatic model calls',async t=>{
+ let enter;const entered=new Promise(r=>enter=r);const f=await fixture(t,{hook:({signal})=>new Promise((resolve,reject)=>{enter();signal.addEventListener('abort',()=>reject(Object.assign(new Error('stopped'),{code:'INTERRUPTED'})),{once:true});})});await f.service.create({jobId:'interrupted',source,targetLang:'en'});await entered;await f.restart();assert.equal((await f.service.get('interrupted')).status,'paused');assert.equal(f.calls.length,1);assert.ok((await f.service.getResult('interrupted')).translations.every(item=>item.status==='pending'));
+});
+test('report sources freeze only collector fields and reject unfinished base jobs',async t=>{
+ const f=await fixture(t),module=await import('../server/translation-jobs.mjs'),{reportFixture}=await import('./business-report-fixtures.mjs'),{collectReportTranslationFields}=await import('../public/report-locale.mjs'),baseReport=reportFixture(),expected=collectReportTranslationFields(baseReport.snapshot,baseReport.enrichment);let complete=false;
+ await f.service.close();let service=await module.createTranslationJobs({dataDir:f.dir,store:f.store,modelConfig:f.modelConfig,client:f.client,retryDelayMs:1,reportJobs:{getResult:async()=>({...copy(baseReport),job:{id:'base-report',status:complete?'completed_with_warnings':'running',snapshotFingerprint:'f'.repeat(64),sourceRevision:5}})}});t.after(()=>service.close());
+ await assert.rejects(service.create({jobId:'report-derived',source:{kind:'report',jobId:'base-report'},targetLang:'en'}),error=>error.status===409);assert.equal(f.calls.length,0);complete=true;await service.create({jobId:'report-derived',source:{kind:'report',jobId:'base-report'},targetLang:'en'});await service.waitForIdle();const result=await service.getResult('report-derived');assert.deepEqual(result.sourceSnapshot.fields,expected);assert.deepEqual(result.translations.map(item=>({id:item.id,text:item.sourceText})),expected);assert.ok(!Object.hasOwn(result.sourceSnapshot.data,'records'));
+});
+test('restart reconciles a committed output before dispatch after a crash between result and job metadata writes',async t=>{
+ const f=await fixture(t);await f.service.create({jobId:'crash-checkpoint',source,targetLang:'en'});await f.service.waitForIdle();const count=f.calls.length;await f.service.close();const file=path.join(f.dir,'content-translations','crash-checkpoint','job.json'),job=JSON.parse(await fs.readFile(file,'utf8'));job.status='running';job.units[0].status='running';delete job.units[0].resultSha256;job.units[0].history=[];await fs.writeFile(file,JSON.stringify(job));await fs.unlink(path.join(path.dirname(file),'n1-a1.json'));
+ await f.restart();assert.equal((await f.service.get('crash-checkpoint')).status,'paused');assert.equal((await f.service.get('crash-checkpoint')).nodes[0].status,'completed');await f.service.resume('crash-checkpoint');await f.service.waitForIdle();assert.equal((await f.service.get('crash-checkpoint')).status,'completed');assert.equal(f.calls.length,count);const detail=await f.service.getNode('crash-checkpoint','n1');assert.ok(detail.input.items.length&&detail.output.items.length);assert.equal(detail.attempts[0].recovered,true);
+});
+test('all frozen request options are preserved during a run and any changed option blocks resume',async t=>{
+ let enter,release;const entered=new Promise(r=>enter=r),gate=new Promise(r=>release=r);let first=true;const f=await fixture(t,{hook:async({input})=>{if(first){first=false;enter();await gate;}return answer(input);}});await f.service.create({jobId:'frozen-options',source,targetLang:'en'});await entered;f.setConfig({model:'changed-mid-run',timeoutMs:150000});await f.service.pause('frozen-options');release();await f.service.waitForIdle();assert.ok(f.calls.every(call=>call.config.model==='fixture'&&call.config.timeoutMs===120000));await assert.rejects(f.service.resume('frozen-options'),error=>error.status===409);f.setConfig({model:'fixture',timeoutMs:120000});await f.service.resume('frozen-options');await f.service.waitForIdle();assert.equal((await f.service.get('frozen-options')).status,'completed');
+});
+test('duplicate accepted creation returns the same job without replay and task scope excludes unrelated sessions',async t=>{
+ const f=await fixture(t),doc=document();doc.state.sessions.push({...copy(doc.state.sessions[0]),id:'S-OTHER',taskId:'TASK-OTHER',turns:[{id:1,text:'UNRELATED_SOURCE_MUST_NOT_LEAVE'}]});f.setDoc(doc);const input={jobId:'duplicate',source:{kind:'task',taskId:'TASK-1'},targetLang:'en'};await f.service.create(input);await f.service.waitForIdle();const count=f.calls.length;const job=await f.service.create(input);await f.service.waitForIdle();assert.equal(job.id,'duplicate');assert.equal(f.calls.length,count);assert.ok(!JSON.stringify(await f.service.getResult('duplicate')).includes('UNRELATED_SOURCE_MUST_NOT_LEAVE'));
+});
+test('the inherited Ark translation transport honors both auth modes and frozen request options',async t=>{
+ const f=await fixture(t),{createArkClient}=await import('../server/ark-client.mjs'),{createTranslationJobs}=await import('../server/translation-jobs.mjs'),sent=[];await f.service.close();const client=createArkClient({fetchImpl:async(url,options)=>{sent.push({url,headers:options.headers,body:JSON.parse(options.body),providerConfig:options.providerConfig});const input=JSON.parse(sent.at(-1).body.messages[1].content).input;return new Response(JSON.stringify({choices:[{finish_reason:'stop',message:{content:JSON.stringify(answer(input)),reasoning_content:'DO_NOT_SAVE_REASONING'}}]}),{status:200,headers:{'Content-Type':'application/json'}});}});let service=await createTranslationJobs({dataDir:f.dir,store:f.store,modelConfig:f.modelConfig,client,retryDelayMs:1});t.after(()=>service.close());
+ f.setConfig({maxTokens:2000,reasoningEffort:'low',timeoutMs:1000});await service.create({jobId:'bearer',source,targetLang:'en'});await service.waitForIdle();assert.equal((await service.get('bearer')).status,'completed');assert.ok(sent.every(call=>call.url==='http://127.0.0.1:1/v1/chat/completions'&&call.headers.Authorization==='Bearer SYNTHETIC_KEY_NOT_SAVED'&&call.providerConfig.timeoutMs===1000&&call.body.max_tokens===2000&&call.body.reasoning_effort==='low'));
+ const count=sent.length;f.setConfig({authMode:'none',apiKey:'OLD_KEY_MUST_NOT_SEND'});await service.create({jobId:'none',source,targetLang:'en'});await service.waitForIdle();assert.equal((await service.get('none')).status,'completed');assert.ok(sent.slice(count).every(call=>!Object.hasOwn(call.headers,'Authorization')));assert.ok(!JSON.stringify(await service.getResult('none')).includes('DO_NOT_SAVE_REASONING'));
+});
+test('English translations preserve source brand names and proper names while requiring English prose',async t=>{
+ for(const [original,translated]of [['华为 Pura P70手机已准备好。','The 华为 Pura P70 phone is ready.'],['服务代表 محمد 已回复。','The agent محمد has replied.'],['客服 Иван 已回复。','Agent Иван has replied.'],['产品 α 已准备好。','The α product is ready.']])await t.test(original,async t=>{
+  const f=await fixture(t,{hook:({input})=>({items:input.items.map(item=>({id:item.id,translation:translated,isTargetLanguage:false,detectedLanguage:'mixed'}))})}),doc=document();doc.state.tasks[0].name='';doc.state.tasks[0].basisSnapshot={rules:[],policies:[]};doc.state.sessions=[{id:'S-1',taskId:'TASK-1',turns:[{id:1,text:original}],aiResults:[],review:{drafts:{}}}];f.setDoc(doc);await f.service.create({jobId:'retained-name',source,targetLang:'en'});await f.service.waitForIdle();const result=await f.service.getResult('retained-name');assert.equal(result.job.status,'completed');assert.equal(result.translations[0].text,translated);
+ });
+});
+test('English translation validation rejects unchanged Chinese with a product ID and invented foreign names',async t=>{
+ for(const translated of ['华为 P70手机已准备好。','The Apple phone by Иван is ready.'])await t.test(translated,async t=>{const f=await fixture(t,{hook:({input})=>({items:input.items.map(item=>({id:item.id,translation:translated,isTargetLanguage:false,detectedLanguage:'zh'}))})}),doc=document();doc.state.tasks[0].name='';doc.state.tasks[0].basisSnapshot={rules:[],policies:[]};doc.state.sessions=[{id:'S-1',taskId:'TASK-1',turns:[{id:1,text:'华为 P70手机已准备好。'}],aiResults:[],review:{drafts:{}}}];f.setDoc(doc);await f.service.create({jobId:'false-english',source,targetLang:'en'});await f.service.waitForIdle();assert.equal((await f.service.get('false-english')).status,'completed_with_warnings');});
+});

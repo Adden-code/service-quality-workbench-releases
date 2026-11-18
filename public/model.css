@@ -1,0 +1,24 @@
+.modal.model-settings{width:min(600px,calc(100vw - 32px))}
+.model-config-status{margin-bottom:20px}
+.model-settings .field-group{margin-bottom:18px}
+.model-settings .model-endpoint{font-size:12px;color:var(--text-muted,#6a736e);background:var(--surface-soft,#f5f7f5)}
+.model-feedback{font-size:12px;line-height:1.7;color:var(--success,#39775f);min-height:20px;overflow-wrap:anywhere}
+.model-advanced{border-top:1px solid var(--border,#e5e8e5);padding-top:14px;margin:6px 0 16px}.model-advanced>summary{cursor:pointer;font-weight:600;font-size:13px;margin-bottom:14px}.model-option-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.model-settings [hidden]{display:none!important}.model-settings .modal-body{overflow-y:auto}.model-settings .model-endpoint{color:var(--ink,#263245)}
+@media(max-width:480px){.model-option-grid{grid-template-columns:1fr;gap:0}}
+.ai-task-status{display:block;margin-top:5px;font-size:11px;line-height:1.5;max-width:200px;overflow-wrap:anywhere}
+.ai-execution{padding:10px 16px;border-bottom:1px solid var(--border,#e5e8e5);background:var(--surface-soft,#f8faf8);font-size:11px;line-height:1.6}
+.ai-execution .ai-model{margin-left:8px;color:var(--text-muted,#6a736e);overflow-wrap:anywhere}
+.ai-execution p{margin:7px 0 0;color:var(--text-muted,#6a736e)}
+.ai-execution.failed p{color:var(--danger,#a24d42)}
+.ai-audit{margin-top:6px;color:var(--text-muted,#6a736e)}
+.ai-audit summary{cursor:pointer;width:fit-content}
+.ai-audit dl{display:grid;grid-template-columns:72px minmax(0,1fr);gap:3px 8px;margin:8px 0 0}
+.ai-audit dd{margin:0;overflow-wrap:anywhere}
+.ai-original-evidence{margin-top:12px}
+.ai-original-evidence .evidence-chips{margin-top:8px}
+.human-result-reason{display:block;margin-top:6px;font-weight:400}
+.task-actions .text-btn:disabled{opacity:.6;cursor:wait}
+.compact-workspace-switch{display:none}
+.rule-source-record{margin:16px 22px;padding:14px;border:1px solid var(--line,#dfe3e9);border-radius:12px;font-size:12px;overflow-wrap:anywhere}.rule-source-record summary{cursor:pointer;font-weight:600}.rule-source-record blockquote{white-space:pre-wrap;margin:10px 0;padding:10px;background:#f6f8fb;border-radius:8px}
+@media(max-width:760px){.top-tools>.demo-chip{display:none}.compact-workspace-switch{display:block;max-width:112px;min-height:34px;padding:5px 7px;border:1px solid var(--line,#dfe3e9);border-radius:9px;background:#ffffffc7;color:var(--ink,#263245);font:inherit;font-size:10px}}
+@media(max-width:600px){.model-settings .modal-footer{align-items:flex-start;gap:12px;flex-direction:column}.model-settings .modal-footer>div{width:100%;justify-content:flex-end}}

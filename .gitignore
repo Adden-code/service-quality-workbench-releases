@@ -1,0 +1,14 @@
+node_modules/
+tests/artifacts/
+data/
+.env*
+*.log
+outputs/
+spring-ai-worker/target/
+packaging/runtime/
+*.exe
+*.jar
+*.zip
+*.sqwb
+*.class
+__pycache__/

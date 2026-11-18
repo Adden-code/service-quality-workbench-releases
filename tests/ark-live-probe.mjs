@@ -1,0 +1,36 @@
+// Explicit opt-in only. This file is not matched by the ordinary unit tests.
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import {fileURLToPath} from 'node:url';
+import {createWorkbenchServer} from '../server.mjs';
+import {createModelConfig} from '../server/model-config.mjs';
+import {createInitialState,createImportedTask} from '../public/domain.mjs';
+import {createCatalog} from '../public/catalog.mjs';
+import {createBasisSnapshot} from '../public/task-basis.mjs';
+if(!process.argv.includes('--live'))throw new Error('必须显式传入 --live 才会进行一次真实模型请求。');
+const project=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
+const output=await fs.mkdtemp('D:/Codex project/outputs/service-quality-ark-integration-20261029/live-');
+const modelConfig=await createModelConfig({dataDir:path.join(project,'data')});
+if(!modelConfig.publicConfig().configured)throw new Error('本机尚未配置密钥。');
+const server=await createWorkbenchServer({dataDir:path.join(output,'workspace'),modelConfig});
+await new Promise(r=>server.listen(0,'127.0.0.1',r));
+const origin=`http://127.0.0.1:${server.address().port}`;
+const workspace=await(await fetch(origin+'/api/workspace')).json();
+const headers={Origin:origin,'Content-Type':'application/json','X-Workspace-Token':workspace.token};
+const raw={format:'SERVICE_QUALITY_INPUT_V1',sessions:[{id:'LIVE-FICTION-001',scene:'新品产品咨询',startedAt:'2026-10-01T09:00:00+08:00',topic:'虚构新品颜色咨询',channel:'虚构渠道',product:'澄光X2（虚构）',agent:'客服乙（虚构）',customer:'客户甲（虚构）',completeness:'完整',missingNote:'',turns:[{id:1,role:'客户',speaker:'客户甲（虚构）',at:'',text:'这款澄光X2有哪些颜色？'},{id:2,role:'客服',speaker:'客服乙（虚构）',at:'',text:'我需要先核对正式产品资料后再向您说明，避免给您错误信息。'}]}]};
+await fs.writeFile(path.join(output,'fictional-input.json'),JSON.stringify(raw,null,2));
+const sourceResponse=await fetch(origin+'/api/sources',{method:'POST',headers:{...headers,'Content-Type':'application/octet-stream','X-File-Name':'fictional-input.json'},body:JSON.stringify(raw)});
+const source=await sourceResponse.json(),catalog=createCatalog();
+const state=createImportedTask(createInitialState(),{name:'方舟真实连通验证（虚构材料）',fileName:'fictional-input.json',source,sessions:raw.sessions,basisSnapshot:createBasisSnapshot(catalog,{effectiveDate:'2026-10-29',ruleIds:['R004']}),reviewer:'验证审核员（虚构）'});
+let response=await fetch(origin+'/api/workspace',{method:'PUT',headers,body:JSON.stringify({baseRevision:0,mutationId:'live-fixture',state,catalog})});
+if(!response.ok)throw new Error('虚构任务保存失败。');
+const runId=crypto.randomUUID();response=await fetch(`${origin}/api/ai/tasks/${state.tasks[0].id}`,{method:'POST',headers,body:JSON.stringify({runId})});
+if(!response.ok)throw new Error('真实验证任务启动失败。');
+console.log(JSON.stringify({phase:'requesting',origin,output,model:modelConfig.publicConfig().model,cases:1}));
+await server.waitForAiIdle();
+const saved=await(await fetch(origin+'/api/workspace')).json(),task=saved.state.tasks.find(t=>t.id===state.tasks[0].id),session=saved.state.sessions.find(s=>s.taskId===task.id);
+const result={phase:'finished',origin,output,taskId:task.id,sessionId:session.id,status:task.aiStatus,executionStatus:session.aiExecution?.status,modelId:session.aiExecution?.modelId,requestId:session.aiExecution?.requestId,runId,usage:session.aiExecution?.usage,errorCode:session.aiExecution?.errorCode,error:session.aiExecution?.error,resultsCount:session.aiResults.length,verdict:session.aiResults[0]?.verdict,humanStatus:session.review.status};
+await fs.writeFile(path.join(output,'live-probe.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));
+if(process.argv.includes('--preview')){
+  console.log('ISOLATED_PREVIEW_READY');for(const signal of ['SIGTERM','SIGINT'])process.once(signal,()=>server.close(()=>{process.exitCode=0;}));
+}else await new Promise(r=>server.close(r));

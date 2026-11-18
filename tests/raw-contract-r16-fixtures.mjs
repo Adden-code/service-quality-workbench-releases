@@ -1,0 +1,10 @@
+import {createHash} from 'node:crypto';
+
+export const hashText=value=>createHash('sha256').update(value,'utf8').digest('hex');
+export function rawSession(text='Customer: Return?\nAgent: Check the policy.\nمرحبا 😀\nRepeat. Repeat.',extra={}){
+ const id=extra.id??'SYN-ROW-2';
+ return {id,externalId:'SYN-EXT-1',scene:'新品咨询',agent:'Synthetic agent',product:'Synthetic product',inputMode:'raw-transcript-v1',evidenceContractVersion:'raw-text-quote-v1',turns:[],startedAt:'',completeness:'未核验',...extra,rawTranscript:{schemaVersion:1,text,textSha256:hashText(text),fileSha256:'a'.repeat(64),sheet:'Synthetic sheet',sheetIndex:1,headerRow:1,row:2,columns:{id:1,agent:2,text:3},headers:['会话ID','客服','消息详情'],raw:['SYN-EXT-1','Synthetic agent',text],timePolicy:{mode:'explicit',timezone:'+08:00'},...(extra.rawTranscript||{})}};
+}
+export function rawBasis(){return {capturedAt:'2026-11-12T00:00:00Z',effectiveDate:'2026-11-12',rules:[{id:'SYN-R1',title:'Policy compliance',version:'V1',category:'Accuracy',scope:'All',passCriteria:'Check stated conditions',failCriteria:'Unconditional promise contrary to policy',exceptionCriteria:'Explain insufficient evidence or inapplicable scope',policyIds:['SYN/P1']},{id:'SYN-R2',title:'Clarity',version:'V1',category:'Communication',scope:'All',passCriteria:'Clear response',failCriteria:'Unclear response',exceptionCriteria:'Explain insufficient evidence or inapplicable scope',policyIds:[]}],policies:[{id:'SYN/P1',version:'V1',title:'Synthetic policy',sections:[{id:'S#1',title:'Conditions',text:'Check all stated return conditions.'}]}]};}
+export function rawWire(session=rawSession()){return {recordId:session.id,results:[{ruleId:'SYN-R1',verdict:'符合',reason:'The reply requests the frozen policy check.',evidenceQuotes:[{quote:'Check the policy.'}],turnRefs:['Estimated agent turn 2'],referenceIds:['SYN%2FP1@V1#S%231'],confidence:0.96,conflictsWith:[]},{ruleId:'SYN-R2',verdict:'符合',reason:'The reply states a clear next step.',evidenceQuotes:[{quote:'Check the policy.'}],turnRefs:[],referenceIds:[],confidence:0.94,conflictsWith:[]}]};}
+export const inspectionAt='2026-11-12T08:00:00+08:00';

@@ -1,0 +1,21 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import {once} from 'node:events';
+import {createWorkbenchServer} from '../server.mjs';
+import {createBusinessState} from '../public/domain.mjs';
+import {createCatalog} from '../public/catalog.mjs';
+import {decodeWorkspaceArchive} from '../server/workspace-archive.mjs';
+test('HTTP migration saves a complete restorable backup, keeps old data, serializes edits and blocks forged config saves',async t=>{
+ const scratch=path.resolve('tests/artifacts/scene-config-api');await fs.mkdir(scratch,{recursive:true});const dataDir=await fs.mkdtemp(path.join(scratch,'case-'));const app=await createWorkbenchServer({dataDir,catalogSeed:null});app.listen(0,'127.0.0.1');await once(app,'listening');const origin=`http://127.0.0.1:${app.address().port}`;let backupPath;
+ t.after(async()=>{await new Promise(r=>app.close(r));assert.ok(dataDir.startsWith(scratch+path.sep));await fs.rm(dataDir,{recursive:true,force:true});if(backupPath){assert.ok(backupPath.startsWith(dataDir+'.scene-before-'));await fs.unlink(backupPath);}});
+ const first=await(await fetch(origin+'/api/workspace')).json();const headers={Origin:origin,'Content-Type':'application/json','X-Workspace-Token':first.token};
+ const api=async(url,input)=>{const r=await fetch(origin+url,{method:'POST',headers,body:JSON.stringify(input)});return{status:r.status,value:await r.json()};};
+ const init=await fetch(origin+'/api/workspace',{method:'PUT',headers,body:JSON.stringify({baseRevision:0,mutationId:'init',state:createBusinessState(),catalog:createCatalog()})});assert.equal(init.status,200);const original=await init.json();
+ const migration=await api('/api/scene-config',{action:'migrate',actor:'合成操作人',reason:'合成回归'});assert.equal(migration.status,200,JSON.stringify(migration.value));backupPath=migration.value.backupPath;assert.ok(backupPath);const backup=decodeWorkspaceArchive(await fs.readFile(backupPath));assert.deepEqual(backup.document.state,original.state);assert.deepEqual(migration.value.state.tasks,original.state.tasks);
+ const repeat=await api('/api/scene-config',{action:'migrate'});assert.equal(repeat.value.revision,migration.value.revision);
+ const opened=await api('/api/scene-config',{action:'create',sceneId:'新品产品咨询',operationId:'create-test',actor:'合成操作人',reason:'编辑测试'});assert.equal(opened.status,200,JSON.stringify(opened.value));const draft=opened.value.state.scenePackageDrafts[0];
+ const writes=await Promise.all(['a','b'].map(id=>api('/api/scene-config',{action:'save',draftId:draft.id,expectedRevision:draft.revision,package:draft.package,operationId:id,actor:'合成操作人',reason:id})));assert.deepEqual(writes.map(r=>r.status).sort(),[200,409]);
+ const saved=await(await fetch(origin+'/api/workspace')).json();const forged=structuredClone(saved.state);forged.sceneConfigurations[0].reason='伪造';const response=await fetch(origin+'/api/workspace',{method:'PUT',headers,body:JSON.stringify({baseRevision:saved.revision,mutationId:'forged',state:forged,catalog:saved.catalog})});assert.equal(response.status,400);assert.match((await response.json()).error,/事务/);
+});

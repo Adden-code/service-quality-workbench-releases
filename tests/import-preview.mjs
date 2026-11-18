@@ -1,0 +1,22 @@
+// Explicit GUI harness: mock by default; --live enables only user-triggered model actions.
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import {fileURLToPath} from 'node:url';
+import {createWorkbenchServer} from '../server.mjs';
+import {createModelConfig} from '../server/model-config.mjs';
+import {workbook} from '../public/io.mjs';
+const project=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
+const output=await fs.mkdtemp('D:/Codex project/outputs/service-quality-import-adaptation-20261029/preview-');
+const live=process.argv.includes('--live');
+const modelConfig=live?await createModelConfig({dataDir:path.join(project,'data')}):{publicConfig:()=>({configured:true,keyConfigured:true,model:'glm-5.3-flash'}),getPrivate:()=>({apiKey:'fictional-mock-only',model:'glm-5.3-flash'})};
+const calls={inspect:0,prepare:0};
+const mock={inspect:async({session,basis})=>{calls.inspect++;return{results:basis.rules.map(r=>({ruleId:r.id,verdict:'符合',reason:'虚构低星评价，回复表达理解并回应内容。',evidence:[1,2],referenceIds:[],fieldEvidence:(session.contextFields||[]).map(f=>f.key)})),modelId:'mock-model',promptVersion:'qa-ark-v2'};},prepareRules:async({input})=>{calls.prepare++;return{candidates:[{title:'低星评价回应（虚构）',category:'沟通与服务',scope:'电商评论回复，评价星级1或2',passCriteria:'先表达理解或歉意，再回应评论。',failCriteria:'低星条件触发但未表达理解或歉意。',exceptionCriteria:'3至5星不适用，缺少星级无法判定。',sourceQuote:input.text,sourceLocator:{start:0,end:input.text.length},warnings:[]}],modelId:'mock-model',promptVersion:'rule-preparation-ark-v1'};}};
+await fs.writeFile(path.join(output,'评论原表_虚构.xlsx'),await workbook([{name:'评价记录',headers:['评价号','时间','客户评价','店铺回复','星数','内部备注'],rows:[['FICTION-PAIR-01','2026-10-29 09:00:00','这款虚构X2的颜色选择少，给1星。','理解您对颜色选择的期待，我们会反馈建议，颜色以产品页面为准。',1,'此列只留存，不参与质检']]}]));
+await fs.writeFile(path.join(output,'咨询原表_虚构.xlsx'),await workbook([{name:'聊天导出',headers:['聊天号','会话时间','说话人','消息','型号'],rows:[['FICTION-TURNS-01','2026-10-29 09:30:00','访客','虚构X2有哪些颜色？','虚构X2'],['FICTION-TURNS-01','2026-10-29 09:30:00','坐席','我先核对正式产品资料后说明。','虚构X2']]}]));
+const ruleText='规则名称：低星评价回应（虚构）。类别：沟通与服务。适用范围：电商评论回复，评价星级为1或2。符合标准：客服先表达理解或歉意，再回应评论。不符合标准：已触发低星条件但未表达理解或歉意。例外及无法判定：3至5星不适用，缺少星级无法判定。';
+await fs.writeFile(path.join(output,'规则文字_虚构.txt'),ruleText);
+const server=await createWorkbenchServer({dataDir:path.join(output,'workspace'),modelConfig,...(!live?{arkClient:mock}:{})});
+await new Promise(r=>server.listen(0,'127.0.0.1',r));
+const safe={origin:`http://127.0.0.1:${server.address().port}`,output,mode:live?'live':'mock',ruleText};
+await fs.writeFile(path.join(output,'preview.json'),JSON.stringify(safe,null,2));console.log(JSON.stringify(safe));
+for(const signal of ['SIGINT','SIGTERM'])process.once(signal,()=>server.close(()=>{console.log(JSON.stringify({closed:true,mode:safe.mode,calls}));process.exitCode=0;}));

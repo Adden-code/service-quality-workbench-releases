@@ -1,0 +1,20 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import {execFile} from 'node:child_process';
+import {promisify} from 'node:util';
+import {pathToFileURL} from 'node:url';
+import {workbook} from '../public/io.mjs';
+test('standalone package verifies its first cleaned XLSX source using only the bundled vendor',async t=>{
+ const parent=path.resolve('tests/.onboarding-scratch');await fs.mkdir(parent,{recursive:true});const root=await fs.mkdtemp(path.join(parent,'standalone-zip-'));
+ t.after(async()=>{assert.ok(root.startsWith(parent+path.sep));await fs.rm(root,{recursive:true,force:true});});
+ await fs.cp(new URL('../public',import.meta.url),path.join(root,'public'),{recursive:true});await fs.mkdir(path.join(root,'server'));
+ await fs.copyFile(new URL('../server/conversation-cleaning-source.mjs',import.meta.url),path.join(root,'server/conversation-cleaning-source.mjs'));
+ const text='2026-11-11T09:00:00+08:00 Customer: synthetic source';
+ const bytes=await workbook([{name:'Raw',headers:['会话ID','客服','消息详情'],rows:[['SYN-ZIP','Synthetic agent',text]]}]);await fs.writeFile(path.join(root,'raw.xlsx'),bytes);
+ const report={scene:'新品产品咨询',sheet:'Raw',headerRow:1,columns:{id:'会话ID',agent:'客服',text:'消息详情'},timezone:'',rows:[{row:2,original:{id:'SYN-ZIP',agent:'Synthetic agent',text}}]};await fs.writeFile(path.join(root,'report.json'),JSON.stringify(report));
+ await fs.writeFile(path.join(root,'deny-npm.mjs'),`export async function resolve(specifier,context,next){if(specifier==='jszip')throw new Error('No npm jszip exists in the installation payload');return next(specifier,context);}`);
+ await fs.writeFile(path.join(root,'probe.mjs'),`import assert from 'node:assert/strict';import fs from 'node:fs/promises';import {validateCleaningSource} from './server/conversation-cleaning-source.mjs';import {inspectConversationCleaningFile} from './public/conversation-cleaning.mjs';assert.equal(globalThis.JSZip,undefined);const bytes=await fs.readFile(new URL('./raw.xlsx',import.meta.url)),report=JSON.parse(await fs.readFile(new URL('./report.json',import.meta.url),'utf8')),source={name:'raw.xlsx',size:bytes.length};const inspected=await inspectConversationCleaningFile({...source,arrayBuffer:async()=>bytes},{scene:report.scene});assert.equal(inspected.valid,true,inspected.errors.join('; '));assert.equal(await validateCleaningSource(report,bytes,source),true);report.rows[0].original.text='forged';await assert.rejects(validateCleaningSource(report,bytes,source),/原文|原件/);console.log('STANDALONE_FIRST_CLEANING_OK');`);
+ const result=await promisify(execFile)(process.execPath,['--no-warnings','--loader',pathToFileURL(path.join(root,'deny-npm.mjs')).href,path.join(root,'probe.mjs')],{windowsHide:true,timeout:15000,maxBuffer:20000});assert.match(result.stdout,/STANDALONE_FIRST_CLEANING_OK/);
+});
