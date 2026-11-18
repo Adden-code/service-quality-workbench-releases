@@ -1,5 +1,17 @@
 # 会话质检工作台
 
+## 0.11.11 审核与引文标注候选版 · 完整内置
+
+**[免登录下载完整安装包（17条规则＋两场景）](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.11-full/QualityWorkbench-0.11.11-Full-Setup-Windows-x64.exe)**
+
+[发布与验收说明](https://github.com/Adden-code/service-quality-workbench-releases/releases/tag/v0.11.11-full) · [升级指引](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.11-full/Hotfix-Guide-zh.txt) · [SHA256](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.11-full/SHA256.txt) · [运行源码提交](https://github.com/Adden-code/service-quality-workbench-releases/commit/08fc6b00e9c1a5a4b08e7c2e9f501a27c3947813)
+
+引文定位失败保留字段合法的AI结论与能力值，标注依据未核验，进入普通待确认；不因引文单独失败熔断。未核验及其依赖规则仍不能进入B6标定或免审。人工待办计数排除派生汇总项，支持可记忆分栏/全宽/字号；移除审核调试JSON；新增导出核验状态与逐规则审计。
+
+2576项测试通过、0失败、1既有环境跳过；实际安装的种子、升级、浏览器人工确认、两场景双语导出、34行重复话术和123行旧暂停续跑回归通过。包内Node→Java使用本机合成HTTP替身，未调用外部模型；内网真实效果待复测。
+
+安装器97720896字节；SHA256：`d4781afff04e900d7292318f806a2e01cea3ec329d4e063bd2a39977317ca437`。7附件匿名完整下载核验。源码分支`source-v0.11.11`；构建`0.11.11-75ddc8604b84db94`。含授权公开的规则和示例，不含真实批次、工作区或密钥。
+
 ## 0.11.10 需求六修复候选版 · 完整内置
 
 **[免登录下载完整安装包（17条规则＋两场景）](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.10-full/QualityWorkbench-0.11.10-Full-Setup-Windows-x64.exe)**
