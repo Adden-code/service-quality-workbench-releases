@@ -21,7 +21,7 @@ test('Arabic auxiliary contract declares all required fields and sends JSON mode
  let sent;const client=createArkClient({fetchImpl:async(_,o)=>{sent=JSON.parse(o.body);return response(body('intent'));}});
  const out=await client.inspectSceneCapability({config,input});assert.equal(out.value.labelId,'price');assert.equal(sent.response_format.type,'json_object');assert.ok(sent.messages[0].content.includes('required'));
  assert.throws(()=>parseSceneCapability(JSON.stringify({status:'uncertain',confidence:0,reason:'unknown',evidence:[]}),input),/字段/);
- assert.throws(()=>parseSceneCapability(JSON.stringify({...body('intent'),evidence:[{...evidence[0],end:2}]}),input),/引文/);
+ assert.equal(parseSceneCapability(JSON.stringify({...body('intent'),evidence:[{...evidence[0],end:2}]}),input).evidence[0].end,text.length);assert.throws(()=>parseSceneCapability(JSON.stringify({...body('intent'),evidence:[{...evidence[0],quote:'Different source'}]}),input),/引文/);
 });
 test('Arabic omissions get two correction retries, distinct validation traces and all three tags recover',async()=>{
  const attempts={},seen=[],traces=[];const client=createArkClient({fetchImpl:async(_,o)=>{const req=JSON.parse(o.body),input=JSON.parse(req.messages[1].content),key=input.capability;seen.push(req);attempts[key]=(attempts[key]||0)+1;return response(attempts[key]<3?{results:[]}:body(key));}});

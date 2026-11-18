@@ -357,10 +357,13 @@ export function validateWorkspace(state,catalog,previous=null,{authenticateNewSn
     if(session.aiResults.some(result=>result.timeFacts!==undefined&&(!stageA||result.ruleId!=='EC-TIME'))||Object.values(session.review.drafts).some(result=>result.timeFacts!==undefined&&(!stageA||result.ruleId!=='EC-TIME')))fail('时效事实只能属于阶段A的本地时效结果。');
     if(stageA&&timeResult){
       const run=[task.aiRun,...(task.aiRunHistory||[])].find(run=>run?.id===session.aiExecution?.runId);
-      let expected;try{expected=computeEcommerceTimeFacts(session,basis,{inspectionAt:run?.inspectionAt,runtime:task.executionSnapshot?.runtime});}catch{fail('阶段A时效事实无法按冻结配置重算。');}
+      const frozen=session.sceneCapabilities?.judgmentClassificationSnapshot;
+      if(frozen&&(!isBusinessEcommerceBasis(basis)||!object(frozen)||Object.keys(frozen).length!==2||frozen.runId!==session.aiExecution?.runId||!Object.hasOwn(frozen,'output')||frozen.output!==null&&!object(frozen.output)))fail('时效判定的原分类快照无效。');
+      const timeSession=frozen?{...session,sceneCapabilities:{...session.sceneCapabilities,outputs:{...session.sceneCapabilities.outputs,ecommerceClassification:frozen.output}}}:session;
+      let expected;try{expected=computeEcommerceTimeFacts(timeSession,basis,{inspectionAt:run?.inspectionAt,runtime:task.executionSnapshot?.runtime});}catch{fail('阶段A时效事实无法按冻结配置重算。');}
       const verdict=expected.outcome==='pass'?'符合':expected.outcome==='fail'?'不符合':expected.outcome==='na'?'不适用':'无法判定';
       if(!run?.inspectionAt||!equal(timeResult.timeFacts,expected)||timeResult.verdict!==verdict||!equal(timeResult.referenceIds,timePolicyReferences(basis)))fail('阶段A时效事实、判定或专用政策依据与原来源和冻结配置重算不一致。');
-      for(const draft of Object.values(session.review.drafts))if(draft.timeFacts!==undefined&&!equal(draft.timeFacts,expected))fail('人工接受的时效事实与原来源及冻结配置重算不一致。');
+      for(const draft of Object.values(session.review.drafts))if(draft.timeFacts!==undefined&&!equal(draft.timeFacts,expected)&&!(frozen&&draft.source!=='AI接受'&&equal(draft.timeFacts,computeEcommerceTimeFacts(session,basis,{inspectionAt:run?.inspectionAt,runtime:task.executionSnapshot?.runtime}))))fail('人工接受的时效事实与原来源及冻结配置重算不一致。');
       if(expected.replyStatus==='unreplied'&&session.aiResults.some(result=>(!isBusinessEcommerceBasis(basis)||result.ruleId!=='EC-TIME')&&result.verdict!=='无法判定'))fail('未回复的内容检查未取得证据，不能保存虚假质量通过或不通过。');
     }
     if(session.review.disposition!==undefined){
@@ -432,6 +435,8 @@ export function validateWorkspace(state,catalog,previous=null,{authenticateNewSn
         if(isRawTranscriptSession(before))validateRawReviewTimeTransition(before,after,trustedAI);
         try{validatePendingResolutionTransition(before,after,previous,state,{trustedAI});}catch(error){fail(error.message);}
         if(trustedAI)try{validateDecisionHistoryTransition(before,after);}catch(error){fail(error.message);}
+        const oldClassification=before.sceneCapabilities?.judgmentClassificationSnapshot,newClassification=after.sceneCapabilities?.judgmentClassificationSnapshot;
+        if(!equal(oldClassification,newClassification)&&(oldClassification||!trustedAI||before.aiExecution?.status!=='completed'||!equal(before.aiResults,after.aiResults)||!equal(newClassification,{runId:before.aiExecution.runId,output:before.sceneCapabilities?.outputs?.ecommerceClassification??null})))fail('既有时效判定的分类依据只能由恢复流程原样冻结，不可改写。');
         if(!trustedAI&&!trustedCalibration)try{validateReturnTransition(before,after);}catch(error){fail(error.message);}
         const comparisonRecovery=trustedAI&&before.ecommerce&&before.review.status==='待审核'&&!Object.keys(before.review.drafts).length&&!before.review.notes?.trim()&&!before.review.history?.length&&before.aiResults.some(r=>r.ruleId==='EC-TARGET'&&r.comparisonAssessment?.status==='incomplete')&&after.aiExecution?.status==='completed'&&before.aiExecution.runId===after.aiExecution.runId&&equal(before.aiResults.filter(r=>r.ruleId!=='EC-TARGET'),after.aiResults.filter(r=>r.ruleId!=='EC-TARGET'));
         if(!comparisonRecovery&&before.aiDecision!==undefined&&before.aiExecution?.status==='completed'&&!equal(before.aiDecision,after.aiDecision))fail('已完成的AI终判审计记录不可改写。');

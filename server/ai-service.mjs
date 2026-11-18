@@ -82,7 +82,8 @@ function publishEcommerceCheckpoints(state,task){
  const q=task.aiQueue;if(!q?.comparison)return;
  const comparison=mergeComparisonGroups(q.comparison,q.comparison.blocks),sessions=state.sessions.filter(s=>s.taskId===task.id);
  q.comparison.groups=comparison.groups;
- const merged=mergeEcommerceResults({sessions,semanticResults:q.rows.filter(r=>r.semanticResult).map(r=>({sessionId:r.sessionId,results:r.semanticResult.results})),duplicateGroups:comparison.groups,deterministic:{duplicateGroups:[]},allowPartial:true,basis:task.basisSnapshot,inspectionAt:task.aiRun.inspectionAt,runtime:task.executionSnapshot?.runtime,pendingComparisons:comparison.pendingBySession});
+ const judgmentSessions=sessions.map(s=>{const frozen=s.sceneCapabilities?.judgmentClassificationSnapshot;return frozen?{...s,sceneCapabilities:{...s.sceneCapabilities,outputs:{...s.sceneCapabilities.outputs,ecommerceClassification:frozen.output}}}:s;});
+ const merged=mergeEcommerceResults({sessions:judgmentSessions,semanticResults:q.rows.filter(r=>r.semanticResult).map(r=>({sessionId:r.sessionId,results:r.semanticResult.results})),duplicateGroups:comparison.groups,deterministic:{duplicateGroups:[]},allowPartial:true,basis:task.basisSnapshot,inspectionAt:task.aiRun.inspectionAt,runtime:task.executionSnapshot?.runtime,pendingComparisons:comparison.pendingBySession});
  for(const row of q.rows){const s=state.sessions.find(s=>s.id===row.sessionId),results=merged.get(row.sessionId);if(!results||human(s))continue;
   if(s.aiExecution?.status==='completed'&&canonical(s.aiResults)===canonical(results))continue;
   archiveFailedAIDecision(s);s.aiResults=copy(results);const result=row.semanticResult;
@@ -183,7 +184,10 @@ export async function createAiService(options={}){
      await step(`r${index}-recovery-persist`,{sessionId:session.id,outputs:repaired.outputs},async()=>{
       await update(taskId,(state,t)=>{const r=t.aiQueue.rows[index],s=state.sessions.find(s=>s.id===r.sessionId);if(human(s))return;
        const audit={at:now(),runId:job.id,before:Object.fromEntries(Object.entries(prior.outputs).map(([k,v])=>[k,v.status])),after:Object.fromEntries(Object.entries(repaired.outputs).map(([k,v])=>[k,v.status])),ruleResultsPreserved:true};
-       r.capabilityRecovery=[...(r.capabilityRecovery||[]),audit];r.sceneCapabilities=copy(repaired);s.sceneCapabilities=copy(repaired);
+       // A recovered classification must not retroactively change the inputs of
+       // an already saved EC-TIME judgment. Preserve that input for audit/replay.
+       const judgmentClassificationSnapshot=s.sceneCapabilities?.judgmentClassificationSnapshot||(s.ecommerce&&s.aiResults.some(v=>v.ruleId==='EC-TIME'&&v.timeFacts)?{runId:s.aiExecution.runId,output:copy(prior.outputs.ecommerceClassification??null)}:null);
+       r.capabilityRecovery=[...(r.capabilityRecovery||[]),audit];r.sceneCapabilities=copy(repaired);s.sceneCapabilities={...copy(repaired),...(judgmentClassificationSnapshot?{judgmentClassificationSnapshot}: {})};
        t.capabilityMonitor=recordCapabilityOutcomes(t.capabilityMonitor,s.id,repaired,t.executionSnapshot.configuration.failurePolicy);
        // Old failures remain in the window until repaired. Stop immediately if
        // a fresh exhausted failure confirms the breaker is still justified.
