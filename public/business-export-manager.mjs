@@ -1,5 +1,6 @@
 import {createBusinessDeliverySnapshot,buildBusinessDeliveryXlsx} from './business-delivery.mjs';
 import {buildBusinessReportHtml} from './business-report.mjs';
+import {sceneReportSizeWarning} from './scene-report-audit.mjs';
 import {businessExportView,businessTasks,businessTranslationSummary} from './business-export-view.mjs';
 import {createConsultationDeliverySnapshot,buildConsultationDeliveryXlsx,isConsultationTask} from './consultation-delivery.mjs';
 import {CUSTOMER_ONLY,CONVERSATION_UNVERIFIED,normalizeRoleEvidenceMode} from './role-evidence.mjs';
@@ -35,7 +36,8 @@ export function createBusinessExportManager({api,getState,getUI,onRender=()=>{},
     const allowed=tasks.find(t=>t.id===ui.businessTaskId)?.executionSnapshot?.runtime.values.outputLanguages;if(allowed?.length){if(!allowed.includes(ui.businessTargetLang))ui.businessTargetLang=allowed[0];if(!allowed.includes(ui.businessReportLanguage))ui.businessReportLanguage=allowed[0];}
     if(![CUSTOMER_ONLY,CONVERSATION_UNVERIFIED].includes(ui.businessRoleEvidenceMode)||!isConsultationTask(state,tasks.find(task=>task.id===ui.businessTaskId)))ui.businessRoleEvidenceMode=CUSTOMER_ONLY;
     const rawTask=tasks.find(task=>task.id===ui.businessTaskId)?.inputMode==='raw-transcript-v1';
-    return{taskId:ui.businessTaskId,conclusionMode:ui.businessConclusionMode,targetLang:ui.businessTargetLang,reportLanguage:ui.businessReportLanguage,roleEvidenceMode:rawTask?CONVERSATION_UNVERIFIED:ui.businessRoleEvidenceMode};
+    if(![2,3,4].includes(ui.businessConcurrency))ui.businessConcurrency=2;
+    return{concurrency:ui.businessConcurrency,taskId:ui.businessTaskId,conclusionMode:ui.businessConclusionMode,targetLang:ui.businessTargetLang,reportLanguage:ui.businessReportLanguage,roleEvidenceMode:rawTask?CONVERSATION_UNVERIFIED:ui.businessRoleEvidenceMode};
   }
   const keyOf=options=>`${options.taskId}|${options.conclusionMode}|${options.targetLang}|${options.reportLanguage||'zh'}|${options.roleEvidenceMode||CUSTOMER_ONLY}`;
   const matches=(job,options)=>job?.taskId===options.taskId&&(job.options?.conclusionMode||'combined')===options.conclusionMode&&(job.options?.targetLang||'zh')===options.targetLang&&(job.options?.roleEvidenceMode??CUSTOMER_ONLY)===(options.roleEvidenceMode??CUSTOMER_ONLY);
@@ -96,12 +98,12 @@ export function createBusinessExportManager({api,getState,getUI,onRender=()=>{},
           model.translationNotGenerated=true;return;
         }
         model.translationTriedKey=key;
-        try{answer=await translations.create({jobId:id,source:{kind:'report',jobId:model.job.id},targetLang:'en'});}
+        try{answer=await translations.create({jobId:id,source:{kind:'report',jobId:model.job.id},targetLang:'en',...(options.concurrency!==2?{concurrency:options.concurrency}:{})});}
         catch(createError){
           if(!current(version,options))return;
           // A definite config/source conflict cannot be overwritten. A fresh ID
           // creates a new derived view while preserving the older translation job.
-          if(createError.status===409){id=`report-en-${makeId().slice(7)}`;derivedIds.set(key,id);answer=await translations.create({jobId:id,source:{kind:'report',jobId:model.job.id},targetLang:'en'});}
+          if(createError.status===409){id=`report-en-${makeId().slice(7)}`;derivedIds.set(key,id);answer=await translations.create({jobId:id,source:{kind:'report',jobId:model.job.id},targetLang:'en',...(options.concurrency!==2?{concurrency:options.concurrency}:{})});}
           else{try{answer=await translations.get(id);}catch{throw createError;}}
         }
       }
@@ -178,7 +180,7 @@ export function createBusinessExportManager({api,getState,getUI,onRender=()=>{},
           await adopt(saved.job,version,options);notify(message('已找回上次保存的后台生成任务。','Recovered the saved background report job.'));return;
         }catch(error){if(!current(version,options)||aborted(error))return;if(error.status!==404)throw error;}
       }
-      try{answer=await request('/api/report-jobs',{method:'POST',body:{jobId,taskId:options.taskId,conclusionMode:options.conclusionMode,targetLang:options.targetLang,...(options.roleEvidenceMode===CONVERSATION_UNVERIFIED?{roleEvidenceMode:options.roleEvidenceMode}:{})}});}
+      try{answer=await request('/api/report-jobs',{method:'POST',body:{jobId,...(options.concurrency!==2?{concurrency:options.concurrency}:{}),taskId:options.taskId,conclusionMode:options.conclusionMode,targetLang:options.targetLang,...(options.roleEvidenceMode===CONVERSATION_UNVERIFIED?{roleEvidenceMode:options.roleEvidenceMode}:{})}});}
       catch(error){
         if(!current(version,options)||aborted(error))return;
         const definitive=error.status>=400&&error.status<500&&![408,429].includes(error.status);
@@ -240,7 +242,8 @@ export function createBusinessExportManager({api,getState,getUI,onRender=()=>{},
       await download(data,`${prefix}_${suffix}`,kind==='xlsx'?'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':'text/html;charset=utf-8');
       const completion=terminal(latestJob.status)?message('已下载本次冻结快照的业务交付文件；缺失内容会明确标记。','Downloaded the frozen report snapshot. Missing content is marked explicitly.'):message('已下载当前已保存结果；尚未完成的分析和译文会明确标记。','Downloaded the saved partial results. Incomplete analysis and translations are marked explicitly.');
       const translationSummary=businessTranslationSummary(enrichment.translationStats);
-      notify(translationSummary?`${completion} ${translationSummary}`:completion);
+      const sizeWarning=kind==='html'?sceneReportSizeWarning(data,options.reportLanguage):null;
+      notify([completion,translationSummary,sizeWarning?.message].filter(Boolean).join(' '),!!sizeWarning);
     }catch(error){if(current(version,options)&&!aborted(error)){model.error=errorMessage(error,'业务文件导出失败。','Could not export the business file.');notify(model.error,true);}}
     finally{if(current(version,options)){model.downloading=false;render();}}
   }
@@ -262,6 +265,7 @@ export function createBusinessExportManager({api,getState,getUI,onRender=()=>{},
       return true;
     },
     handleChange(id,value){
+      if(id==='business-concurrency'){const concurrency=Number(value);if(!disposed&&[2,3,4].includes(concurrency)&&!model.busy&&model.job?.status!=='running'){getUI().businessConcurrency=concurrency;render();}return true;}
       const fields={'business-task':'businessTaskId','business-conclusion-mode':'businessConclusionMode','business-target-lang':'businessTargetLang','business-report-language':'businessReportLanguage','business-role-evidence-mode':'businessRoleEvidenceMode'};
       if(disposed||!Object.hasOwn(fields,id))return false;const key=fields[id];
       if(key==='businessRoleEvidenceMode'&&getState().tasks.find(task=>task.id===getUI().businessTaskId)?.inputMode==='raw-transcript-v1')return false;

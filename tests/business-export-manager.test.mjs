@@ -8,6 +8,12 @@ async function implementation(){assert.ok(existsSync(managerUrl),'缺少业务�
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
 const button=dataset=>({dataset});
 
+test('delivery concurrency defaults to two, is configurable before generation, and stays frozen while running',async()=>{
+ const {createBusinessExportManager}=await implementation(),state=managerState(),ui=businessUI(),requests=[];let job;
+ const manager=createBusinessExportManager({api:async(path,options={})=>{if(options.method==='POST'){requests.push(options.body);job=summaryFixture({id:options.body.jobId,concurrency:options.body.concurrency??2,resultAvailable:false});return {job};}return {jobs:[]};},getState:()=>state,getUI:()=>ui,onRender:()=>{},download:()=>{},notify:()=>{},pollMs:100000});
+ try{manager.view(state,ui);assert.equal(ui.businessConcurrency,2);assert.match(manager.view(state,ui),/business-concurrency/);manager.handleChange('business-concurrency','3');await manager.handleAction('business-generate');assert.equal(requests.length,1);assert.equal(requests[0].concurrency,3);manager.handleChange('business-concurrency','4');assert.equal(ui.businessConcurrency,3);assert.match(manager.view(state,ui),/本次任务：3路/);}finally{manager.close();}
+});
+
 test('empty business view is useful without fictional examples or automatic model calls',async()=>{
   const {createBusinessExportManager}=await implementation();let calls=0;
   const manager=createBusinessExportManager({api:async()=>{calls++;return{jobs:[]};},getState:emptyBusinessState,getUI:businessUI,onRender:()=>{},download:()=>{},notify:()=>{}});
