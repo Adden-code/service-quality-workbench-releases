@@ -1,5 +1,17 @@
 # 会话质检工作台
 
+## 0.11.14 工作区增量同步与审核性能候选版 · 完整内置
+
+**[免登录下载完整安装包（17条规则＋两场景）](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.14-full/QualityWorkbench-0.11.14-Full-Setup-Windows-x64.exe)**
+
+[发布与验收说明](https://github.com/Adden-code/service-quality-workbench-releases/releases/tag/v0.11.14-full) · [升级指引](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.14-full/Hotfix-Guide-zh.txt) · [SHA256](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.14-full/SHA256.txt) · [源码提交](https://github.com/Adden-code/service-quality-workbench-releases/commit/562450b46d980a09edc483d7007c5de0f91d6362)
+
+含上一版评价归类修复；工作区按记录指纹增量传输、Web Worker解析与SHA核验，保存/重启/冲突恢复统一同步。审核列表50条、执行明细25条、轨迹50节点分页及选中快照读取；同步分片512KiB，响应体积可监控。首次仍按分片构造本机状态缓存，旧接口保留兼容。
+
+实际安装版以9任务430会话、180行审核批次验证27MB/44MB合成工作区，两组各40次保存均低于500ms；重启、丢回执、双标签冲突、分页及完整轨迹导出通过。零外部模型调用，内网真实环境待复测。升级后刷新旧标签页，无需重新装载场景。
+
+安装器97736596字节；SHA256：`de06446baca90d5194bc0b5238ff381919c094c45f491b9cc9ca298f4310d43a`。7附件匿名完整下载核验。源码分支`source-v0.11.14`；含授权公开的规则示例，不含客户批次、用户工作区或密钥。
+
 ## 0.11.13 评价归类组合修复候选版 · 完整内置
 
 **[免登录下载完整安装包（17条规则＋两场景）](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.13-full/QualityWorkbench-0.11.13-Full-Setup-Windows-x64.exe)**
