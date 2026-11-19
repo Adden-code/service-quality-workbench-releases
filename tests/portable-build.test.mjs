@@ -50,7 +50,7 @@ test('stage-only build creates complete manifest without a ZIP or transfer parts
  const manifest=JSON.parse(await fs.readFile(path.join(info.root,'文件校验清单.json'),'utf8'));
  assert.equal(manifest.version,'0.11.16');assert.equal(manifest.schemaVersion,1);
  const build=JSON.parse(await fs.readFile(path.join(info.root,'packaging/build-identity.json'),'utf8'));
- assert.equal(build.version,metadata.version);assert.match(build.buildId,/^0\.11\.15-[a-f0-9]{16}$/);assert.match(build.sourceCommit,/^[a-f0-9]{40}$/);
+ assert.equal(build.version,metadata.version);assert.match(build.buildId,/^0\.11\.16-[a-f0-9]{16}$/);assert.match(build.sourceCommit,/^[a-f0-9]{40}$/);
  assert.match(await fs.readFile(path.join(info.root,'public/build-identity.mjs'),'utf8'),new RegExp(build.buildId));
  assert.ok(manifest.files.some(file=>file.path==='packaging/build-identity.json'));
  assert.ok(manifest.files.some(file=>file.path==='server/ecommerce-comparison.mjs'));
