@@ -1,5 +1,19 @@
 # 会话质检工作台
 
+## 0.11.16 电商报告按客服分组候选版 · 完整内置
+
+**[免登录下载完整安装包（17条规则＋两场景）](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.16-full/QualityWorkbench-0.11.16-Full-Setup-Windows-x64.exe)**
+
+[发布与验收说明](https://github.com/Adden-code/service-quality-workbench-releases/releases/tag/v0.11.16-full) · [升级指引](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.16-full/Hotfix-Guide-zh.txt) · [SHA256](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.16-full/SHA256.txt) · [源码提交](https://github.com/Adden-code/service-quality-workbench-releases/commit/af14b36acf0946f67aeb4298a3c063ea49e8f3f3)
+
+EC概况默认按客服(管理员)，可配置客服/站点/意图/产品并随任务冻结。超过30个非空组保留会话数前30，其他合并；“未提供”始终单列。历史任务、新品场景不改分组；典型案例保留产品信息。修复报告配置单独发布后相同规则版本误挡新任务的问题。
+
+已有工作区先备份停服并升级；随后进入场景管理→电商辅助判定与交付形式→设置报告分组，选客服、确认两Tab后发布。此次无需重新装载整套场景，原站点标准可保留。新任务生效，旧任务继续冻结维度。
+
+实际安装后四种分组页面完整链路、旧任务冻结与NP保护通过。180行合成高分散HTML约46KB；无外部模型调用，内网真实数据效果待复测。
+
+安装器97749955字节；SHA256：`f41b0ae460f4995f963dbcc753d654ca051a1e2b8bcfbcb1e210dc405efbddcf`。7附件匿名完整下载核验。源码分支`source-v0.11.16`；含已授权公开规则示例，不含客户批次或凭据。
+
 ## 0.11.15 人工结案与报告交付候选版 · 完整内置
 
 **[免登录下载完整安装包（17条规则＋两场景）](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.15-full/QualityWorkbench-0.11.15-Full-Setup-Windows-x64.exe)**
