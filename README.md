@@ -1,5 +1,19 @@
 # 会话质检工作台
 
+## 0.11.15 人工结案与报告交付候选版 · 完整内置
+
+**[免登录下载完整安装包（17条规则＋两场景）](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.15-full/QualityWorkbench-0.11.15-Full-Setup-Windows-x64.exe)**
+
+[发布与验收说明](https://github.com/Adden-code/service-quality-workbench-releases/releases/tag/v0.11.15-full) · [升级指引](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.15-full/Hotfix-Guide-zh.txt) · [SHA256](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.15-full/SHA256.txt) · [源码提交](https://github.com/Adden-code/service-quality-workbench-releases/commit/fa13b2f7e69cfc0e3c9ed02291d6bc695eb7daf6)
+
+AI失败行可人工复核分类并完成五项确认；能力恢复后定向重算技术依赖未知项，人工行只保留候选、逐项重新确认后清除提示。恢复业务报告横幅、编号、图表与审计页脚；完整冻结快照移至Excel审计分块，180行合成HTML约40–45KB。独立任务并行，默认2路，可选3/4路，限流自动降速。
+
+包括0.11.14的增量同步、Worker解析、分页与体积响应头。实际安装版44MB级合成工作区40次保存约47–90ms；失败行结案、依赖人工保护、报告与Excel审计、旧工作区升级、两场景种子和本机Java替身验证通过。零外部模型调用，内网真实环境待复测。升级前备份停服，覆盖安装后刷新旧标签页，无需重新装载场景。
+
+180行23批、每请求1秒合成计时：串行23.067秒，并发2为12.578秒，并发3为8.540秒；默认2不承诺严格减半。真实网关限流和模型时延须内网复测。
+
+安装器97742299字节；SHA256：`63771e53f652210c6e7db560b0a31e13a596f789a2f2aa0ef55f72facc695a67`。7附件匿名完整下载核验。源码分支`source-v0.11.15`；含授权公开的规则示例，不含客户批次、用户工作区或密钥。
+
 ## 0.11.14 工作区增量同步与审核性能候选版 · 完整内置
 
 **[免登录下载完整安装包（17条规则＋两场景）](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.14-full/QualityWorkbench-0.11.14-Full-Setup-Windows-x64.exe)**
