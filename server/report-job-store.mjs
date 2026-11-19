@@ -26,7 +26,7 @@ export async function createReportJobStore({dataDir}={}){
  return{
   async list(){const result=[];for(const entry of await fs.readdir(jobs,{withFileTypes:true})){if(entry.isSymbolicLink()||!entry.isDirectory())throw storage();if(/^\.creating-[A-Za-z0-9_-]+-[a-f0-9]+$/.test(entry.name))continue;const id=reportJobId(entry.name);const job=await json(path.join(folder(id),'job.json'),8*1024*1024);if(!job||job.id!==id||job.schemaVersion!==1||!Array.isArray(job.units))throw storage();result.push(job);}return result;},
   create(job,snapshot){return serial(async()=>{const dir=folder(job.id);await directory(jobs);const exists=await fs.lstat(dir).catch(error=>{if(error.code==='ENOENT')return null;throw error;});if(exists)throw new ReportJobError('交付任务标识已存在。',409);const staged=path.join(jobs,`.creating-${job.id}-${randomBytes(8).toString('hex')}`);await fs.mkdir(staged);await atomic(path.join(staged,'snapshot.json'),snapshot);await atomic(path.join(staged,'job.json'),job,8*1024*1024);await fs.rename(staged,dir);});},
-  save(job){return serial(()=>atomic(path.join(folder(job.id),'job.json'),job,8*1024*1024));},
+  save(job){job=structuredClone(job);return serial(()=>atomic(path.join(folder(job.id),'job.json'),job,8*1024*1024));},
   async snapshot(id){const value=await json(path.join(folder(id),'snapshot.json'));if(!value)throw storage();return value;},
   async result(id,nodeId){if(!/^n\d+$/.test(nodeId))throw storage();return json(path.join(folder(id),nodeId+'.json'));},
   saveResult(id,nodeId,value){return serial(async()=>{if(!/^n\d+$/.test(nodeId))throw storage();const envelope={value,sha256:sha(Buffer.from(JSON.stringify(value)))};await atomic(path.join(folder(id),nodeId+'.json'),envelope);return envelope.sha256;});},

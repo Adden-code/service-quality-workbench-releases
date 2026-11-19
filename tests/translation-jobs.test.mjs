@@ -73,7 +73,7 @@ test('soft pause checkpoints the active success and restart resumes only pending
  await f.restart();job=await f.service.get('pause');assert.equal(job.status,'paused');f.setConfig({model:'changed'});await assert.rejects(f.service.resume('pause'),error=>error.status===409);f.setConfig({model:'fixture'});await f.service.resume('pause');await f.service.waitForIdle();assert.equal((await f.service.get('pause')).status,'completed');for(const id of done)assert.equal((await f.service.getNode('pause',id)).attempts.length,1);assert.ok(f.calls.length>=before);
 });
 
-test('backup busy probe covers soft pause and an internal queued configuration-failure write',async t=>{
+test('backup busy probe covers soft pause and a concurrent job checkpoint write',async t=>{
  let enter,release,writeEnter,writeRelease,blockWrite=false;
  const entered=new Promise(resolve=>enter=resolve),gate=new Promise(resolve=>release=resolve),writing=new Promise(resolve=>writeEnter=resolve),writeGate=new Promise(resolve=>writeRelease=resolve);
  const fsOps={...fs,async rename(from,to){if(blockWrite&&/[/\\]queued-b[/\\]job\.json$/.test(to)){writeEnter();await writeGate;}return fs.rename(from,to);}};
@@ -82,14 +82,14 @@ test('backup busy probe covers soft pause and an internal queued configuration-f
   assert.equal(f.service.isBusy(),false);const creation=f.service.create({jobId:'queued-a',source,targetLang:'en'});assert.equal(f.service.isBusy(),true);await creation;await entered;
   await f.service.pause('queued-a');assert.equal(f.service.isBusy(),true,'paused request is still executing');
   await f.service.create({jobId:'queued-b',source,targetLang:'en'});blockWrite=true;f.setConfig({model:'changed-after-queueing'});release();await writing;
-  assert.equal((await f.service.get('queued-b')).status,'paused');assert.equal(f.service.isBusy(),true,'kick changed all jobs to paused but its durable write is still pending');
-  writeRelease();await f.service.waitForIdle();assert.equal(f.service.isBusy(),false);assert.equal(f.calls.length,1,'backup probe never dispatches queued work');
+  assert.equal((await f.service.get('queued-b')).status,'running');assert.equal(f.service.isBusy(),true,'a concurrent job checkpoint write is still pending');
+  writeRelease();await f.service.waitForIdle();assert.equal(f.service.isBusy(),false);assert.ok(f.calls.length>=2,'independent work starts without waiting for the paused job');assert.ok(f.calls.every(call=>call.config.model==='fixture'),'already-started jobs retain frozen model settings');
  }finally{release();writeRelease();}
 });
 test('cache storage failure pauses without replaying the completed model output after restart',async t=>{
  let failed=false;const fsOps={...fs,async rename(from,to){if(!failed&&to.includes('translation-cache')){failed=true;throw Object.assign(new Error('synthetic disk failure'),{code:'EIO'});}return fs.rename(from,to);}};
- const f=await fixture(t,{fsOps});await f.service.create({jobId:'cache-storage-fault',source,targetLang:'en'});await f.service.waitForIdle();const job=await f.service.get('cache-storage-fault');assert.equal(job.status,'paused');assert.equal(job.stopReason,'storage_error');assert.ok(job.nodes.some(node=>node.status==='completed'),'validated successful output must be checkpointed before cache writes');const completedTexts=new Set(f.calls.flatMap(call=>call.input.items.map(item=>item.text)));
- await f.restart();await f.service.resume('cache-storage-fault');await f.service.waitForIdle();assert.equal((await f.service.get('cache-storage-fault')).status,'completed');for(const call of f.calls.slice(1))assert.ok(call.input.items.every(item=>!completedTexts.has(item.text)),'completed model output cannot be sent again');
+ const f=await fixture(t,{fsOps});await f.service.create({jobId:'cache-storage-fault',source,targetLang:'en'});await f.service.waitForIdle();const job=await f.service.get('cache-storage-fault');assert.equal(job.status,'paused');assert.equal(job.stopReason,'storage_error');assert.ok(job.nodes.some(node=>node.status==='completed'),'validated successful output must be checkpointed before cache writes');const beforeRestart=f.calls.length,completedTexts=new Set(f.calls.flatMap(call=>call.input.items.map(item=>item.text)));
+ await f.restart();await f.service.resume('cache-storage-fault');await f.service.waitForIdle();assert.equal((await f.service.get('cache-storage-fault')).status,'completed');for(const call of f.calls.slice(beforeRestart))assert.ok(call.input.items.every(item=>!completedTexts.has(item.text)),'completed model output cannot be sent again');
 });
 test('a result checkpoint write failure retains the validated output in memory and resumes without a model replay',async t=>{
  let blocked=true;const fsOps={...fs,async rename(from,to){if(blocked&&/[/\\]n1\.json$/.test(to))throw Object.assign(new Error('synthetic disk failure'),{code:'EIO'});return fs.rename(from,to);}};
