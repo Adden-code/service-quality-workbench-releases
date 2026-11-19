@@ -183,6 +183,8 @@ export async function createWorkspaceStore({dataDir,fsOps=fs,catalogSeed=null,sc
   }
   return {
     read,changesSince,
+    // Internal immutable view: callers must never mutate or expose it to plugins.
+    transportSnapshot:()=>({initialized:document.revision>0,revision:document.revision,state:document.state,catalog:document.catalog}),
     reviewCommand(input,{snapshot=true}={}){const request=clone(input);return serial(async()=>{
       if(!object(request)||typeof request.mutationId!=='string'||!request.mutationId||request.mutationId.length>128)throw new WorkspaceError('审核操作标识无效。');
       const fingerprint=digest(canonical(request)),replay=document.mutations.find(x=>x.id===request.mutationId);

@@ -177,6 +177,14 @@ export async function createWorkflowTraceStore({dataDir,clock=()=>new Date()}={}
     }
     await recover();
   }catch(error){await release().catch(()=>{});throw error;}
+  function pagedRun(id,{offset=0,limit=50,nodeId}={}){
+    checkId(id);const run=records.get(id);if(!run)return null;
+    const parts=run.meta?.parentRunId===run.id?[...records.values()].filter(p=>p.taskId===run.taskId&&p.meta?.parentRunId===run.id).sort((a,b)=>(a.meta.part||1)-(b.meta.part||1)):[run],nodes=parts.flatMap(p=>p.nodes);
+    if(nodeId){checkId(nodeId);const node=nodes.find(n=>n.id===nodeId);if(!node)throw traceError('trace_node','运行节点不存在。',404);return copy(node);}
+    if(!Number.isSafeInteger(offset)||offset<0||!Number.isSafeInteger(limit)||limit<1||limit>100)throw traceError('trace_page','运行记录分页无效。');
+    const result=copy({...run,nodes:[]});if(parts.length>1){result.status=parts.some(p=>p.status==='running')?'running':parts.every(p=>p.status==='completed')?'completed':parts.some(p=>p.status==='interrupted')?'interrupted':parts.some(p=>p.status==='partial'||p.status==='completed')?'partial':'failed';result.completedAt=result.status==='running'?null:parts.map(p=>p.completedAt).filter(Boolean).sort().at(-1)??null;}
+    result.nodes=nodes.slice(offset,offset+limit).map(({input,output,...node})=>({...copy(node),input:null,output:null,snapshotDeferred:true}));return{...result,metadataOnly:true,offset,totalNodes:nodes.length,completedNodes:nodes.filter(n=>n.status==='completed').length};
+  }
   return {
     begin(input){return serial(async()=>{
       if(!plain(input))throw traceError('trace_input','运行输入无效。');
@@ -221,8 +229,9 @@ export async function createWorkflowTraceStore({dataDir,clock=()=>new Date()}={}
       if(run.nodes.some(n=>n.status==='running'))throw traceError('trace_state','仍有执行中的节点，不能结束运行。',409);
       run.status=status;run.completedAt=now();if(result!==undefined)run.summary=snapshot(result);if(error)run.error=safeFailure(error);
       settlePending(run,'本次运行未执行此节点。');return persist(run);});},
+    readPage(id,options){return serial(async()=>pagedRun(id,options));},
     read(id){return serial(async()=>{checkId(id);await directoryWithoutLinks(directory);const stat=await regularFile(filename(id),{optional:true});if(!stat)return null;const run=records.get(id)||validateLoaded(JSON.parse(await readFileWithoutLinks(filename(id))),id);const logical=logicalRun(run);for(const part of logical.meta?.tracePartIds||[])await regularFile(filename(part));return copy(logical);});},
-    list(taskId){return serial(async()=>{checkId(taskId);await directoryWithoutLinks(directory);return [...records.values()].filter(run=>run.taskId===taskId&&(!run.meta?.parentRunId||run.meta.parentRunId===run.id)).sort((a,b)=>b.startedAt.localeCompare(a.startedAt)||b.id.localeCompare(a.id)).map(run=>summary(logicalRun(run)));});},
+    list(taskId,{compact=false}={}){return serial(async()=>{checkId(taskId);await directoryWithoutLinks(directory);return [...records.values()].filter(run=>run.taskId===taskId&&(!run.meta?.parentRunId||run.meta.parentRunId===run.id)).sort((a,b)=>b.startedAt.localeCompare(a.startedAt)||b.id.localeCompare(a.id)).map(run=>compact?summary({...pagedRun(run.id,{limit:1}),nodes:[]}):summary(logicalRun(run)));});},
     recover,
     close(){if(closePromise)return closePromise;closing=true;closePromise=queue.then(release);return closePromise;},
   };

@@ -1,3 +1,4 @@
+import {createWorkspaceDecoder} from './workspace-decoder.mjs';
 import {mergeWorkspacePatch} from './workspace-patch.mjs';
 import {createBusinessState} from './domain.mjs';
 import {createBusinessCatalog,validateCatalog} from './catalog.mjs';
@@ -24,7 +25,8 @@ function reviewBasis(document,sessionId){
   return JSON.stringify({session,basis:task.basisSnapshot,policy:task.reviewPolicy,lifecycle:task.lifecycle,scenario:task.scenarioSnapshot,calibrations:document.state?.ruleCalibrations,catalog:document.catalog});
 }
 
-export function createWorkspaceClient({fetchImpl=globalThis.fetch,storage=null,timeoutMs=15000,onChange=null,structuralSharing=false,setTimer=setTimeout,clearTimer=clearTimeout}={}){
+export function createWorkspaceClient({fetchImpl=globalThis.fetch,storage=null,timeoutMs=15000,onChange=null,structuralSharing=false,incrementalTransport=typeof globalThis.Worker==='function',setTimer=setTimeout,clearTimer=clearTimeout}={}){
+  const decoder=incrementalTransport?createWorkspaceDecoder({fetchImpl}):null;
   let acknowledged=null,pending=null,conflicted=false,queue=Promise.resolve(),sequence=0,modelConfig=null;
   const mutationId=()=>globalThis.crypto?.randomUUID?.()||`mutation-${Date.now()}-${++sequence}`;
   const serial=operation=>{const next=queue.then(operation);queue=next.catch(()=>{});return next;};
@@ -42,12 +44,16 @@ export function createWorkspaceClient({fetchImpl=globalThis.fetch,storage=null,t
     const controller=new AbortController(),timer=setTimer(()=>controller.abort(),timeLimit);
     const outerSignal=options.signal,cancel=()=>controller.abort();if(outerSignal?.aborted)controller.abort();outerSignal?.addEventListener('abort',cancel,{once:true});
     try{
-      const response=await fetchImpl(url,{...options,signal:controller.signal,credentials:'same-origin'});
+      const response=await fetchImpl(url,{...options,headers:{...options.headers,...(incrementalTransport?{'X-Workspace-Sync':'records-v1','X-Workspace-Revision':String(acknowledged?.revision??-1),'X-Workspace-Epoch':acknowledged?.token||''}:{})},signal:controller.signal,credentials:'same-origin'});
       let value;
-      try{value=await response.json();}catch{throw failure('本地服务返回了无法识别的结果，请检查服务版本。',response.ok?undefined:response.status);}
+      try{value=decoder?await decoder.decode(await response.arrayBuffer(),{baseRevision:acknowledged?.revision,deadline:Date.now()+timeLimit}):await response.json();}catch(error){throw failure(decoder&&/工作区|后台数据/.test(error.message)?error.message:'本地服务返回了无法识别的结果，请检查服务版本。',response.ok?undefined:response.status);}
       if(!response.ok)throw failure(value?.error||`工作区请求失败（${response.status}）`,response.status);
       return value;
     }finally{clearTimer(timer);outerSignal?.removeEventListener('abort',cancel);}
+  }
+  async function readCurrent(){
+    const value=await request(incrementalTransport?'/api/workspace?since='+(acknowledged?.revision??0):'/api/workspace');
+    return value.patch?mergeWorkspacePatch(acknowledged,value):value.unchanged?{...acknowledged,...value}:value;
   }
   async function sendPending(){
     const record=pending;
@@ -79,6 +85,8 @@ export function createWorkspaceClient({fetchImpl=globalThis.fetch,storage=null,t
     }catch(error){throw new Error(`旧记录迁移失败，原浏览器记录保持不变。${error.message}`);}
   }
   return {
+    close(){decoder?.close?.();},
+    readExecution(taskId,offset=0){return request('/api/tasks/'+encodeURIComponent(taskId)+'/execution?offset='+offset+'&limit=25');},
     get snapshot(){return view(acknowledged);},
     get revision(){return acknowledged?.revision;},
     get token(){return acknowledged?.token;},
@@ -91,14 +99,14 @@ export function createWorkspaceClient({fetchImpl=globalThis.fetch,storage=null,t
     deleteRule(input){return serial(async()=>{ensureWritable();return adopt(await request('/api/rules/delete',{method:'POST',headers:{'Content-Type':'application/json','X-Workspace-Token':acknowledged.token},body:JSON.stringify(input)}));});},
     deleteTask(input){return serial(async()=>{
       ensureWritable();try{return adopt(await request('/api/tasks/delete',{method:'POST',headers:{'Content-Type':'application/json','X-Workspace-Token':acknowledged.token},body:JSON.stringify(input)},120000));}
-      catch(error){if(error.status)throw error;const value=await request('/api/workspace');documentCheck(value);adopt(value);if(value.state.taskDeletionAudit?.some(a=>a.task.id===input.taskId))return clone(value);throw new Error('删除结果尚未确认，已重新加载；请检查任务与删除审计。');}
+      catch(error){if(error.status)throw error;const value=await readCurrent();documentCheck(value);adopt(value);if(value.state.taskDeletionAudit?.some(a=>a.task.id===input.taskId))return clone(value);throw new Error('删除结果尚未确认，已重新加载；请检查任务与删除审计。');}
     });},
     taskLifecycle(taskIds,action,options={}){return serial(async()=>{
       ensureWritable();
       try{return adopt(await request('/api/task-lifecycle',{method:'POST',headers:{'Content-Type':'application/json','X-Workspace-Token':acknowledged.token},body:JSON.stringify({taskIds,action,...options})}));}
       catch(error){
         if(error.status)throw error;
-        const value=await request('/api/workspace');documentCheck(value);adopt(value);
+        const value=await readCurrent();documentCheck(value);adopt(value);
         const applied=taskIds.every(id=>{const life=value.state.tasks.find(task=>task.id===id)?.lifecycle;return action==='deliverable'?life?.deliverables?.some(item=>item.id===options.deliveryId):action==='void'?life?.voidedAt&&life.voidReason===options.reason?.trim():action==='archive'?!!life?.archivedAt:life&&!life.archivedAt;});
         if(applied)return clone(value);
         throw new Error('任务操作结果未确认，已重新加载；请核对任务状态后重试。');
@@ -123,28 +131,28 @@ export function createWorkspaceClient({fetchImpl=globalThis.fetch,storage=null,t
       catch(error){
         if(error.status)throw error;
         // A lost acceptance must be reconciled before a new chargeable run.
-        const value=await request('/api/workspace');documentCheck(value);adopt(value);
+        const value=await readCurrent();documentCheck(value);adopt(value);
         if(value.state.tasks.some(task=>[task.aiRun,...(task.aiRunHistory||[])].some(run=>run?.id===runId)))return clone(value);
         throw new Error('AI任务启动结果未确认，请刷新核对任务状态后再运行。');
       }
     });},
     load(){return serial(async()=>{
       if(pending)throw new Error('上次保存结果未确认，请先重试保存。');
-      const value=await request('/api/workspace');documentCheck(value);acknowledged=view(value);
+      const value=await readCurrent();documentCheck(value);acknowledged=view(value);
       if(value.initialized){conflicted=false;return adopt(value);}
       const next=legacy();prepare(next);
       try{return await sendPending();}
       catch(error){
         // Only bootstrap may safely adopt a winning browser's initialization.
         if(error.status!==409)throw error;
-        const winner=await request('/api/workspace');documentCheck(winner);
+        const winner=await readCurrent();documentCheck(winner);
         if(!winner.initialized)throw error;
         conflicted=false;return adopt(winner);
       }
     });},
     reload(){return serial(async()=>{
       if(pending)throw new Error('上次保存结果未确认，请先重试保存。');
-      const value=await request('/api/workspace');documentCheck(value);
+      const value=await readCurrent();documentCheck(value);
       if(!value.initialized)throw new Error('服务端工作区尚未初始化，不能丢弃当前记录。');
       conflicted=false;return adopt(value);
     });},
@@ -158,7 +166,7 @@ export function createWorkspaceClient({fetchImpl=globalThis.fetch,storage=null,t
       try{return await sendPending();}
       catch(error){
         if(error.status!==409||!baseline)throw error;
-        const latest=await request('/api/workspace');documentCheck(latest);
+        const latest=await readCurrent();documentCheck(latest);
         if(!latest.initialized||latest.token!==acknowledged.token||basis(latest)!==baseline)throw error;
         // A rejected revision has no write to reconcile. Reapply this review
         // once only when its record, frozen basis and catalog are unchanged.
@@ -170,7 +178,7 @@ export function createWorkspaceClient({fetchImpl=globalThis.fetch,storage=null,t
     retryPending(){return serial(async()=>{
       if(conflicted)throw new Error('工作区版本冲突，请保留编辑内容后重新加载。');
       // A restarted local service issues a new token. Keep the same body and mutation ID.
-      const value=await request('/api/workspace');documentCheck(value);acknowledged={...acknowledged,token:value.token};
+      const value=await readCurrent();documentCheck(value);acknowledged={...acknowledged,token:value.token};
       return sendPending();
     });},
     importDraftRequest(url,{method='GET',body}={}){ensureWritable();return request(url,{method,headers:{'X-Workspace-Token':acknowledged.token,...(body!==undefined?{'Content-Type':'application/json'}:{})},...(body!==undefined?{body:JSON.stringify(body)}:{})},30000);},

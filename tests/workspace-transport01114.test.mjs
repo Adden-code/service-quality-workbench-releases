@@ -1,0 +1,33 @@
+import test from 'node:test';import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';import path from 'node:path';
+import {createWorkspaceTransport} from '../server/workspace-transport.mjs';
+import {createWorkspaceDecoderCore} from '../public/workspace-decode-core.mjs';
+import {mergeWorkspacePatch} from '../public/workspace-patch.mjs';
+import {createWorkbenchServer} from '../server.mjs';
+import {createWorkspaceClient} from '../public/workspace-client.mjs';
+import {largeWorkspace} from './workspace-performance-fixture.mjs';
+test('record transport pins revisions, hashes pages and transfers only changed records beyond journal horizon',async()=>{
+ let now=0,bytes=0;const transport=createWorkspaceTransport({pageBytes:512,now:()=>now});
+ const decoder=createWorkspaceDecoderCore({fetchImpl:async url=>{const [,lease,hash,index]=url.match(/parts\/([^/]+)\/([^/]+)\/(\d+)$/);const b=transport.page(lease,hash,Number(index));assert.ok(b.length<=512);bytes+=b.length;return new Response(b);}});
+ const raw=largeWorkspace({count:12,megabytes:1}),first={initialized:true,revision:1,state:raw.state,catalog:raw.catalog,token:'synthetic'};
+ const envelope=transport.prepare(first),decode=(v,baseRevision)=>decoder.decode(new TextEncoder().encode(JSON.stringify(v)).buffer,{baseRevision});
+ const a=await decode(envelope);assert.deepEqual(a,first);const initialBytes=bytes;bytes=0;
+ const changed={...first,revision:1397,state:{...first.state,sessions:first.state.sessions.map((s,i)=>i?s:{...s,review:{...s.review,notes:'only one changed'}})}};
+ const b=await decode(transport.prepare(changed),1);assert.equal(b.patch.sessions.length,1);assert.deepEqual(mergeWorkspacePatch(a,b).state,changed.state);assert.ok(bytes<initialBytes/3);
+ assert.equal((await decode(envelope)).revision,1,'old lease remains pinned');
+ now=120001;assert.throws(()=>transport.page(envelope.lease,envelope.manifest.hash,0),/过期/);
+});
+test('negotiated client loads large workspaces in bounded slices and retains revision conflict/idempotent semantics',async t=>{
+ const root=path.resolve('tests/artifacts/transport01114');await fs.mkdir(root,{recursive:true});const dir=await fs.mkdtemp(path.join(root,'test-')),raw=largeWorkspace({count:40,megabytes:3});await fs.writeFile(path.join(dir,'workspace.json'),JSON.stringify(raw));
+ let server=await createWorkbenchServer({dataDir:dir,storageMode:'sharded'});await new Promise(r=>server.listen(0,'127.0.0.1',r));const port=server.address().port,origin='http://127.0.0.1:'+port,requests=[];let drop=false;
+ const fetchImpl=async(url,options={})=>{const r=await fetch(origin+url,{...options,headers:{Origin:origin,...options.headers}});requests.push({url,bytes:Number(r.headers.get('X-Response-Bytes')),status:r.status});if(drop&&url==='/api/review'){drop=false;await r.arrayBuffer();throw new Error('Synthetic response lost after committed write');}return r;};
+ const client=createWorkspaceClient({fetchImpl,incrementalTransport:true,structuralSharing:true}),other=createWorkspaceClient({fetchImpl,incrementalTransport:true});
+ t.after(async()=>{client.close();other.close();await new Promise(r=>server.close(r));assert.ok(dir.startsWith(root+path.sep));await fs.rm(dir,{recursive:true,force:true});});
+ const first=await client.load();await other.load();assert.equal(first.state.sessions.length,40);let calls=requests.length;await client.refresh();assert.equal(requests.length,calls+1);assert.ok(requests.at(-1).bytes<3000);
+ const command={action:'accept',sessionId:first.state.sessions[0].id,at:'2026-11-19T08:00:00Z'};await client.reviewCommand(command);await assert.rejects(other.reviewCommand(command),/更新|冲突/);await other.reload();assert.equal(other.snapshot.revision,client.revision);
+ await client.reviewCommand({...command,sessionId:first.state.sessions[1].id});await other.refresh();assert.equal(other.snapshot.state.sessions[1].review.status,'已暂存');
+ assert.ok(requests.every(r=>r.bytes<2*1024*1024));assert.ok(requests.filter(r=>r.url.startsWith('/api/workspace')&&!r.url.includes('/parts/')).every(r=>r.url.includes('?since=')));
+ const rows=await client.readExecution(first.state.tasks[0].id);assert.equal(rows.total,40);assert.equal(rows.rows.length,25);assert.equal((await client.readExecution(first.state.tasks[0].id,25)).rows.length,15);
+ drop=true;await assert.rejects(client.reviewCommand({...command,sessionId:first.state.sessions[2].id}),/未确认/);assert.equal(client.hasPending,true);const beforeRestart=client.token;await new Promise(r=>server.close(r));server=await createWorkbenchServer({dataDir:dir,storageMode:'sharded'});await new Promise(r=>server.listen(port,'127.0.0.1',r));await client.retryPending();assert.notEqual(client.token,beforeRestart);assert.equal(client.hasPending,false);assert.equal(client.snapshot.state.activity.filter(e=>e.sessionId===first.state.sessions[2].id).length,1);
+ const revision=client.revision;await other.reload();assert.equal(other.revision,revision);assert.deepEqual(other.snapshot.state,client.snapshot.state);
+});

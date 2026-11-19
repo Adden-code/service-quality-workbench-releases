@@ -1,11 +1,13 @@
+import {createWorkspaceDecoder} from './workspace-decoder.mjs';
 import {html as uiHtml,uiLiteral,uiAttributes,t as uiT,translateError as uiError} from './i18n.mjs';
 import { workflowView, workflowJson } from './workflow-view.mjs';
 
-const ACTIONS = new Set(['workflow-open', 'workflow-close', 'workflow-refresh', 'workflow-node', 'workflow-copy', 'workflow-export']);
+const ACTIONS = new Set(['workflow-open', 'workflow-close', 'workflow-refresh', 'workflow-node', 'workflow-copy', 'workflow-export', 'workflow-page']);
 const initial = () => ({ active: false, taskId: '', runs: [], runId: '', run: null, nodeId: '', loadingHistory: false, loadingRun: false, historyError: '', detailError: '', lastUpdated: '', lastAttemptAt: '' });
 
 /** Read-only, token-authenticated trace viewer. Closing invalidates every pending response. */
 export function createWorkflowManager({ getToken, openModal, closeModal, onChange = () => {}, toast = () => {}, fetchImpl = globalThis.fetch?.bind(globalThis), pollMs = 1000, download } = {}) {
+  const paged=typeof globalThis.Worker==='function',decoder=paged?createWorkspaceDecoder({fetchImpl}):null;
   let state = initial(), owner = 0, selection = 0, pollTimer = null;
   const requests = new Set();
   const current = (epoch, sequence = selection) => state.active && epoch === owner && sequence === selection;
@@ -25,9 +27,9 @@ export function createWorkflowManager({ getToken, openModal, closeModal, onChang
     const controller = new AbortController(); requests.add(controller);
     const timeout = setTimeout(() => controller.abort(), 15000);
     try {
-      const response = await fetchImpl(url, { headers: { 'X-Workspace-Token': token }, credentials: 'same-origin', cache: 'no-store', signal: controller.signal });
+      const response = await fetchImpl(url, { headers: { 'X-Workspace-Token': token,...(paged?{'X-Workspace-Sync':'records-v1'}:{}) }, credentials: 'same-origin', cache: 'no-store', signal: controller.signal });
       if (!response.ok) throw new Error(response.status === 403 || response.status === 401 ? '工作区身份已失效，请重新加载工作区。' : response.status === 404 ? '该运行记录不存在，请刷新历史运行。' : '暂时无法读取运行记录，请稍后刷新。');
-      return await response.json();
+      return decoder?await decoder.decode(await response.arrayBuffer()):await response.json();
     } catch (error) {
       if (/^(工作区身份|该运行记录|暂时无法读取)/.test(error?.message || '')) throw error;
       throw new Error('暂时无法读取运行记录，请检查本机服务后刷新。');
@@ -46,12 +48,14 @@ export function createWorkflowManager({ getToken, openModal, closeModal, onChang
     if (showLoading) { state.loadingRun = true; notify(); }
     state.lastAttemptAt = new Date().toISOString();
     try {
-      const value = await request(`/api/workflow/runs/${encodeURIComponent(runId)}`);
+      const value = await request(`/api/workflow/runs/${encodeURIComponent(runId)}${paged?'?summary=1&offset='+(state.offset||0):''}`);
       if (!current(epoch, sequence)) return false;
       if (!value || value.id !== runId || value.taskId !== state.taskId || !Array.isArray(value.nodes)) throw new Error('运行记录与当前任务不匹配，请刷新后重试。');
+      const previousNode=state.run?.nodes.find(n=>n.id===state.nodeId);
       const changed = !same(state.run, value) || Boolean(state.detailError);
       state.run = value; state.detailError = ''; state.lastUpdated = new Date().toISOString();
       if (!value.nodes.some(node => node.id === state.nodeId)) state.nodeId = (value.nodes.find(node => ['running', 'failed'].includes(node.status)) || value.nodes[0])?.id || '';
+      if(paged&&state.nodeId){const node=value.nodes.find(n=>n.id===state.nodeId);if(previousNode&&!previousNode.snapshotDeferred&&previousNode.id===node.id&&previousNode.status===node.status&&previousNode.completedAt===node.completedAt)Object.assign(node,previousNode);else await loadNode(epoch,sequence);}
       return changed;
     } catch (error) {
       if (!current(epoch, sequence)) return false;
@@ -60,12 +64,18 @@ export function createWorkflowManager({ getToken, openModal, closeModal, onChang
       if (current(epoch, sequence)) state.loadingRun = false;
     }
   }
+  async function loadNode(epoch=owner,sequence=selection){
+    const runId=state.runId,nodeId=state.nodeId;if(!paged||!nodeId)return;
+    const node=await request(`/api/workflow/runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(nodeId)}`);
+    if(!current(epoch,sequence)||state.nodeId!==nodeId||state.runId!==runId)return;
+    if(!node||node.id!==nodeId)throw new Error('运行节点与当前选择不匹配。');state.run.nodes=state.run.nodes.map(n=>n.id===nodeId?node:n);
+  }
   async function selectRun(runId, epoch = owner) {
     if (!state.active || epoch !== owner || !state.runs.some(run => run.id === runId)) return;
     const changed = runId !== state.runId, sequence = begin();
     state.loadingHistory = false;
     state.runId = runId; state.detailError = '';
-    if (changed) { state.run = null; state.nodeId = ''; state.lastUpdated = ''; }
+    if (changed) { state.offset=0;state.run = null; state.nodeId = ''; state.lastUpdated = ''; }
     try { await loadRun(epoch, sequence); }
     finally { if (current(epoch, sequence)) { notify(); schedule(epoch, sequence); } }
   }
@@ -75,7 +85,7 @@ export function createWorkflowManager({ getToken, openModal, closeModal, onChang
     state.loadingHistory = !background; state.loadingRun = false; state.lastAttemptAt = new Date().toISOString();
     if (!background) { state.historyError = ''; notify(); }
     try {
-      const value = await request(`/api/workflow/runs?taskId=${encodeURIComponent(state.taskId)}`);
+      const value = await request(`/api/workflow/runs?taskId=${encodeURIComponent(state.taskId)}${paged?'&compact=1':''}`);
       if (!current(epoch, sequence)) return;
       if (!Array.isArray(value?.runs) || value.runs.some(run => !run || typeof run.id !== 'string' || (run.taskId && run.taskId !== state.taskId))) throw new Error('运行历史与当前任务不匹配，请刷新后重试。');
       // Follow new runs only when the user was viewing the previous latest run.
@@ -85,7 +95,7 @@ export function createWorkflowManager({ getToken, openModal, closeModal, onChang
       const selected = (followedLatest ? state.runs[0] : state.runs.find(run => run.id === state.runId)) || state.runs[0];
       if (selected) {
         const selectionChanged = selected.id !== state.runId;
-        if (selectionChanged) { state.runId = selected.id; state.run = null; state.nodeId = ''; state.lastUpdated = ''; changed = true; }
+        if (selectionChanged) { state.offset=0;state.runId = selected.id; state.run = null; state.nodeId = ''; state.lastUpdated = ''; changed = true; }
         if (!background || selectionChanged || !state.run || state.run.status === 'running' || state.detailError) {
           const detailChanged = await loadRun(epoch, sequence, !background || selectionChanged);
           changed = detailChanged || changed;
@@ -114,7 +124,8 @@ export function createWorkflowManager({ getToken, openModal, closeModal, onChang
   }
   async function exportRun() {
     if (!state.run) return;
-    const blob = new Blob([workflowJson(state.run)], { type: 'application/json;charset=utf-8' });
+    const full=paged?await request(`/api/workflow/runs/${encodeURIComponent(state.run.id)}?export=1`):state.run;
+    const blob = new Blob([workflowJson(full)], { type: 'application/json;charset=utf-8' });
     const filename = `运行记录-${String(state.run.id).replace(/[^a-zA-Z0-9_-]/g, '_')}.json`;
     if (download) { download(blob, filename); return; }
     if (typeof document === 'undefined') return;
@@ -128,8 +139,9 @@ export function createWorkflowManager({ getToken, openModal, closeModal, onChang
     if (!state.active) return false;
     if (act === 'workflow-close') { stop(); closeModal?.(); }
     else if (act === 'workflow-refresh') await refresh();
+    else if(act==='workflow-page'){state.offset=Number(element.dataset.offset||0);state.nodeId='';const sequence=begin();await loadRun(owner,sequence);notify();schedule(owner,sequence);}
     else if (act === 'workflow-node') {
-      if (state.run?.nodes.some(node => node.id === element?.dataset?.id)) { state.nodeId = element.dataset.id; notify(); }
+      if (state.run?.nodes.some(node => node.id === element?.dataset?.id)) { state.nodeId = element.dataset.id;await loadNode(); notify(); }
     } else if (act === 'workflow-export') await exportRun();
     else if (act === 'workflow-copy') {
       const node = state.run?.nodes.find(node => node.id === state.nodeId), part = element?.dataset?.part;
