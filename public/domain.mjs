@@ -1,6 +1,6 @@
 import {hasCompletedAI,hasRawFallback} from './session-result-availability.mjs';
 import {newImportLineage,isRepeatedImport} from './import-lineage.mjs';
-import {hasEcommerceClassification,classificationReviewed,classificationNeedsJudgment} from './ecommerce-classification-review.mjs';
+import {requiresEcommerceClassification,classificationReviewed,classificationNeedsJudgment} from './ecommerce-classification-review.mjs';
 import {ruleExemption,calibratedReviewPolicy} from './rule-calibration-policy.mjs';
 import {freezeSceneExecution,latestSceneConfiguration} from './scene-configuration.mjs';
 import {usableTaskState,isVoidedTask,isInactiveTask,assertTaskWritable} from './task-lifecycle.mjs';
@@ -397,7 +397,7 @@ export function acceptAI(state, sessionId, now) {
 }
 
 export function confirmReview(state, sessionId, now) {
-  const classified=getSession(state,sessionId);if(hasEcommerceClassification(classified)&&!classificationReviewed(classified))throw new Error('请先在回复时效项中保存评价分类人工复核。');if(['EC-TIME','EC-STEPS'].some(id=>classificationNeedsJudgment(classified,id)))throw new Error('评价分类已改判，请重新记录时效与回复结构的人工判断。');
+  const classified=getSession(state,sessionId);if(requiresEcommerceClassification(classified)&&!classificationReviewed(classified))throw new Error('请先在回复时效项中保存评价分类人工复核。');if(['EC-TIME','EC-STEPS'].some(id=>classificationNeedsJudgment(classified,id)))throw new Error('评价分类已改判，请重新记录时效与回复结构的人工判断。');
   const existing = getSession(state, sessionId);
   assertReviewAvailable(state,existing);
   if(isUnrepliedSession(state,existing))throw new Error('未回复须使用独立的未回复事实确认，不作为质量通过或不通过。');

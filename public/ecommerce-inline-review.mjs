@@ -3,7 +3,7 @@ import {e} from './ui.mjs';
 import {getLocale} from './i18n.mjs';
 import {getSessionRules,getTaskBasis,referenceKey} from './task-basis.mjs';
 import {saveReview,acceptAI,confirmReview} from './domain.mjs';
-import {hasEcommerceClassification,classificationReviewed,classificationNeedsJudgment,saveClassificationReview} from './ecommerce-classification-review.mjs';
+import {requiresEcommerceClassification,classificationReviewed,classificationNeedsJudgment,saveClassificationReview} from './ecommerce-classification-review.mjs';
 import {computeEcommerceTimeFacts,timePolicyReferences} from './ecommerce-time-results.mjs';
 import {ecommerceSourceColumn,ecommerceTimeValues} from './ecommerce-schema.mjs';
 import {sceneReviewEvidence} from './scene-review-view.mjs';
@@ -32,8 +32,8 @@ export function saveInlineEcommerce(state,id,edits={},at,{confirm=false,classifi
  const drafts=inlineDrafts(state,s,edits),missing=drafts.filter(d=>!d.reason?.trim()&&['不符合','无法判定'].includes(d.verdict));
  if(missing.length)throw new Error(`请填写以下项目的判定理由：${missing.map(d=>d.ruleId).join('、')}。`);
  let next=state;
- if(confirm&&hasEcommerceClassification(s)&&(!classificationReviewed(s)||classification&&['evaluationType','vocKind','reason'].some(k=>classification[k]!==s.review.classification[k]))){
-  const value=classification||s.sceneCapabilities.outputs.ecommerceClassification.value||{};
+ if(confirm&&requiresEcommerceClassification(s)&&(!classificationReviewed(s)||classification&&['evaluationType','vocKind','reason'].some(k=>classification[k]!==s.review.classification[k]))){
+  const value=classification||s.sceneCapabilities?.outputs?.ecommerceClassification?.value||{};
   next=saveClassificationReview(next,id,{...value,reason:value.reason||'人工核对并确认评价分类。'},at);
  }
  const updated=next.sessions.find(r=>r.id===id),needs=['EC-TIME','EC-STEPS'].filter(ruleId=>classificationNeedsJudgment(updated,ruleId)&&!edits[ruleId]);if(needs.length)throw new Error('分类已更正，请先保存分类复核，再核对并点选时效与回复结构结论：'+needs.join('、'));

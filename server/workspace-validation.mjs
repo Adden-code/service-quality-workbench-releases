@@ -1,5 +1,5 @@
 import {validateImportLineages} from '../public/import-lineage.mjs';
-import {hasEcommerceClassification,classificationReviewed,classificationNeedsJudgment} from '../public/ecommerce-classification-review.mjs';
+import {requiresEcommerceClassification,classificationReviewed,classificationNeedsJudgment} from '../public/ecommerce-classification-review.mjs';
 import {isBusinessEcommerceBasis} from '../public/ecommerce-business-profile.mjs';
 import {validateCatalog} from '../public/catalog.mjs';
 import {isSessionCheckRule,ruleKindOf} from '../public/rule-kind.mjs';
@@ -334,8 +334,8 @@ export function validateWorkspace(state,catalog,previous=null,{authenticateNewSn
     if(!Array.isArray(session.aiResults)||!object(session.review)||!object(session.review.drafts)||!['待审核','已暂存','已确认','待补充'].includes(session.review.status)||typeof session.review.reviewer!=='string'||typeof session.review.notes!=='string'||(session.review.completedAt!==null&&typeof session.review.completedAt!=='string'))fail('会话AI结果或人工审核结构无效。');
     validateRawReviewTime(session,task);
     try{validatePendingResolution(session,task,state);}catch(error){fail(error.message);}
-    if(session.review.classification){const c=session.review.classification;if(!hasEcommerceClassification(session)||!['好评正向','好评负向','中评','差评','无效评价'].includes(c.evaluationType)||!['substantive','strong-negative','none'].includes(c.vocKind)||!validZonedTime(c.at)||!c.reason?.trim()||c.reason.length>2000||c.reviewer!==session.review.reviewer||typeof c.changed!=='boolean'||c.changed!==(c.evaluationType!==session.sceneCapabilities.outputs.ecommerceClassification.value?.evaluationType||c.vocKind!==session.sceneCapabilities.outputs.ecommerceClassification.value?.vocKind)||!Array.isArray(session.review.classificationHistory))fail('评价分类人工复核记录无效。');}
-    if(session.review.status==='已确认'&&hasEcommerceClassification(session)&&(!classificationReviewed(session)||['EC-TIME','EC-STEPS'].some(id=>classificationNeedsJudgment(session,id))))fail('确认前须复核评价归类及改判后受影响的检核项。');
+    if(session.review.classification){const c=session.review.classification;if(c.origin!==undefined&&!['manual-row-failed','human-review'].includes(c.origin))fail('评价分类人工来源无效。');if(!requiresEcommerceClassification(session)||!['好评正向','好评负向','中评','差评','无效评价'].includes(c.evaluationType)||!['substantive','strong-negative','none'].includes(c.vocKind)||!validZonedTime(c.at)||!c.reason?.trim()||c.reason.length>2000||c.reviewer!==session.review.reviewer||typeof c.changed!=='boolean'||c.changed!==(c.evaluationType!==session.sceneCapabilities?.outputs?.ecommerceClassification?.value?.evaluationType||c.vocKind!==session.sceneCapabilities?.outputs?.ecommerceClassification?.value?.vocKind)||!Array.isArray(session.review.classificationHistory))fail('评价分类人工复核记录无效。');}
+    if(session.review.status==='已确认'&&requiresEcommerceClassification(session)&&(!classificationReviewed(session)||['EC-TIME','EC-STEPS'].some(id=>classificationNeedsJudgment(session,id))))fail('确认前须复核评价归类及改判后受影响的检核项。');
     const basis=task.basisSnapshot||{rules:demoRules,policies:demoPolicies};
     if(task.mode==='manual'&&!session.ecommerce&&basis.rules.some(rule=>rule.id.startsWith('EC-')))fail('电商专用规则必须使用可验证的电商来源记录。');
     if(session.ecommerce!==undefined){
@@ -440,6 +440,7 @@ export function validateWorkspace(state,catalog,previous=null,{authenticateNewSn
         if(!trustedAI&&!trustedCalibration)try{validateReturnTransition(before,after);}catch(error){fail(error.message);}
         const comparisonRecovery=trustedAI&&before.ecommerce&&before.review.status==='待审核'&&!Object.keys(before.review.drafts).length&&!before.review.notes?.trim()&&!before.review.history?.length&&before.aiResults.some(r=>r.ruleId==='EC-TARGET'&&r.comparisonAssessment?.status==='incomplete')&&after.aiExecution?.status==='completed'&&before.aiExecution.runId===after.aiExecution.runId&&equal(before.aiResults.filter(r=>r.ruleId!=='EC-TARGET'),after.aiResults.filter(r=>r.ruleId!=='EC-TARGET'));
         if(!comparisonRecovery&&before.aiDecision!==undefined&&before.aiExecution?.status==='completed'&&!equal(before.aiDecision,after.aiDecision))fail('已完成的AI终判审计记录不可改写。');
+        if(!trustedAI&&before.review.status!=='已确认'&&after.review.status==='已确认'&&requiresEcommerceClassification(before)&&!classificationReviewed(after))fail('请先完成人工评价分类复核，再确认五项检查。');
         if(!trustedAI&&before.aiExecution?.status==='running'&&!equal(before.review,after.review))fail('AI正在运行，完成后才能修改人工审核。');
         if(!trustedAI&&!trustedCalibration)for(const [ruleId,draft] of Object.entries(after.review.drafts)){if(draft.source==='AI接受'&&!equal(draft,before.review.drafts[ruleId])){const original=before.aiResults.find(r=>r.ruleId===ruleId);if(!original||!equal(draft,{...original,source:'AI接受'}))fail('接受AI必须完整保留AI原判；修改结论请使用人工改判并说明理由。');}}
         if(!trustedAI&&before.aiExecution?.status!=='completed'&&!equal(before.review,after.review)){
