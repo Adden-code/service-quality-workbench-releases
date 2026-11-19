@@ -1,5 +1,17 @@
 # 会话质检工作台
 
+## 0.11.13 评价归类组合修复候选版 · 完整内置
+
+**[免登录下载完整安装包（17条规则＋两场景）](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.13-full/QualityWorkbench-0.11.13-Full-Setup-Windows-x64.exe)**
+
+[发布与验收说明](https://github.com/Adden-code/service-quality-workbench-releases/releases/tag/v0.11.13-full) · [升级指引](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.13-full/Hotfix-Guide-zh.txt) · [SHA256](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.13-full/SHA256.txt) · [源码提交](https://github.com/Adden-code/service-quality-workbench-releases/commit/0a118c92cace083ff03751a81f96b8f8cb2a6838)
+
+高分含实质负面内容仍派生好评负向；正向与实质负面冲突组合精确归一化，无法确定时清空候选分类，修改前后值留痕并强制人工复核。升级后可直接恢复暂停队列，无需重导原文件或装载场景；原判定及冻结依据保留。
+
+2590项回归通过、0失败、1既有环境跳过；实际安装与存量升级、180行首次运行及旧版20/180暂停恢复、浏览器人工复核与审计、包内Java链路通过。合成模型替身，零外部模型调用；真实内网效果待复测。
+
+安装器97731386字节；SHA256：`0c1ad8ddf6e5e6382de7e396fa34741763fde8753cbca57889930f771d65dd7c`。7附件匿名完整下载核验。源码分支`source-v0.11.13`；含授权公开的规则示例，不含客户批次、用户工作区或密钥。
+
 ## 0.11.12 系统导出与审核优化候选版 · 完整内置
 
 **[免登录下载完整安装包（17条规则＋两场景）](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.12-full/QualityWorkbench-0.11.12-Full-Setup-Windows-x64.exe)**
