@@ -563,6 +563,7 @@ document.addEventListener('click',async event=>{
     if(action==='model-settings'){await openModelSettings();return;}
     if(action==='model-save'||action==='model-test'){await modelAction(action);return;}
     if(action==='run-ai'){await runAiTask(id);return;}
+    if(action==='retry-scene-dependencies'){const session=state.sessions.find(s=>s.id===id);if(!session)throw new Error('会话不存在。');lockSaving(true);toast('正在重试本行依赖项，已保存的人工记录会保留。');try{adoptWorkspace(await workspace.retryDependencies(session.taskId,session.id));}finally{lockSaving(false);}render();toast('本行依赖重试已保存；如有人工记录，请查看候选判断后自行核对并重新确认。');return;}
     if(action==='pause-ai'||action==='resume-ai'){lockSaving(true);try{adoptWorkspace(await workspace[action==='pause-ai'?'pauseAI':'resumeAI'](id));}finally{lockSaving(false);}render();toast(action==='pause-ai'?'已请求暂停，正在执行的请求完成后保留结果':'已继续AI质检');return;}
     if(action==='cancel-queued-ai'||action==='resume-ai-queue'){lockSaving(true);try{adoptWorkspace(await (action==='cancel-queued-ai'?workspace.cancelQueuedAI(id):workspace.resumeAIQueue()));}finally{lockSaving(false);}render();toast(action==='cancel-queued-ai'?'已取消本次AI运行，已保存结果保留':'已继续串行任务队列');return;}
     if(action==='workspace-retry'||action==='workspace-reload'){

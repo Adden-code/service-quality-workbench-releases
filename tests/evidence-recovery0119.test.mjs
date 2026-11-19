@@ -5,7 +5,7 @@ import path from 'node:path';
 import {pathToFileURL} from 'node:url';
 const root=path.resolve(process.env.VERIFY_APP_ROOT||'.');
 const load=(rel,base=root)=>import(pathToFileURL(path.join(base,rel)));
-test('123 ecommerce rows resume after restart: failed offsets recover once, 103 pending dispatch, 20 judgments remain frozen',async t=>{
+test('123 ecommerce rows resume after restart: failed offsets recover once, 103 pending dispatch, only classification-blocked time outcomes supersede',async t=>{
  const {createBusinessState,createImportedTask}=await load('public/domain.mjs'),{createCatalog}=await load('public/catalog.mjs'),{defaultScenePackage,SCENE_COLLECTIONS,sceneBasisForTask}=await load('public/scene-configuration.mjs'),{EC_HEADERS,EC_RULE_IDS}=await load('public/ecommerce-schema.mjs'),{workbook}=await load('public/io.mjs'),{parseEcommerceFile}=await load('public/ecommerce-input.mjs');
  const {createWorkspaceStore}=await load('server/workspace-store.mjs'),{createAiService}=await load('server/ai-service.mjs');
  const oldRoot=process.env.VERIFY_OLD_APP_ROOT;
@@ -35,12 +35,18 @@ test('123 ecommerce rows resume after restart: failed offsets recover once, 103 
  const paused=await store.read(),task=paused.state.tasks[0];assert.equal(task.aiStatus,'paused');assert.equal(task.capabilityMonitor.ecommerceClassification.technicalFailures,3);assert.equal(task.aiQueue.rows.filter(r=>r.status==='pending').length,103);
  const frozen=structuredClone(paused.state.sessions.slice(0,20).map(s=>({aiResults:s.aiResults,review:s.review,ecommerce:s.ecommerce}))),savedBasis=structuredClone(task.basisSnapshot),before=calls;
  await service.close();await store.close();store=await createWorkspaceStore({dataDir:dir});service=await createAiService({store,modelConfig:config,client:await client(false),onError:e=>errors.push(e.stack),maxAttempts:1,retryDelayMs:0});
- await service.resume(task.id);await service.waitForIdle();const after=await store.read();assert.equal(after.state.tasks[0].aiStatus,'completed',JSON.stringify({errors,calls,stop:after.state.tasks[0].aiQueue.stopReason}));assert.equal(calls-before,106);assert.deepEqual(after.state.sessions.slice(0,20).map(s=>({aiResults:s.aiResults,review:s.review,ecommerce:s.ecommerce})),frozen);assert.deepEqual(after.state.tasks[0].basisSnapshot,savedBasis);assert.deepEqual(after.state.tasks[0].source,task.source);
+ await service.resume(task.id);await service.waitForIdle();const after=await store.read();assert.equal(after.state.tasks[0].aiStatus,'completed',JSON.stringify({errors,calls,stop:after.state.tasks[0].aiQueue.stopReason}));assert.equal(calls-before,106);
+ for(const [i,s] of after.state.sessions.slice(0,20).entries()){
+  assert.deepEqual(s.review,frozen[i].review);assert.deepEqual(s.ecommerce,frozen[i].ecommerce);
+  if(i<3){const audit=s.sceneCapabilities.dependencyRecoveryHistory.at(-1);assert.deepEqual(audit.ruleIds,['EC-TIME']);assert.deepEqual(audit.beforeResults,frozen[i].aiResults.filter(r=>r.ruleId==='EC-TIME'));assert.deepEqual(audit.afterResults,s.aiResults.filter(r=>r.ruleId==='EC-TIME'));assert.deepEqual(s.aiResults.filter(r=>r.ruleId!=='EC-TIME'),frozen[i].aiResults.filter(r=>r.ruleId!=='EC-TIME'));assert.equal(s.aiResults[0].verdict,'无法判定','missing business timing standards still require review');}
+  else assert.deepEqual(s.aiResults,frozen[i].aiResults);
+ }
+ assert.deepEqual(after.state.tasks[0].basisSnapshot,savedBasis);assert.deepEqual(after.state.tasks[0].source,task.source);
  const repaired=after.state.sessions.filter(s=>s.sceneCapabilities.outputs.ecommerceClassification.evidence[0].locatorRepair);assert.equal(repaired.length,106);for(const s of repaired){const c=s.sceneCapabilities.outputs.ecommerceClassification,e=c.evidence[0];assert.equal(c.status,'completed');assert.equal(c.attempts,1);assert.equal(c.confidence,.95);assert.equal(e.quote,quote);assert.equal(s.turns[0].text.slice(e.start,e.end),quote);assert.deepEqual(e.locatorRepair,{version:1,method:'unique-exact',originalStart:'95',originalEnd:'121'});}
  const {validateWorkspace}=await load('server/workspace-validation.mjs');
- const altered=structuredClone(after.state);altered.sessions[0].sceneCapabilities.judgmentClassificationSnapshot.output.reason='forged';assert.throws(()=>validateWorkspace(altered,after.catalog,after.state,{trustedAI:true}),/分类依据/);
+ const altered=structuredClone(after.state);altered.sessions[0].sceneCapabilities.dependencyRecoveryHistory[0].beforeClassification.reason='forged';assert.throws(()=>validateWorkspace(altered,after.catalog,after.state,{trustedAI:true}),/审计|原判/);
  const accepted=structuredClone(after.state);accepted.sessions[0].review.drafts['EC-TIME']={...structuredClone(accepted.sessions[0].aiResults.find(r=>r.ruleId==='EC-TIME')),source:'AI接受'};assert.equal(validateWorkspace(accepted,after.catalog,after.state),true);
  assert.ok(after.state.tasks[0].aiQueue.rows.slice(0,3).every(r=>r.capabilityRecovery));assert.equal(after.state.tasks[0].capabilityMonitor.ecommerceClassification.technicalFailures,0);
  await service.close();service=null;await store.close();store=await createWorkspaceStore({dataDir:dir});assert.deepEqual((await store.read()).state,after.state,'repaired evidence survives persisted workspace restart');
- if(process.env.VERIFY_RECOVERY_OUTPUT)await fs.writeFile(process.env.VERIFY_RECOVERY_OUTPUT,JSON.stringify({status:'passed',oldRoot:oldRoot||null,testedRoot:root,syntheticRows:123,pausedCompleted:20,pausedPending:103,recoveredCapabilities:3,dispatchedPending:103,oneAttemptSuccesses:106,previousJudgmentsAndReviewPreserved:20,sourceAndBasisPreserved:true,repairAuditPersisted:true,externalModelCalls:0},null,2));
+ if(process.env.VERIFY_RECOVERY_OUTPUT)await fs.writeFile(process.env.VERIFY_RECOVERY_OUTPUT,JSON.stringify({status:'passed',oldRoot:oldRoot||null,testedRoot:root,syntheticRows:123,pausedCompleted:20,pausedPending:103,recoveredCapabilities:3,dispatchedPending:103,oneAttemptSuccesses:106,unaffectedRowsPreserved:17,dependencyTimeOutcomesSupersededWithAudit:3,allReviewPreserved:true,sourceAndBasisPreserved:true,repairAuditPersisted:true,externalModelCalls:0},null,2));
 });

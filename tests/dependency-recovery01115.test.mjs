@@ -1,0 +1,91 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import {createBusinessState,createImportedTask,saveReview,confirmReview,reopenReview} from '../public/domain.mjs';
+import {saveClassificationReview} from '../public/ecommerce-classification-review.mjs';
+import {createCatalog} from '../public/catalog.mjs';
+import {defaultScenePackage,SCENE_COLLECTIONS,sceneBasisForTask} from '../public/scene-configuration.mjs';
+import {EC_HEADERS,EC_RULE_IDS} from '../public/ecommerce-schema.mjs';
+import {workbook} from '../public/io.mjs';
+import {parseEcommerceFile} from '../public/ecommerce-input.mjs';
+import {createWorkspaceStore} from '../server/workspace-store.mjs';
+import {createAiService} from '../server/ai-service.mjs';
+import {createArkClient} from '../server/ark-client.mjs';
+import {createWorkflowTraceStore} from '../server/workflow-traces.mjs';
+import {validateWorkspace} from '../server/workspace-validation.mjs';
+import {classificationBlockedRuleIds,dependencyStaleness,isDependencyRecoveryTransition,validateDependencyRecoveryHistory} from '../public/scene-dependency-staleness.mjs';
+
+const copy=x=>structuredClone(x),now='2026-11-19T00:00:00Z';
+const indexOf=s=>Number(s.turns[0].text.match(/#(\d+)/)[1]);
+const outcome=(ruleId,verdict='符合',reason='Synthetic source checked')=>({ruleId,verdict,reason,evidence:[2],referenceIds:[],confidence:.95,conflictsWith:[]});
+const businessBasis=()=>({executionProfile:'ec-business-v1',capturedAt:now,effectiveDate:'2026-11-18',rules:EC_RULE_IDS.map(id=>({id,title:id,name:id,version:'V3.0',category:'Synthetic',scope:'Synthetic',policyIds:[],passCriteria:'Synthetic pass',failCriteria:'Synthetic fail',exceptionCriteria:'Synthetic unknown'})),policies:[],businessProfile:{schemaVersion:1,similarity:{method:'normalized-bigram-dice-v1',threshold:.85,minimumRecords:2,scope:'batch'},structure:{minimumSteps:3,counting:'grapheme-with-spaces-v1',closingWaiver:{zh:200,en:200}},privacy:{maskedAllowed:false},timing:{status:'ready',mode:'elapsed',defaultHours:24,defaultSource:'Synthetic manually approved threshold',siteField:'国家',sites:[],standards:[]}}});
+async function fixture(t,{count=21,failedCount=5,missingTime=false,businessUnknown=false,traces=false,failedSemantic=[]}={}){
+ const root=path.resolve('tests/artifacts/dependency-recovery01115');await fs.mkdir(root,{recursive:true});const dir=await fs.mkdtemp(path.join(root,'test-'));let store=await createWorkspaceStore({dataDir:dir}),traceStore=traces?await createWorkflowTraceStore({dataDir:dir}):null,service;
+ t.after(async()=>{await service?.close();await store.close();await traceStore?.close();assert.ok(dir.startsWith(root+path.sep));await fs.rm(dir,{recursive:true,force:true});});
+ const state=createBusinessState(),catalog=createCatalog(),basis=businessBasis(),p=defaultScenePackage({id:'电商评论回复',name:'Synthetic EC',engine:'ecommerce'},basis);
+ p.configuration.status='published';p.configuration.executionMode='configured';p.configuration.capabilities=[{key:'ecommerceClassification',phase:'pre',executorVersion:'scene-capability.v1',dependsOn:[]}];p.configuration.ruleDependencies={'EC-STEPS':['ecommerceClassification']};p.template.renderMode='configured';SCENE_COLLECTIONS.forEach(k=>state[k]=[]);state.sceneConfigurations=[p.configuration];state.deliveryTemplates=[p.template];state.sceneConfigurationMigration=1;
+ const rows=Array.from({length:count},(_,i)=>{const r=Array(22).fill('');r[3]='Synthetic';r[8]=`Synthetic #${i}: battery fails`;r[9]=`Synthetic response ${i}`;r[10]='5';r[12]='2026-11-17 09:00:00';r[13]=missingTime&&i===1?'':'2026-11-17 10:00:00';return r;});
+ const bytes=Buffer.from(await workbook([{name:'Sheet4',headers:[...EC_HEADERS],rows:[Array(22).fill(''),...rows]}])),parsed=await parseEcommerceFile({name:'synthetic.xlsx',size:bytes.length,arrayBuffer:async()=>bytes});assert.equal(parsed.valid,true,JSON.stringify(parsed.errors));
+ const source=await store.putSource(bytes,'synthetic.xlsx'),next=createImportedTask(state,{name:'Synthetic dependency recovery',fileName:'synthetic.xlsx',sessions:parsed.sessions,source,basisSnapshot:sceneBasisForTask(state,catalog,'电商评论回复',now),reviewer:'Synthetic reviewer',executionSettings:{concurrency:1},now});await store.save({state:next,catalog,baseRevision:0,mutationId:'synthetic-initial'});
+ const errors=[],calls={capability:[],row:[],targeted:[]},switches={initial:true,failTargeted:false,hook:null,config:null};
+ const config={model:'synthetic-model',authMode:'none',baseUrl:'http://127.0.0.1:1',configured:true,connectionTested:true};
+ const client={inspectSceneCapability:async({input})=>{const i=Number(input.blocks[0].text.match(/#(\d+)/)[1]);calls.capability.push(i);if(switches.initial&&i<failedCount)throw Object.assign(new Error('Synthetic capability failure'),{code:'INVALID_OUTPUT'});const b=input.blocks[0];return{status:'completed',value:{evaluationType:'好评负向',polarity:'negative',vocKind:'substantive'},confidence:.95,reason:'Synthetic source classification',evidence:[{blockId:b.id,quote:b.text,start:0,end:b.text.length}]};},inspectEcommerceRow:async req=>{const i=indexOf(req.session);if(req.ruleIds){calls.targeted.push({i,ruleIds:copy(req.ruleIds),basisRuleIds:req.basis.rules.map(r=>r.id),model:req.config.model});await switches.hook?.();if(switches.failTargeted)throw Object.assign(new Error('Synthetic targeted failure'),{code:'TIMEOUT'});return{results:[outcome('EC-STEPS')],modelId:'synthetic-model'};}calls.row.push(i);if(switches.initial&&failedSemantic.includes(i))throw Object.assign(new Error('Synthetic row failure'),{code:'TIMEOUT'});return{results:EC_RULE_IDS.filter(id=>id!=='EC-TIME').map(id=>outcome(id,businessUnknown&&(id==='EC-TEXT'&&i===0||id==='EC-STEPS'&&i===2)?'无法判定':'符合',businessUnknown&&id==='EC-STEPS'&&i===2?'商品资料缺失，无法核对操作步骤。':'Synthetic original result')),modelId:'synthetic-model'};}};
+ const open=async()=>{service=await createAiService({store,traceStore,modelConfig:{getPrivate:()=>switches.config||config},client,onError:e=>errors.push(e.stack),maxAttempts:1,retryDelayMs:0});};await open();
+ return{get store(){return store;},get ai(){return service;},get traces(){return traceStore;},taskId:next.tasks[0].id,calls,switches,errors,async restart(){await service.close();await store.close();await traceStore?.close();store=await createWorkspaceStore({dataDir:dir});traceStore=traces?await createWorkflowTraceStore({dataDir:dir}):null;await open();},async start(){await service.start(next.tasks[0].id,'synthetic-dependency-run');await service.waitForIdle();return store.read();}};
+}
+
+test('resume supersedes only missing-classification outcomes; business unknowns and human-confirmed rows stay frozen',async t=>{
+ const f=await fixture(t,{missingTime:true,businessUnknown:true});let doc=await f.start();assert.equal(doc.state.tasks[0].aiStatus,'paused',JSON.stringify(f.errors));
+ assert.deepEqual(classificationBlockedRuleIds(doc.state.sessions[0]),['EC-TIME','EC-STEPS']);assert.deepEqual(classificationBlockedRuleIds(doc.state.sessions[2]),['EC-TIME']);
+ let edited=saveReview(doc.state,doc.state.sessions[3].id,{ruleId:'EC-TEXT',verdict:'不符合',reason:'Synthetic human override',evidence:[2]},new Date(Date.now()+1000).toISOString());
+ const confirmedId=doc.state.sessions[4].id;edited=saveClassificationReview(edited,confirmedId,{evaluationType:'好评负向',vocKind:'substantive',reason:'Synthetic manual classification'},new Date(Date.now()+2000).toISOString());
+ for(const [i,ruleId] of EC_RULE_IDS.entries())edited=saveReview(edited,confirmedId,{ruleId,verdict:'符合',reason:'Synthetic independent human check',evidence:[2]},new Date(Date.now()+3000+i*1000).toISOString());
+ edited=confirmReview(edited,confirmedId,new Date(Date.now()+10000).toISOString());await f.store.save({state:edited,catalog:doc.catalog,baseRevision:doc.revision,mutationId:'synthetic-human-review'});
+ const preserved=s=>({aiResults:s.aiResults,aiExecution:s.aiExecution,sceneCapabilities:s.sceneCapabilities,review:s.review,ecommerce:s.ecommerce});
+ const before=(await f.store.read()).state,unaffected=copy(before.sessions.slice(5,20).map(preserved));f.switches.initial=false;await f.restart();await f.ai.resume(f.taskId);await f.ai.waitForIdle();doc=await f.store.read();assert.equal(doc.state.tasks[0].aiStatus,'completed',JSON.stringify(f.errors));assert.deepEqual(f.errors,[]);
+ const [normal,missing,business,human,confirmed]=doc.state.sessions;
+ assert.deepEqual(normal.aiResults.filter(r=>!['EC-TIME','EC-STEPS'].includes(r.ruleId)),before.sessions[0].aiResults.filter(r=>!['EC-TIME','EC-STEPS'].includes(r.ruleId)));assert.equal(normal.aiResults.find(r=>r.ruleId==='EC-TIME').verdict,'符合');assert.equal(normal.aiResults.find(r=>r.ruleId==='EC-STEPS').verdict,'符合');
+ assert.equal(missing.aiResults[0].verdict,'无法判定');assert.match(missing.aiResults[0].reason,/时间字段缺失/);assert.deepEqual(classificationBlockedRuleIds(missing),[]);
+ assert.deepEqual(business.aiResults.find(r=>r.ruleId==='EC-STEPS'),before.sessions[2].aiResults.find(r=>r.ruleId==='EC-STEPS'));assert.deepEqual(preserved(human),preserved(before.sessions[3]));assert.deepEqual(confirmed,before.sessions[4]);assert.deepEqual(doc.state.sessions.slice(5,20).map(preserved),unaffected);
+ for(const i of [0,1,2]){const atPersist=copy(doc.state.sessions[i]);delete atPersist.aiDecision;assert.equal(isDependencyRecoveryTransition(before.sessions[i],atPersist),true);assert.deepEqual(doc.state.sessions[i].aiExecution,before.sessions[i].aiExecution);}
+ assert.deepEqual(f.calls.targeted.map(x=>x.i),[0,1]);assert.ok(f.calls.targeted.every(x=>JSON.stringify(x.ruleIds)==='["EC-STEPS"]'&&JSON.stringify(x.basisRuleIds)==='["EC-STEPS"]'));
+ for(const s of [human,confirmed]){const info=dependencyStaleness(s,doc.state.tasks[0]);assert.equal(info.recovered,true);assert.equal(info.protected,true);assert.equal(info.canRetry,true);assert.match(info.message,/已恢复/);}
+ const frozen=copy(confirmed);await f.ai.retryDependencies(f.taskId,confirmed.id);doc=await f.store.read();assert.deepEqual(doc.state.sessions[4],frozen);assert.equal(dependencyStaleness(frozen,doc.state.tasks[0]).candidateResults.length,2);
+ let reviewed=reopenReview(doc.state,confirmed.id,new Date(Date.now()+20000).toISOString());reviewed=saveClassificationReview(reviewed,confirmed.id,{evaluationType:'好评负向',vocKind:'substantive',reason:'Rechecked against recovered candidate'},new Date(Date.now()+21000).toISOString());assert.equal(dependencyStaleness(reviewed.sessions[4],reviewed.tasks[0]).stale,true,'classification alone does not resolve dependent checks');
+ for(const [i,ruleId] of ['EC-TIME','EC-STEPS'].entries())reviewed=saveReview(reviewed,confirmed.id,{ruleId,verdict:'符合',reason:'Human rechecked recovered dependency',evidence:[2]},new Date(Date.now()+22000+i*1000).toISOString());assert.equal(dependencyStaleness(reviewed.sessions[4],reviewed.tasks[0]).stale,true,'confirmation is still required');
+ reviewed=confirmReview(reviewed,confirmed.id,new Date(Date.now()+25000).toISOString());const resolved=dependencyStaleness(reviewed.sessions[4],reviewed.tasks[0]);assert.equal(resolved.stale,false);assert.equal(resolved.canRetry,false);assert.equal(resolved.resolvedByHuman,true);assert.deepEqual(reviewed.sessions[4].aiResults,frozen.aiResults);assert.deepEqual(reviewed.sessions[4].sceneCapabilities,frozen.sceneCapabilities);
+ await f.store.save({state:reviewed,catalog:doc.catalog,baseRevision:doc.revision,mutationId:'candidate-reviewed'});doc=await f.store.read();
+ await f.restart();assert.deepEqual((await f.store.read()).state,doc.state);
+});
+
+test('explicit row retry retains partial successes, audits old decisions, and refuses a changed frozen model',async t=>{
+ const f=await fixture(t,{count:1,failedCount:1,traces:true});const before=await f.start(),s=before.state.sessions[0];assert.equal(before.state.tasks[0].aiStatus,'completed');assert.ok(s.aiDecision);
+ f.switches.initial=false;f.switches.config={model:'changed-model',authMode:'none',baseUrl:'http://127.0.0.1:1',configured:true,connectionTested:true};const calls=f.calls.capability.length;await assert.rejects(f.ai.retryDependencies(f.taskId,s.id),/冻结配置/);assert.equal(f.calls.capability.length,calls);
+ f.switches.config=null;f.switches.failTargeted=true;await f.ai.retryDependencies(f.taskId,s.id);let doc=await f.store.read(),row=doc.state.sessions[0];assert.equal(row.aiResults[0].verdict,'符合');assert.equal(row.aiResults.find(r=>r.ruleId==='EC-STEPS').verdict,'无法判定');assert.equal(row.aiDecisionHistory.length,1);assert.deepEqual(row.aiDecisionHistory[0],s.aiDecision);assert.equal(dependencyStaleness(row,doc.state.tasks[0]).lastError.errorCode,'timeout');assert.equal(row.aiExecution.status,'completed');
+ const partial=copy(row);f.switches.failTargeted=false;await f.ai.retryDependencies(f.taskId,s.id);doc=await f.store.read();row=doc.state.sessions[0];assert.equal(row.aiResults.find(r=>r.ruleId==='EC-STEPS').verdict,'符合');assert.deepEqual(row.aiResults[0],partial.aiResults[0]);assert.equal(row.aiDecisionHistory.length,2);assert.equal(row.sceneCapabilities.dependencyRecoveryHistory.length,2);assert.equal(dependencyStaleness(row,doc.state.tasks[0]).stale,false);assert.equal(isDependencyRecoveryTransition(partial,row),true);
+ const scopeAttack=copy(row),last=scopeAttack.sceneCapabilities.dependencyRecoveryHistory.at(-1);scopeAttack.aiResults.find(r=>r.ruleId==='EC-TEXT').verdict='不符合';last.ruleIds=['EC-TEXT','EC-STEPS'];last.beforeResults=partial.aiResults.filter(r=>last.ruleIds.includes(r.ruleId));last.afterResults=scopeAttack.aiResults.filter(r=>last.ruleIds.includes(r.ruleId));assert.equal(isDependencyRecoveryTransition(partial,scopeAttack),false);assert.throws(()=>validateDependencyRecoveryHistory(partial,scopeAttack,{trustedAI:true}),/定向/);
+ assert.throws(()=>validateDependencyRecoveryHistory(partial,row,{trustedAI:false}),/定向/);for(const review of [{status:'已确认'},{classification:{at:now}},{notes:'Human notes'},{drafts:{'EC-TEXT':outcome('EC-TEXT')}},{history:[{at:now}]}]){const a=copy(partial),b=copy(row);a.review={...a.review,...review};b.review=copy(a.review);assert.equal(isDependencyRecoveryTransition(a,b),false,'human state cannot opt into automatic superseding');}
+ const runs=await f.traces.list(f.taskId),retries=runs.filter(r=>r.id.startsWith('dependency-'));assert.equal(retries.length,2);assert.deepEqual(retries.map(r=>r.status).sort(),['completed','partial']);for(const run of retries){const trace=await f.traces.read(run.id);assert.equal(trace.meta.originalRunId,'synthetic-dependency-run');assert.equal(trace.meta.sessionId,s.id);assert.ok(trace.nodes.some(n=>n.id.endsWith('targeted-request')));assert.ok(trace.nodes.some(n=>n.id.endsWith('recovery-persist')));assert.ok(doc.state.tasks[0].aiQueue.rows[0].capabilityRecovery.some(a=>a.traceId===run.id));}
+ const forged=copy(doc.state);forged.sessions[0].sceneCapabilities.dependencyRecoveryHistory[0].beforeResults[0].reason='Forged prior result';assert.throws(()=>validateWorkspace(forged,doc.catalog,doc.state,{trustedAI:true}),/审计|原判/);
+ const illegal=copy(before.state);illegal.sessions[0].aiResults[1].verdict='不符合';assert.throws(()=>validateWorkspace(illegal,before.catalog,before.state,{trustedAI:true}),/不可改写|不一致/);
+});
+
+test('human edits arriving during an explicit retry protect the whole row and retain a recovery candidate',async t=>{
+ const f=await fixture(t,{count:1,failedCount:1});const before=await f.start(),id=before.state.sessions[0].id;f.switches.initial=false;let frozen;
+ f.switches.hook=async()=>{const doc=await f.store.read(),state=saveReview(doc.state,id,{ruleId:'EC-TEXT',verdict:'不符合',reason:'Concurrent synthetic human edit',evidence:[2]},new Date().toISOString());await f.store.save({state,catalog:doc.catalog,baseRevision:doc.revision,mutationId:'concurrent-human'});frozen=copy(state.sessions[0]);};
+ await f.ai.retryDependencies(f.taskId,id);const after=await f.store.read();assert.deepEqual(after.state.sessions[0],frozen);assert.equal(dependencyStaleness(after.state.sessions[0],after.state.tasks[0]).recovered,true);assert.deepEqual(f.errors,[]);
+});
+
+test('a stale row from a previous run retries with its original model snapshot and inspection cutoff',async t=>{
+ const f=await fixture(t,{count:2,failedCount:1,failedSemantic:[1]});const first=await f.start(),old=first.state.sessions[0],oldRun=copy(first.state.tasks[0].aiRun);assert.equal(first.state.tasks[0].aiStatus,'partial');f.switches.initial=false;
+ await f.ai.start(f.taskId,'synthetic-newer-run');await f.ai.waitForIdle();let doc=await f.store.read();assert.equal(doc.state.tasks[0].aiStatus,'completed');assert.equal(doc.state.sessions[0].aiExecution.runId,oldRun.id);assert.equal(dependencyStaleness(doc.state.sessions[0],doc.state.tasks[0]).canRetry,true);
+ await f.ai.retryDependencies(f.taskId,old.id);doc=await f.store.read();const s=doc.state.sessions[0];assert.equal(s.aiResults[0].verdict,'符合');assert.equal(s.aiResults[0].timeFacts.inspectionAt,oldRun.inspectionAt);assert.equal(s.aiExecution.runId,oldRun.id);assert.equal(s.sceneCapabilities.dependencyRecoveryHistory.at(-1).runId,oldRun.id);assert.deepEqual(f.errors,[]);
+});
+
+test('targeted ecommerce wire requests and validates EC-STEPS alone',async()=>{
+ const basis=businessBasis(),session={id:'synthetic-wire',turns:[{id:1,role:'客户',text:'Synthetic customer comment'},{id:2,role:'客服',text:'Synthetic response'}]},config={model:'synthetic',authMode:'none',baseUrl:'http://127.0.0.1:1'};let sent,extra=false;
+ const client=createArkClient({fetchImpl:async(url,options)=>{sent=JSON.parse(options.body);return new Response(JSON.stringify({choices:[{finish_reason:'stop',message:{content:JSON.stringify({results:extra?[outcome('EC-STEPS'),outcome('EC-TEXT')]:[outcome('EC-STEPS')]})}}]}));}});
+ assert.equal((await client.inspectEcommerceRow({config,session,basis,ruleIds:['EC-STEPS']})).results.length,1);assert.deepEqual(JSON.parse(sent.messages[1].content).basis.rules.map(r=>r.id),['EC-STEPS']);assert.match(sent.messages[0].content,/仅检查并精确返回EC-STEPS/);
+ extra=true;await assert.rejects(client.inspectEcommerceRow({config,session,basis,ruleIds:['EC-STEPS']}));await assert.rejects(client.inspectEcommerceRow({config,session,basis,ruleIds:['EC-TEXT']}),/仅允许/);
+});

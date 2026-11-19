@@ -25,6 +25,7 @@ import {createWorkspaceRestore} from './server/workspace-restore.mjs';
 import {encodeWorkspaceArchive,decodeWorkspaceArchive,backupSummary,MAX_BACKUP_BYTES} from './server/workspace-archive.mjs';
 import {extractSceneDocument} from './server/scene-package-preparation.mjs';
 import {NP_CATEGORIES} from './public/scene-configuration.mjs';
+import {dependencyStaleness} from './public/scene-dependency-staleness.mjs';
 
 const project=path.dirname(fileURLToPath(import.meta.url));
 const types={'.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8','.mjs':'text/javascript; charset=utf-8','.js':'text/javascript; charset=utf-8','.json':'application/json; charset=utf-8','.svg':'image/svg+xml','.xlsx':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'};
@@ -95,7 +96,7 @@ export async function createWorkbenchServer({dataDir=process.env.DEMO_DATA_DIR||
         const snapshot=store.transportSnapshot(),task=snapshot.state?.tasks.find(t=>t.id===executionPage[1]);if(!task)throw new WorkspaceError('任务不存在。',404);
         const offset=Number(url.searchParams.get('offset')||0),limit=Number(url.searchParams.get('limit')||25);
         if(!Number.isSafeInteger(offset)||offset<0||!Number.isSafeInteger(limit)||limit<1||limit>50)throw new WorkspaceError('执行明细分页无效。');
-        const rows=task.aiQueue?.rows||[];return await json(res,200,{revision:snapshot.revision,taskId:task.id,offset,total:rows.length,rows:rows.slice(offset,offset+limit).map(row=>({...row,batchIndex:task.aiQueue.batches?.find(b=>b.id===row.batchId)?.index??1,businessId:snapshot.state.sessions.find(s=>s.id===row.sessionId)?.externalId||row.sessionId}))});
+        const rows=task.aiQueue?.rows||[];return await json(res,200,{revision:snapshot.revision,taskId:task.id,offset,total:rows.length,rows:rows.slice(offset,offset+limit).map(row=>{const session=snapshot.state.sessions.find(s=>s.id===row.sessionId),dependency=dependencyStaleness(session,task);return{...Object.fromEntries(['id','sessionId','sourceRow','status','attempts','durationMs','error'].filter(key=>row[key]!==undefined).map(key=>[key,row[key]])),batchIndex:task.aiQueue.batches?.find(b=>b.id===row.batchId)?.index??1,businessId:session?.externalId||row.sessionId,dependency:{stale:dependency.stale,canRetry:dependency.canRetry,protected:dependency.protected,count:dependency.ruleIds.length}};})});
       }
       if(pathname==='/api/build-info'&&req.method==='GET'){await json(res,200,buildInfo);return;}
       if(pathname.startsWith('/api/workspace-backup/')){
@@ -358,13 +359,14 @@ export async function createWorkbenchServer({dataDir=process.env.DEMO_DATA_DIR||
         if(input.action==='void'){if(input.administratorConfirmed!==true||typeof input.actor!=='string'||!input.actor.trim())throw new WorkspaceError('请确认本机管理员操作并填写操作人。');if(busy())throw new WorkspaceError('请先结束正在运行的任务与交付任务，再作废。',409);}
         const {taskIds,action,...options}=input;await json(res,200,{...await store.updateTaskLifecycle(taskIds,action,options),token,aiRuntime:ai.runtime()});return;
       }
-      const aiTaskRoute=pathname.match(/^\/api\/tasks\/([^/]+)\/ai(?:\/(pause|resume|cancel))?$/);
+      const aiTaskRoute=pathname.match(/^\/api\/tasks\/([^/]+)\/ai(?:\/(pause|resume|cancel|retry-dependencies))?$/);
       if(pathname.startsWith('/api/ai/tasks/')||aiTaskRoute){
         if(req.method!=='POST')throw new WorkspaceError('Method not allowed',405);
         requireMutation('application/json');const input=await parseJson(1024);
         const action=aiTaskRoute?.[2],taskId=aiTaskRoute?.[1]??pathname.slice('/api/ai/tasks/'.length);
-        if(!input||Array.isArray(input)||typeof input!=='object'||Object.keys(input).some(key=>!(action?[]:['runId','settings']).includes(key)))throw new WorkspaceError('AI任务请求字段无效。');
-        const saved=action?await ai[action](taskId):await ai.start(taskId,input.runId,input.settings);await json(res,action?200:202,{...saved,token,aiRuntime:ai.runtime()});return;
+        if(!input||Array.isArray(input)||typeof input!=='object'||Object.keys(input).some(key=>!(action==='retry-dependencies'?['sessionId']:action?[]:['runId','settings']).includes(key)))throw new WorkspaceError('AI任务请求字段无效。');
+        if(action==='retry-dependencies'&&(typeof input.sessionId!=='string'||!input.sessionId.trim()))throw new WorkspaceError('请选择需要重试依赖项的会话。');
+        const saved=action==='retry-dependencies'?await ai.retryDependencies(taskId,input.sessionId):action?await ai[action](taskId):await ai.start(taskId,input.runId,input.settings);await json(res,action?200:202,{...saved,token,aiRuntime:ai.runtime()});return;
       }
       if(pathname==='/api/workspace'){
         if(req.method==='GET'&&req.headers['x-workspace-sync']==='records-v1'){await json(res,200,{initialized:true});return;}

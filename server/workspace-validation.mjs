@@ -18,6 +18,7 @@ import {validateSceneRegistry,latestSceneConfiguration,freezeSceneExecution,scen
 import {inspectionRules} from '../public/scene-aggregate.mjs';
 import {assertTaskCatalogScene,catalogRecordMatchesScene} from '../public/catalog-scenes.mjs';
 import {validateTriageTask,validateTriageSession,validateReturnTransition,validateDecisionHistoryTransition} from './triage-validation.mjs';
+import {validateDependencyRecoveryHistory} from '../public/scene-dependency-staleness.mjs';
 import {AI_TASK_QUEUE_STATUSES,AI_TASK_QUEUE_PAUSE_REASONS} from './ai-task-scheduler.mjs';
 import {validateCleaningReportSnapshot} from '../public/conversation-cleaning.mjs';
 import {isFinalSession} from '../public/ai-triage.mjs';
@@ -434,12 +435,13 @@ export function validateWorkspace(state,catalog,previous=null,{authenticateNewSn
         if(!after||!equal(without(before,trustedAI?['aiResults','aiExecution','aiDecision','aiDecisionHistory','calibrationAssignments','sceneCapabilities']:trustedCalibration?['review','ruleCalibrationRevocations']:['review']),without(after,trustedAI?['aiResults','aiExecution','aiDecision','aiDecisionHistory','calibrationAssignments','sceneCapabilities']:trustedCalibration?['review','ruleCalibrationRevocations']:['review'])))fail('业务会话原文、标识与初始结果不可改写。');
         if(isRawTranscriptSession(before))validateRawReviewTimeTransition(before,after,trustedAI);
         try{validatePendingResolutionTransition(before,after,previous,state,{trustedAI});}catch(error){fail(error.message);}
-        if(trustedAI)try{validateDecisionHistoryTransition(before,after);}catch(error){fail(error.message);}
+        let sceneRecovery=false;try{sceneRecovery=validateDependencyRecoveryHistory(before,after,{trustedAI});}catch(error){fail(error.message);}
+        if(trustedAI&&!sceneRecovery)try{validateDecisionHistoryTransition(before,after);}catch(error){fail(error.message);}
         const oldClassification=before.sceneCapabilities?.judgmentClassificationSnapshot,newClassification=after.sceneCapabilities?.judgmentClassificationSnapshot;
-        if(!equal(oldClassification,newClassification)&&(oldClassification||!trustedAI||before.aiExecution?.status!=='completed'||!equal(before.aiResults,after.aiResults)||!equal(newClassification,{runId:before.aiExecution.runId,output:before.sceneCapabilities?.outputs?.ecommerceClassification??null})))fail('既有时效判定的分类依据只能由恢复流程原样冻结，不可改写。');
+        if(!sceneRecovery&&!equal(oldClassification,newClassification)&&(oldClassification||!trustedAI||before.aiExecution?.status!=='completed'||!equal(before.aiResults,after.aiResults)||!equal(newClassification,{runId:before.aiExecution.runId,output:before.sceneCapabilities?.outputs?.ecommerceClassification??null})))fail('既有时效判定的分类依据只能由恢复流程原样冻结，不可改写。');
         if(!trustedAI&&!trustedCalibration)try{validateReturnTransition(before,after);}catch(error){fail(error.message);}
         const comparisonRecovery=trustedAI&&before.ecommerce&&before.review.status==='待审核'&&!Object.keys(before.review.drafts).length&&!before.review.notes?.trim()&&!before.review.history?.length&&before.aiResults.some(r=>r.ruleId==='EC-TARGET'&&r.comparisonAssessment?.status==='incomplete')&&after.aiExecution?.status==='completed'&&before.aiExecution.runId===after.aiExecution.runId&&equal(before.aiResults.filter(r=>r.ruleId!=='EC-TARGET'),after.aiResults.filter(r=>r.ruleId!=='EC-TARGET'));
-        if(!comparisonRecovery&&before.aiDecision!==undefined&&before.aiExecution?.status==='completed'&&!equal(before.aiDecision,after.aiDecision))fail('已完成的AI终判审计记录不可改写。');
+        if(!sceneRecovery&&!comparisonRecovery&&before.aiDecision!==undefined&&before.aiExecution?.status==='completed'&&!equal(before.aiDecision,after.aiDecision))fail('已完成的AI终判审计记录不可改写。');
         if(!trustedAI&&before.review.status!=='已确认'&&after.review.status==='已确认'&&requiresEcommerceClassification(before)&&!classificationReviewed(after))fail('请先完成人工评价分类复核，再确认五项检查。');
         if(!trustedAI&&before.aiExecution?.status==='running'&&!equal(before.review,after.review))fail('AI正在运行，完成后才能修改人工审核。');
         if(!trustedAI&&!trustedCalibration)for(const [ruleId,draft] of Object.entries(after.review.drafts)){if(draft.source==='AI接受'&&!equal(draft,before.review.drafts[ruleId])){const original=before.aiResults.find(r=>r.ruleId===ruleId);if(!original||!equal(draft,{...original,source:'AI接受'}))fail('接受AI必须完整保留AI原判；修改结论请使用人工改判并说明理由。');}}
@@ -447,7 +449,7 @@ export function validateWorkspace(state,catalog,previous=null,{authenticateNewSn
           if(Object.values(after.review.drafts).some(draft=>draft.source==='AI接受'))fail('AI尚未完整完成，不能接受AI判定。');
           if(before.aiExecution?.errorCode==='dependency_incomplete'&&after.review.status==='已确认'&&Object.values(after.review.drafts).some(draft=>draft.source!=='人工独立审核'))fail('完整批次比较尚未完成；只能明确逐项人工独立审核，不能确认未完整的AI结论。');
         }
-        if(trustedAI&&!comparisonRecovery&&before.aiExecution?.status==='completed'&&(!equal(before.aiResults,after.aiResults)||!equal(before.aiExecution,after.aiExecution)))fail('已完成AI执行及初始结果不可改写。');
+        if(trustedAI&&!sceneRecovery&&!comparisonRecovery&&before.aiExecution?.status==='completed'&&(!equal(before.aiResults,after.aiResults)||!equal(before.aiExecution,after.aiExecution)))fail('已完成AI执行及初始结果不可改写。');
       }
     }
   }

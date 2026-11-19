@@ -3,13 +3,13 @@ import {isBusinessEcommerceBasis} from '../public/ecommerce-business-profile.mjs
 import {createHash} from 'node:crypto';
 import {setTimeout as delay} from 'node:timers/promises';
 import {WorkspaceError,canonical} from './workspace-validation.mjs';
-import {mergeEcommerceResults} from './ecommerce-engine.mjs';
+import {mergeEcommerceResults,timeJudgment} from './ecommerce-engine.mjs';
 import {planEcommerceComparisons,mergeComparisonGroups} from './ecommerce-comparison.mjs';
 import {comparisonRetryFeedback} from './ecommerce-comparison-wire.mjs';
 import {validateEcommerceSource} from '../public/ecommerce-schema.mjs';
 import {workflowInput,workflowDependencies} from './workflow-contract.mjs';
 import {modelConfigSnapshot,modelConfigFingerprint} from './model-config.mjs';
-import {applyAIDecisions,archiveFailedAIDecision} from '../public/ai-triage.mjs';
+import {applyAIDecisions,archiveFailedAIDecision,deriveAIDecision} from '../public/ai-triage.mjs';
 import {createTaskQueue,pendingTaskEntries as allPendingTaskEntries,taskQueueEntry,appendTaskEntry,syncTaskEntries,taskQueueRuntime as allTaskQueueRuntime} from './ai-task-scheduler.mjs';
 import {computeEcommerceTimeFacts,isStageATimeBasis,TIME_EXECUTOR_VERSION,unrepliedSemanticResults} from '../public/ecommerce-time-results.mjs';
 import {RAW_INPUT_MODE,isRawTranscriptSession,validateRawTranscript} from '../public/raw-transcript.mjs';
@@ -18,10 +18,11 @@ import {rawTimeRuleIds} from '../public/raw-evidence.mjs';
 
 import {executeSceneCapabilities,enforceSceneResults,recordCapabilityOutcomes,reconcileCapabilityOutcomes} from './scene-capabilities.mjs';
 import {inspectionBasis} from '../public/scene-aggregate.mjs';
+import {classificationBlockedRuleIds,hasHumanDependencyReview,dependencyStaleness,dependencyRecoveryRun} from '../public/scene-dependency-staleness.mjs';
 
 const copy=value=>structuredClone(value),now=()=>new Date().toISOString();
 const digest=value=>createHash('sha256').update(canonical(value)).digest('hex');
-const human=s=>s.review.status!=='待审核'||Object.keys(s.review.drafts).length>0||Boolean(s.review.notes?.trim())||Boolean(s.review.history?.length);
+const human=hasHumanDependencyReview;
 const failedRawFallback=s=>isRawTranscriptSession(s)&&s.aiExecution?.status==='failed'&&s.aiResults.length>0&&s.aiResults.every(result=>result.verdict==='无法判定'&&(result.rawValidation?.status==='program-fallback'||s.rawTranscript.timePolicy.mode==='unavailable'&&result.rawValidation?.status==='verified'&&result.rawValidation.reasonCodes?.includes('source_time_unavailable')&&result.confidence===0&&result.evidenceQuotes?.length===0));
 const comparisonPending=s=>s.aiResults?.some(r=>r.comparisonAssessment?.status==='incomplete');
 const eligible=s=>!human(s)&&((!s.aiResults.length||failedRawFallback(s))&&s.aiExecution?.status!=='completed'||comparisonPending(s));
@@ -105,6 +106,58 @@ export async function createAiService(options={}){
  const writable=(state,task)=>{try{assertTaskWritable(state,task);}catch(error){throw new WorkspaceError(error.message,409);}};
  async function updateState(change){const saved=await store.updateAI(({state,catalog})=>{change(state);syncTaskEntries(state);return{state,catalog};});cachedState=saved.state;return saved;}
  async function update(taskId,change){return updateState(state=>{const task=state.tasks.find(t=>t.id===taskId);if(!task)throw new WorkspaceError('质检任务不存在。',404);change(state,task);});}
+ async function recoverDependencies({taskId,index,config,signal,step,trigger='automatic-recovery',traceId}){
+  const doc=await read(),task=doc.state.tasks.find(t=>t.id===taskId),row=task.aiQueue.rows[index],session=doc.state.sessions.find(s=>s.id===row.sessionId),prior=row.capabilityRecovery?.at(-1)?.candidateCapabilities||row.sceneCapabilities||session.sceneCapabilities;
+  const run=dependencyRecoveryRun(session,task)||task.aiRun;
+  if(modelConfigFingerprint(config)!==modelConfigFingerprint(run.modelConfig??modelConfigSnapshot({model:run.modelId})))throw new WorkspaceError('当前模型设置与本行原运行冻结配置不同，不能重算旧行依赖。',409);
+  const beforeResults=copy(session.aiResults),beforeReview=copy(session.review),source=isBusinessEcommerceBasis(task.basisSnapshot)?copy(session):workflowInput(session);delete source.source;
+  const trace={step:(node,input,op)=>step(`r${index}-recovery-${node}`,{sessionId:session.id,...input},op)};
+  let repaired=await executeSceneCapabilities({session:source,snapshot:task.executionSnapshot,client,config,signal,trace,previous:prior,retryDelayMs});
+  repaired=await executeSceneCapabilities({session:source,snapshot:task.executionSnapshot,client,config,signal,trace,previous:repaired,phase:'post',retryDelayMs});
+  const ruleIds=classificationBlockedRuleIds(session),candidateResults=[],canRecompute=repaired?.outputs?.ecommerceClassification?.status==='completed'&&isBusinessEcommerceBasis(task.basisSnapshot)&&(!human(session)||trigger==='row-retry');
+  let ruleRecoveryError;
+  if(canRecompute){
+   if(ruleIds.includes('EC-TIME'))candidateResults.push(timeJudgment({...session,sceneCapabilities:repaired},{basis:task.basisSnapshot,inspectionAt:run.inspectionAt,runtime:task.executionSnapshot.runtime}));
+   if(ruleIds.includes('EC-STEPS'))try{
+    const projected=workflowInput(session);delete projected.source;
+    const result=await trace.step('targeted-request',{ruleIds:['EC-STEPS'],modelId:config.model},()=>client.inspectEcommerceRow({config,session:projected,basis:{...copy(task.basisSnapshot),rules:copy(task.basisSnapshot.rules.filter(r=>r.id==='EC-STEPS'))},ruleIds:['EC-STEPS'],signal,trace,sceneSnapshot:task.executionSnapshot,sceneCapabilities:repaired}));
+    if(result.results?.length!==1||result.results[0].ruleId!=='EC-STEPS')throw Object.assign(new Error('依赖重算须精确返回EC-STEPS。'),{code:'INVALID_OUTPUT'});
+    candidateResults.push(...enforceSceneResults(result.results,task.executionSnapshot,repaired,session));
+   }catch(error){if(signal?.aborted||String(error?.code||'').toLowerCase().startsWith('trace_'))throw error;ruleRecoveryError=safeFailure(error);}
+  }
+  await step(`r${index}-recovery-persist`,{sessionId:session.id,outputs:repaired.outputs,ruleIds,candidateResults,ruleRecoveryError:ruleRecoveryError??null},async()=>{
+   await update(taskId,(state,t)=>{
+    const r=t.aiQueue.rows[index],s=state.sessions.find(s=>s.id===r.sessionId),at=now();
+    // Human writes can arrive during a model request. Never cross that boundary.
+    const protectedRow=human(s)||canonical(s.review)!==canonical(beforeReview)||canonical(s.aiResults)!==canonical(beforeResults),priorCapabilities=copy(s.sceneCapabilities||prior);
+    const audit={at,runId:run.id,trigger,...(traceId?{traceId}:{}),before:Object.fromEntries(Object.entries(prior?.outputs||{}).map(([k,v])=>[k,v.status])),after:Object.fromEntries(Object.entries(repaired.outputs).map(([k,v])=>[k,v.status])),ruleIds,ruleResultsPreserved:true,candidateCapabilities:copy(repaired),candidateResults:copy(candidateResults),protected:protectedRow,...(protectedRow?{humanReviewCheckpoint:{classificationAt:s.review.classification?.at??null,historyLength:s.review.history?.length||0}}:{}),...(ruleRecoveryError?{ruleRecoveryError}: {})};
+    if(!protectedRow){
+     // Keep replay inputs for unaffected historic time outcomes. A targeted time
+     // supersession instead records both inputs in its append-only audit below.
+     const oldFrozen=priorCapabilities?.judgmentClassificationSnapshot;
+     const classificationChanged=canonical(priorCapabilities?.outputs?.ecommerceClassification??null)!==canonical(repaired.outputs?.ecommerceClassification??null);
+     const frozen=oldFrozen||(classificationChanged&&s.ecommerce&&s.aiResults.some(v=>v.ruleId==='EC-TIME'&&v.timeFacts)?{runId:s.aiExecution.runId,output:copy(priorCapabilities?.outputs?.ecommerceClassification??null)}:null);
+     s.sceneCapabilities={...copy(repaired),...(priorCapabilities?.dependencyRecoveryHistory?{dependencyRecoveryHistory:copy(priorCapabilities.dependencyRecoveryHistory)}:{}),...(frozen?{judgmentClassificationSnapshot:frozen}:{})};
+     const changes=candidateResults.filter(result=>canonical(result)!==canonical(s.aiResults.find(old=>old.ruleId===result.ruleId)));
+     if(changes.length&&s.aiExecution?.status==='completed'){
+      const ids=changes.map(result=>result.ruleId),beforeDecision=copy(s.aiDecision??null),oldResults=copy(s.aiResults.filter(result=>ids.includes(result.ruleId)));
+      if(ids.includes('EC-TIME'))delete s.sceneCapabilities.judgmentClassificationSnapshot;
+      s.aiResults=s.aiResults.map(result=>copy(changes.find(next=>next.ruleId===result.ruleId)||result));
+      if(r.semanticResult)r.semanticResult.results=r.semanticResult.results.map(result=>copy(changes.find(next=>next.ruleId===result.ruleId)||result));
+      if(s.aiDecision){s.aiDecisionHistory=[...(s.aiDecisionHistory||[]),copy(s.aiDecision)];s.aiDecision=deriveAIDecision(s,t.reviewPolicy,{at,runId:s.aiExecution.runId,basis:t.basisSnapshot});}
+      const supersession={version:1,at,runId:s.aiExecution.runId,trigger,ruleIds:ids,beforeResults:oldResults,afterResults:copy(s.aiResults.filter(result=>ids.includes(result.ruleId))),beforeClassification:copy(priorCapabilities?.outputs?.ecommerceClassification??null),afterClassification:copy(repaired.outputs.ecommerceClassification),beforeJudgmentClassificationSnapshot:copy(oldFrozen??null),afterJudgmentClassificationSnapshot:copy(s.sceneCapabilities.judgmentClassificationSnapshot??null),beforeDecision,afterDecision:copy(s.aiDecision??null)};
+      s.sceneCapabilities.dependencyRecoveryHistory=[...(s.sceneCapabilities.dependencyRecoveryHistory||[]),supersession];audit.ruleResultsPreserved=false;audit.appliedRuleIds=ids;
+     }
+     r.sceneCapabilities=copy(repaired);
+    }
+    // Protected rows retain their complete session. Candidate capability facts
+    // live in the queue audit, making recovery visible without editing review.
+    r.capabilityRecovery=[...(r.capabilityRecovery||[]),audit];
+    t.capabilityMonitor=recordCapabilityOutcomes(t.capabilityMonitor,s.id,repaired,t.executionSnapshot.configuration.failurePolicy);
+   });return{saved:true};
+  });
+  return repaired;
+ }
  const doc=await read();
  if(doc.initialized&&doc.state.tasks.some(t=>!isInactiveTask(t)&&t.aiQueue?.comparison&&doc.state.sessions.some(s=>s.taskId===t.id&&s.aiExecution?.errorCode==='dependency_incomplete')))await updateState(state=>{for(const t of state.tasks){if(isInactiveTask(t)||!t.aiQueue?.comparison)continue;publishEcommerceCheckpoints(state,t);if(['failed','partial'].includes(t.aiStatus)&&state.sessions.some(s=>s.taskId===t.id&&s.aiExecution?.status==='completed')){t.aiStatus='partial';t.aiQueue.status='partial';t.aiRun.status='partial';}applyAIDecisions(state,t);refresh(t,state);}});
  if(doc.initialized&&(pendingTaskEntries(doc.state.aiTaskQueue).length||doc.state.tasks.some(t=>t.mode==='manual'&&!isInactiveTask(t)&&t.aiStatus==='running')))await updateState(state=>{
@@ -117,7 +170,10 @@ export async function createAiService(options={}){
   for(const entry of pendingTaskEntries(scheduler))entry.blockedReason='interrupted';
  });
  function resetForResume(task,state){writable(state,task);
-  if(task.executionSnapshot?.configuration.executionMode==='configured')task.capabilityMonitor=reconcileCapabilityOutcomes(task.capabilityMonitor,state.sessions.filter(s=>s.taskId===task.id),task.executionSnapshot.configuration.failurePolicy);
+  if(task.executionSnapshot?.configuration.executionMode==='configured'){
+   const checkpoints=new Map((task.aiQueue?.rows||[]).map(row=>[row.sessionId,row.capabilityRecovery?.at(-1)?.candidateCapabilities]));
+   task.capabilityMonitor=reconcileCapabilityOutcomes(task.capabilityMonitor,state.sessions.filter(s=>s.taskId===task.id).map(s=>checkpoints.get(s.id)?{...s,sceneCapabilities:checkpoints.get(s.id)}:s),task.executionSnapshot.configuration.failurePolicy);
+  }
   const q=task.aiQueue;q.status='queued';delete q.stopReason;q.resumeCount=(q.resumeCount||0)+1;
   for(const row of q.rows)if(['failed','running','blocked'].includes(row.status)&&!row.semanticResult)row.status='pending';
   task.aiStatus='queued';task.aiRun.status='queued';task.aiRun.completedAt=null;refresh(task,state);
@@ -165,36 +221,18 @@ export async function createAiService(options={}){
    await step('source',{recordCount:sessions.length,sourceRows:sessions.map(s=>({sessionId:s.id,row:s.rawTranscript?.row??s.ecommerce?.row??null}))},()=>{if(ecommerce)for(const s of sessions)validateEcommerceSource(s);if(raw)for(const s of sessions)validateRawTranscript(s.rawTranscript);return{valid:true};});
    await step('basis',{basis:task.basisSnapshot},()=>({basisSha256:digest(task.basisSnapshot)}));
    const canDispatch=()=>!closing&&!job.paused&&!job.stopped;
-   // Resume repairs auxiliary checkpoints before admitting new rows. Existing
-   // rule/human judgments are immutable here: an old dependent unknown still
-   // needs human review or a separate reinspection, never an automatic promotion.
+   // Restore failed capabilities first; only dependency-caused unknowns are
+   // superseded, with both judgments retained. Human rows receive audit candidates.
    if(q.resumeCount&&task.executionSnapshot?.configuration.executionMode==='configured'){
     for(const [index,previousRow] of q.rows.entries()){
      if(!canDispatch())break;
-     const prior=previousRow.sceneCapabilities;
+     const prior=previousRow.capabilityRecovery?.at(-1)?.candidateCapabilities||previousRow.sceneCapabilities;
      if(!prior||!Object.values(prior.outputs||{}).some(v=>v.status==='failed'))continue;
-     const latest=await store.read(),current=latest.state.tasks.find(t=>t.id===taskId),session=latest.state.sessions.find(s=>s.id===previousRow.sessionId);
-     if(human(session))continue;
-     const source=isBusinessEcommerceBasis(current.basisSnapshot)?session:workflowInput(session);delete source.source;
-     const trace={step:(node,input,op)=>step(`r${index}-recovery-${node}`,{sessionId:session.id,...input},op)};
-     let repaired;
      try{
-      repaired=await executeSceneCapabilities({session:source,snapshot:current.executionSnapshot,client,config:job.config,signal:job.controller.signal,trace,previous:prior,retryDelayMs});
-      repaired=await executeSceneCapabilities({session:source,snapshot:current.executionSnapshot,client,config:job.config,signal:job.controller.signal,trace,previous:repaired,phase:'post',retryDelayMs});
-     }catch(error){if(String(error?.code||'').toLowerCase().startsWith('trace_'))throw error;const failure=safeFailure(error,closing||job.controller.signal.aborted);job.paused=true;await update(taskId,(state,t)=>{t.aiQueue.stopReason=failure.errorCode;});break;}
-     await step(`r${index}-recovery-persist`,{sessionId:session.id,outputs:repaired.outputs},async()=>{
-      await update(taskId,(state,t)=>{const r=t.aiQueue.rows[index],s=state.sessions.find(s=>s.id===r.sessionId);if(human(s))return;
-       const audit={at:now(),runId:job.id,before:Object.fromEntries(Object.entries(prior.outputs).map(([k,v])=>[k,v.status])),after:Object.fromEntries(Object.entries(repaired.outputs).map(([k,v])=>[k,v.status])),ruleResultsPreserved:true};
-       // A recovered classification must not retroactively change the inputs of
-       // an already saved EC-TIME judgment. Preserve that input for audit/replay.
-       const judgmentClassificationSnapshot=s.sceneCapabilities?.judgmentClassificationSnapshot||(s.ecommerce&&s.aiResults.some(v=>v.ruleId==='EC-TIME'&&v.timeFacts)?{runId:s.aiExecution.runId,output:copy(prior.outputs.ecommerceClassification??null)}:null);
-       r.capabilityRecovery=[...(r.capabilityRecovery||[]),audit];r.sceneCapabilities=copy(repaired);s.sceneCapabilities={...copy(repaired),...(judgmentClassificationSnapshot?{judgmentClassificationSnapshot}: {})};
-       t.capabilityMonitor=recordCapabilityOutcomes(t.capabilityMonitor,s.id,repaired,t.executionSnapshot.configuration.failurePolicy);
-       // Old failures remain in the window until repaired. Stop immediately if
-       // a fresh exhausted failure confirms the breaker is still justified.
-       if(Object.values(repaired.outputs).some(v=>v.status==='failed')&&Object.values(t.capabilityMonitor).some(m=>m.paused)){job.paused=true;t.aiQueue.stopReason='capability_failure_rate';}
-      });return {saved:true,ruleResultsPreserved:true};
-     });
+      const repaired=await recoverDependencies({taskId,index,config:job.config,signal:job.controller.signal,step});
+      const latest=await store.read(),current=latest.state.tasks.find(t=>t.id===taskId);
+      if(Object.values(repaired.outputs).some(v=>v.status==='failed')&&Object.values(current.capabilityMonitor).some(m=>m.paused)){job.paused=true;await update(taskId,(state,t)=>{t.aiQueue.stopReason='capability_failure_rate';});}
+     }catch(error){if(error instanceof WorkspaceError||String(error?.code||'').toLowerCase().startsWith('trace_'))throw error;const failure=safeFailure(error,closing||job.controller.signal.aborted);job.paused=true;job.stopped=true;await update(taskId,(state,t)=>{t.aiQueue.stopReason=failure.errorCode;});break;}
     }
    }
    async function inspectRow(index){
@@ -272,6 +310,22 @@ export async function createAiService(options={}){
    await dispatchNext();return read();
   }
   const api={
+   retryDependencies(taskId,sessionId){return serialized(async()=>{
+    ensureOpen();if(active.size)throw new WorkspaceError('请等待当前AI请求结束后单行重试依赖项。',409);
+    const doc=await read(),task=doc.state.tasks.find(t=>t.id===taskId),session=doc.state.sessions.find(s=>s.id===sessionId&&s.taskId===taskId),index=task?.aiQueue?.rows?.findIndex(r=>r.sessionId===sessionId);
+    if(!task||!session||index<0||!dependencyStaleness(session,task).canRetry)throw new WorkspaceError('本行没有可定向重试的评价归类依赖项。',409);
+    writable(doc.state,task);const run=dependencyRecoveryRun(session,task),config=resumeConfig(modelConfig.getPrivate(),run);
+    const traceId=`dependency-${Date.now()}-${digest([taskId,sessionId,doc.revision]).slice(0,12)}`,nodes=new Set(['source']);
+    const bounded=value=>{const json=JSON.stringify(value??null,(_,v)=>typeof v==='string'&&config.apiKey?v.split(config.apiKey).join('[已隐藏密钥]'):v);return Buffer.byteLength(json)<=65536?JSON.parse(json):{truncated:true,bytes:Buffer.byteLength(json),sha256:digest(value),sessionId,reason:'完整输入与结果保留在来源、行检查点及依赖恢复审计中。'};};
+    const step=async(id,input,op)=>{if(!traceStore)return op();if(!nodes.has(id)){await traceStore.appendNodes(traceId,[{id,label:id}]);nodes.add(id);}let result;await traceStore.step(traceId,id,bounded(input),async()=>{result=await op();return bounded(result);});return result;};
+    if(traceStore)await traceStore.begin({id:traceId,taskId,engine:client.engine||'native-node',kind:'ecommerce-dependency-retry',nodes:[{id:'source',label:'单行依赖重试输入'}],meta:{runId:run.id,originalRunId:run.id,sessionId,targetRuleIds:classificationBlockedRuleIds(session),modelConfig:modelConfigSnapshot(config),modelConfigFingerprint:modelConfigFingerprint(config)}});
+    try{
+     await step('source',{session:workflowInput(session),basis:task.basisSnapshot,inspectionAt:run.inspectionAt},async()=>({valid:true}));
+     await recoverDependencies({taskId,index,config,signal:new AbortController().signal,step,trigger:'row-retry',traceId});
+     await update(taskId,(state,t)=>applyAIDecisions(state,t));const saved=await read(),audit=saved.state.tasks.find(t=>t.id===taskId).aiQueue.rows[index].capabilityRecovery.at(-1);
+     if(traceStore)await traceStore.finish(traceId,{status:audit.ruleRecoveryError||audit.after.ecommerceClassification!=='completed'?'partial':'completed',summary:{sessionId,protected:audit.protected,appliedRuleIds:audit.appliedRuleIds||[],candidateRuleIds:audit.candidateResults.map(r=>r.ruleId)}});return saved;
+    }catch(error){if(traceStore)await traceStore.finish(traceId,{status:'failed',error}).catch(()=>{});throw error;}
+   });},
    start(taskId,runId,settings){return serialized(async()=>{
     ensureOpen();if(typeof runId!=='string'||!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,100}$/.test(runId))throw new WorkspaceError('AI运行标识无效。');
     const doc=await read();if(!doc.initialized)throw new WorkspaceError('请先初始化工作区。');const task=doc.state.tasks.find(t=>t.id===taskId);if(!task||task.mode!=='manual')throw new WorkspaceError('请选择文件工作区中的任务。');
