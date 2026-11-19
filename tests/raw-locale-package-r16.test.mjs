@@ -36,7 +36,7 @@ function fixture(){
 
 test('R16 English renders import, review and human quote editing while retaining internal values',ctx=>{
  setLocale('en',{storage:null});ctx.after(()=>setLocale('zh',{storage:null}));const f=fixture(),before=JSON.stringify(f.state);
- const views=[rawImportFields({parsed:{inputMode:'raw-transcript-v1',sessions:[f.session]},rawImportOptions:f.task.rawImportOptions}),rawTaskPanel(f.state,f.task),rawReviewView(f.state,{openRules:[]},{session:f.session,queue:[f.session]}),rawEditDialog({ruleId:'SYN-R',verdict:'无法判定',evidenceQuotes:[]},f.state,f.session).body];
+ const views=[rawImportFields({parsed:{inputMode:'raw-transcript-v1',sessions:[f.session]},rawImportOptions:f.task.rawImportOptions}),rawTaskPanel(f.state,f.task),rawReviewView(f.state,{openRules:['SYN-R'],rawSelectedSession:f.session.id,rawResultFilter:'全部规则'},{session:f.session,queue:[f.session]}),rawEditDialog({ruleId:'SYN-R',verdict:'无法判定',evidenceQuotes:[]},f.state,f.session).body];
  for(const view of views)assert.doesNotMatch(visible(view),/\p{Script=Han}/u,visible(view));
  assert.match(views[0],/value="unavailable"/);assert.match(views[3],/value="无法判定"[^>]*>Unable to determine/);
  assert.match(views[2],/Locate quotation|No located quotation/);assert.equal(JSON.stringify(f.state),before);
@@ -98,7 +98,7 @@ test('program-only R16 staging preserves every raw runtime module and includes n
  const inputs={nodeExe:path.join(dir,'node.exe'),nodeLicense:path.join(dir,'LICENSE.txt'),javaRuntime,jarPath:path.join(dir,'synthetic-worker.jar')};
  for(const name of [inputs.nodeExe,inputs.nodeLicense,inputs.jarPath,path.join(javaRuntime,'bin/java.exe')])await fs.writeFile(name,'SYNTHETIC runtime placeholder; never execute');
  const result=await buildPortable({outputDir:path.join(dir,'output'),...inputs,archive:false,split:false}),meta=JSON.parse(await fs.readFile(path.join(result.root,'portable-info.json'),'utf8')),manifest=JSON.parse(await fs.readFile(path.join(result.root,'文件校验清单.json'),'utf8'));
- assert.equal(meta.version,'0.11.11');assert.equal(meta.factoryReady,false);assert.equal(meta.catalogSeedIncluded,false);assert.equal(meta.catalog,null);assert.equal(meta.catalogInfo,null);assert.equal(meta.sourceDataIncluded,false);assert.equal(meta.credentialsIncluded,false);
+ assert.equal(meta.version,'0.11.12');assert.equal(meta.factoryReady,false);assert.equal(meta.catalogSeedIncluded,false);assert.equal(meta.catalog,null);assert.equal(meta.catalogInfo,null);assert.equal(meta.sourceDataIncluded,false);assert.equal(meta.credentialsIncluded,false);
  assert.ok(!manifest.files.some(entry=>/^(?:data|tests|docs\/samples)\/|catalog-seed\.json|(?:^|\/)\.env|\.secrets|sample.*\.xlsx/i.test(entry.path)));
  for(const rel of ['server/raw-inspection.mjs','server/raw-source.mjs','server/raw-structure-jobs.mjs','public/raw-locale-en.mjs','public/raw-review-view.mjs','public/raw-golden.mjs']){
   assert.ok(manifest.files.some(entry=>entry.path===rel),rel);assert.deepEqual(await fs.readFile(path.join(result.root,rel)),await fs.readFile(path.join(project,rel)),rel);
@@ -107,7 +107,7 @@ test('program-only R16 staging preserves every raw runtime module and includes n
 });
 
 test('release version and bilingual instructions define raw direct inspection, legacy drafts and all four golden metrics',async()=>{
- const {productVersion}=await import('../packaging/version.mjs');assert.equal(productVersion,'0.11.11');
+ const {productVersion}=await import('../packaging/version.mjs');assert.equal(productVersion,'0.11.12');
  const pkg=JSON.parse(await fs.readFile(path.join(project,'package.json'),'utf8'));assert.equal(pkg.version,productVersion);
  for(const text of [selfServiceGuide('en'),englishUsageGuide(productVersion),triageWorkflowGuide('en'),acceptanceChecklist('en')]){
   for(const phrase of ['Raw direct inspection','legacy','0.90','90%','FAIL recall','uncertainty','wrong original AI-final PASS','denominator'])assert.ok(text.toLowerCase().includes(phrase.toLowerCase()),phrase);

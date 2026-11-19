@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {tasksView} from '../public/views.mjs';
 import {dialogView} from '../public/dialogs.mjs';
 import {createEcommerceManager} from '../public/ecommerce-manager.mjs';
-import {createEcommerceSample} from '../public/ecommerce-sample.mjs';
+import {createEcommerceSample} from './system-ec-fixture.mjs';
 import {readXlsx} from '../public/io.mjs';
 import {workflowView} from '../public/workflow-view.mjs';
 import * as workbench from '../public/task-workbench.mjs';
@@ -74,8 +74,7 @@ test('ecommerce template has headers plus rule row and no customer records',asyn
   const module=await import('../public/ecommerce-template.mjs').catch(()=>null);assert.ok(module,'empty Sheet4 template is required');
   const bytes=await module.createEcommerceTemplate();
   const sheets=await readXlsx(bytes);
-  assert.deepEqual(Object.keys(sheets),['Sheet4']);assert.equal(sheets.Sheet4.length,2);assert.equal(sheets.Sheet4[0].length,22);
-  assert.match(sheets.Sheet4[1][15],/24/);
+  assert.deepEqual(Object.keys(sheets),['系统导出']);assert.equal(sheets.系统导出.length,1);assert.equal(sheets.系统导出[0].length,23);assert.equal(sheets.系统导出[0][16],'首次回复时间');
 });
 
 test('workflow keeps raw JSON collapsed while showing actual row node errors',()=>{
@@ -138,7 +137,7 @@ test('ecommerce precheck explains missing required labels and clears the reason 
   assert.match(manager.dialog(current),/placeholder="请填写：批次名-日期"/);
   assert.match(manager.dialog(current),/id="ec-required-hint"[^>]*>[^<]*请填写任务名称/);
   manager.input({target:{id:'ec-name',value:'合成预检批次-20261115'}});manager.input({target:{id:'ec-reviewer',value:'   '}});
-  let html=manager.dialog(current);assert.match(html,/审核人标签（必填）/);assert.match(html,/id="ec-reviewer"[^>]*required/);assert.match(html,/id="ec-reviewer"[^>]*aria-required="true"/);assert.match(html,/id="ec-reviewer"[^>]*aria-describedby="ec-required-hint"/);assert.match(html,/id="ec-required-hint"[^>]*>[^<]*请填写审核人标签/);assert.match(html,/data-act="ec-next"[^>]*disabled/);
+  let html=manager.dialog(current);assert.match(html,/审核人姓名（必填）/);assert.match(html,/id="ec-reviewer"[^>]*required/);assert.match(html,/id="ec-reviewer"[^>]*aria-required="true"/);assert.match(html,/id="ec-reviewer"[^>]*aria-describedby="ec-required-hint"/);assert.match(html,/id="ec-required-hint"[^>]*>[^<]*请填写审核人标签/);assert.match(html,/data-act="ec-next"[^>]*disabled/);
   manager.input({target:{id:'ec-reviewer',value:'复核员'}});html=manager.dialog(current);
   assert.equal(current.reviewer,'复核员');assert.doesNotMatch(html,/id="ec-required-hint"[^>]*>[^<]*请填写/);assert.match(html,/data-act="ec-next"[^>]*disabled/);
   confirmPreview(manager,current);assert.doesNotMatch(manager.dialog(current),/data-act="ec-next"[^>]*disabled/);

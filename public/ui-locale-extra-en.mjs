@@ -1,5 +1,20 @@
 // Explicit templates and canonical status labels used only for UI display.
 export const UI_EXTRA_EN=Object.freeze({
+ '依据未核验，请结合原文判断':'Unverified evidence; review against the original text',
+"整体结果与审核说明":"Overall result and review notes",
+"详细编辑":"Detailed edit",
+"检查项已变化，请重新打开。":"This check has changed. Reopen it.",
+"检查标准与运行安排":"Check standards and run settings",
+"审核人姓名（必填）":"Reviewer name (required)",
+"先选择这批要检查的业务。":"Choose the business to inspect.",
+"上传文件，核对前几条原文是否正确。":"Upload the file and check the original text in the preview.",
+"核对本次检查标准、人工审核方式和运行参数。":"Check the standards, review mode and settings for this batch.",
+"查看进度，审核结果并下载报告。":"View progress, review results and download reports.",
+"标准双表（AI生成，未核验）":"Conversation and message sheets (AI-generated, unverified)",
+"直接上传业务系统导出的23列文件；第1行是表头，第2行起是评论，原列全部保留。":"Upload the 23-column business system export. Row 1 contains headers; reviews start at row 2. All source columns are preserved.",
+"业务系统导出文件 · 五项检查 · AI归类后人工核对":"Business system export \u00b7 Five checks \u00b7 Review AI classification",
+"评价类型由AI归类后人工核对；原表正负向标记仅作对照，全部原列完整保留。":"Review type is classified by AI and reviewed by a person. Source sentiment flags are reference only; all original columns are preserved.",
+
   '当前连接已测试通过':'Current connection tested successfully',
   '当前连接尚未测试':'Current connection has not been tested',
   '保存设置后请测试连接；测试成功才能开始AI质检。人工审核不受影响。':'Save settings and test the connection before starting AI inspection. Manual review remains available.',

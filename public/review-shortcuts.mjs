@@ -51,7 +51,7 @@ function unavailable(control,root,{allowCollapsed=false}={}){
 
 export function firstReviewActionControl(root,kind){
   if(!root?.querySelectorAll)return null;
-  const selector=kind==='edit'?'.result-list [data-act="ec-inline-edit"],.result-list [data-act="ec-inline-verdict"],.result-list [data-act="edit-result"],.result-list [data-act="raw-edit-result"]':kind==='confirm'?'.results-footer [data-act="ec-inline-confirm"],.results-footer [data-act="confirm-review"],.results-footer [data-act="confirm-unreplied"],.results-footer [data-act="raw-confirm-next"]':null;
+  const selector=kind==='edit'?'.result-list [data-act="raw-inline-verdict"],.result-list [data-act="ec-inline-edit"],.result-list [data-act="ec-inline-verdict"],.result-list [data-act="edit-result"],.result-list [data-act="raw-edit-result"]':kind==='confirm'?'.results-footer [data-act="ec-inline-confirm"],.results-footer [data-act="confirm-review"],.results-footer [data-act="confirm-unreplied"],.results-footer [data-act="raw-confirm-next"]':null;
   if(!selector)return null;
   return [...root.querySelectorAll(selector)].find(control=>(kind!=='edit'||Boolean(control.dataset?.rule))&&!unavailable(control,root,{allowCollapsed:kind==='edit'}))||null;
 }

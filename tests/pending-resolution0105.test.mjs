@@ -102,7 +102,7 @@ test('B2 server requires the per-row audit and rejects resolve plus conclusion e
 
 test('B2 actual raw XLSX pending record persists and reopens without modifying original transcript or judgment',async t=>{
  const f=await persisted(t,{raw:true}),before=await f.store.read(),state=resolve(before.state);await save(f.store,state,'raw-resolve');let doc=await f.restart();assert.equal(isProcessedUnknown(doc.state.sessions[0]),true);assert.deepEqual(doc.state.sessions[0].rawTranscript,before.state.sessions[0].rawTranscript);assert.deepEqual(doc.state.sessions[0].review.drafts,before.state.sessions[0].review.drafts);
- const view=reviewView(doc.state,{...uiFor(doc.state),reviewStatus:'已处理待补充',showReviewRecords:true});assert.match(view,/data-act="pending-reopen"/);assert.match(view,/data-act="raw-edit-result"[^>]+disabled/);assert.doesNotMatch(view,/data-act="raw-confirm-next"/);assert.match(view,/data-act="raw-result-filter" data-value="人工改判">人工修改记录<\/button>/);
+ const view=reviewView(doc.state,{...uiFor(doc.state),reviewStatus:'已处理待补充',showReviewRecords:true});assert.match(view,/data-act="pending-reopen"/);assert.doesNotMatch(view,/data-act="raw-(?:inline-verdict|inline-save|edit-result)"/);assert.doesNotMatch(view,/data-act="raw-confirm-next"/);assert.match(view,/data-act="raw-result-filter" data-value="人工改判">人工修改记录<\/button>/);
  doc=await save(f.store,reopen(doc.state),'raw-reopen');assert.equal(doc.state.sessions[0].review.resolution,undefined);assert.deepEqual((await f.restart()).state,doc.state);
 });
 

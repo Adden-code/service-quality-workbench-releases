@@ -3,6 +3,8 @@ import {resultProvenanceSheet} from './triage-export.mjs';
 import {createReportLocale,englishReportValue} from './report-locale.mjs';
 
 const labels={
+ '整体：已判且完成所选审核口径的会话，有Fail则Fail，否则Pass；NA和无法判定不阻断，含无法判定单列。未执行及待人工确认不计入最终通过率。子项：NA仅业务不适用，无法判定独立统计。':'Overall: under the selected review scope, any Fail means Fail; otherwise judged conversations Pass. NA and undetermined checks do not block Pass; undetermined counts remain visible. Unexecuted and pending confirmation records are excluded from the final denominator. Item NA means inapplicable; undetermined checks are counted separately.',
+ '结果说明':'Result notes','无法判定子项说明':'Undetermined checks','待确认':'Awaiting confirmation',
  '证据核验状态':'Evidence verification status','AI证据核验状态':'AI evidence verification','证据核验审计':'Verification audit','证据核验明细':'Evidence verification','已核验':'Verified','未核验':'Unverified','人工提供':'Human provided',
  '译文与置信度':'Translations and confidence','翻译字段':'Translation field','原文语种':'Source language','翻译置信度':'Translation confidence','译文':'Translation',
  '评价归类复核与改判记录':'Evaluation classification review and correction history',
@@ -22,12 +24,12 @@ const labels={
 
 export function sceneReportLocale(snapshot,enrichment={},options={}){
  const locale=createReportLocale(snapshot,enrichment,options),english=locale.language==='en';
- const text=value=>{if(!english||typeof value!=='string')return value;if(Object.hasOwn(labels,value))return labels[value];const fixed=englishReportValue(value);if(fixed!==value)return fixed;if(!/[\u3400-\u9fff]/.test(value))return value;return locale.display(value);};
+ const text=value=>{if(!english||typeof value!=='string')return value;if(/^含 \d+ 项无法判定$/.test(value))return value.match(/\d+/)[0]+' undetermined checks';if(Object.hasOwn(labels,value))return labels[value];const fixed=englishReportValue(value);if(fixed!==value)return fixed;if(!/[\u3400-\u9fff]/.test(value))return value;return locale.display(value);};
  const source=value=>english?locale.sourceLabel(value):value;
  function sheets(input){if(!english)return input;const t=snapshot.executionSnapshot.template;
   return input.map((sheet,index)=>{if(sheet.name==='证据核验明细')return evidenceAuditSheet(snapshot,true);if(sheet.name==='判定来源与分流')return resultProvenanceSheet(snapshot,'en');
    const result={...sheet,name:labels[sheet.name]||sheet.name.replace(/^原始数据/,'Original data '),headers:sheet.headers.map(text)};
-   if(index===0){const sourceCount=sheet.headers.length-t.columns.filter(c=>c.visible).length-1-(snapshot.evidenceAudit?1:0);result.headers=sheet.headers.map((v,i)=>i<sourceCount?'Original data':text(v));result.rows=sheet.rows.map(row=>row.map((v,i)=>i<sourceCount?v:text(v)));}
+   if(index===0){const sourceCount=snapshot.original?.headers?.length??snapshot.systemSourceHeaders?.length??((snapshot.headers22?.length||0)+(snapshot.extensions?.headers?.length||0));result.headers=sheet.headers.map((v,i)=>i<sourceCount?'Original data':text(v));result.rows=sheet.rows.map(row=>row.map((v,i)=>i<sourceCount?v:text(v)));}
    else if(index===1)result.rows=sheet.rows.map(row=>row.map((v,i)=>i===0?v:text(v)));
    else if(index===2)result.rows=sheet.rows.map(row=>row.map((v,i)=>[4,6].includes(i)?text(v):v));
    else if(index===4)result.rows=sheet.rows.map(([key,value])=>[text(key),key==='来源声明'?`${snapshot.source.name}; SHA256 ${snapshot.source.sha256}; local frozen snapshot`:['冻结版本','输出语种','模板列规则'].includes(key)?value:text(value)]);

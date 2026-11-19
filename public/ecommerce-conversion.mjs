@@ -7,7 +7,7 @@ const plain=value=>value!==null&&typeof value==='object'&&!Array.isArray(value)&
 const exact=(value,keys)=>plain(value)&&Reflect.ownKeys(value).length===keys.length&&keys.every(key=>Object.hasOwn(value,key));
 const fail=message=>{throw new Error(`电商源列映射${message}`);};
 const text=(value,max)=>typeof value==='string'&&Boolean(value.trim())&&value.length<=max;
-function checkedHeaders(headers){if(!Array.isArray(headers)||headers.length<22||headers.length>16363||headers.some(header=>typeof header!=='string'||header.length>20000))fail('须保留22列以上的真实原表头，且满足单元格及导出列数上限。');}
+function checkedHeaders(headers){if(!Array.isArray(headers)||headers.length<1||headers.length>16363||headers.some(header=>typeof header!=='string'||header.length>20000))fail('须保留真实原表头，且满足单元格及导出列数上限。');}
 function sourceIdentity(source){
  if(!plain(source)||!/^[a-f0-9]{64}$/.test(source.fileSha256)||!text(source.sheet,80)||!Number.isSafeInteger(source.sheetIndex)||source.sheetIndex<1||source.sheetIndex>16384)fail('原文件摘要或工作表来源无效。');
  checkedHeaders(source.headers);

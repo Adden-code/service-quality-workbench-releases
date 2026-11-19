@@ -121,10 +121,10 @@ export async function createRawStructureJobs({dataDir,store,modelConfig,client,t
   }
   const sheets=[{name:'会话信息',headers:infoHeaders,rows:infoRows},{name:'会话明细',headers:turnHeaders,rows:turnRows}];
   const bytes=await workbook(sheets),parsed=await parseBusinessInput({name:'AI-generated-structure.xlsx',size:bytes.length,arrayBuffer:async()=>bytes}),valid=parsed.valid&&unparsed.length===0&&missingInfo.length===0;
-  const validation={valid,errors:[...parsed.errors,...(unparsed.length?['存在未解析原文，不能声称标准双表已完成。']:[]),...(missingInfo.length&&!parsed.errors.length?['存在来源缺失信息，保持AI未核验草稿。']:[])],warnings:parsed.warnings||[]};
-  const kind=valid?'standard-double-sheet':'ai-unverified-draft',label=valid?'标准双表（AI生成，未核验）':'AI生成未核验结构化草稿';
+  const validation={valid,errors:[...parsed.errors,...(unparsed.length?['存在未解析原文，不能声称会话信息与逐条发言表已完成。']:[]),...(missingInfo.length&&!parsed.errors.length?['存在来源缺失信息，保持AI未核验草稿。']:[])],warnings:parsed.warnings||[]};
+  const kind=valid?'standard-double-sheet':'ai-unverified-draft',label=valid?'会话信息与逐条发言表（AI生成，未核验）':'AI生成未核验结构化草稿';
   const warnings=['可选结构化产物独立于质检和人工审核；不得反向替换本次归档原文或证据。','角色建议、摘要和转换格式不构成业务事实核验；缺失时间不会自动补造。'];
-  if(!valid)sheets.push({name:'转换说明',headers:['项目','说明'],rows:[['产物性质',label],['格式预检','未通过完整标准模板预检，不可标称已核验标准双表。'],...warnings.map(warning=>['边界',warning]),...validation.errors.map(error=>['格式问题',error]),...missingInfo.map(item=>['缺失信息',JSON.stringify(item)])]},{name:'未解析原文',headers:['内部记录ID','源物理行','起始UTF-16','结束UTF-16','完整未解析原文'],rows:unparsed.map(item=>[item.recordId,item.sourceRow,item.start,item.end,item.text])},{name:'原文溯源',headers:['内部记录ID','原会话ID','源工作表','源物理行','原文SHA256','完整原文'],rows:sourceRows});
+  if(!valid)sheets.push({name:'转换说明',headers:['项目','说明'],rows:[['产物性质',label],['格式预检','未通过完整标准模板预检，不可标称已核验会话信息与逐条发言表。'],...warnings.map(warning=>['边界',warning]),...validation.errors.map(error=>['格式问题',error]),...missingInfo.map(item=>['缺失信息',JSON.stringify(item)])]},{name:'未解析原文',headers:['内部记录ID','源物理行','起始UTF-16','结束UTF-16','完整未解析原文'],rows:unparsed.map(item=>[item.recordId,item.sourceRow,item.start,item.end,item.text])},{name:'原文溯源',headers:['内部记录ID','原会话ID','源工作表','源物理行','原文SHA256','完整原文'],rows:sourceRows});
   return{kind,label,sheets,validation,missingInfo,unparsed,warnings};
  }
  return{

@@ -3,7 +3,7 @@ export const IMPORT098_EN=Object.freeze({
  '本轮解析转换流程已调整，请在内网使用49会话/1735轮次基准复测数量、角色与时间；外部合成测试不代表业务准确率。':'This conversion flow has changed. Retest counts, roles and timestamps on the intranet against the 49 conversations / 1,735 turns benchmark. Synthetic tests do not establish business accuracy.',
  'AI解析转换':'AI-assisted import conversion','本机操作人':'Local operator','本机操作标签可修改，不绑定登录身份。':'This editable local operator label is not a signed-in identity.',
  '核心22字段按表头定位；原表及扩展列保留。':'Locate the 22 core fields by header; retain the original and extra columns.',
- '标准双表可直接导入；缺少结构时使用AI解析转换。':'Import a complete two-sheet template directly; use AI conversion when structure is missing.',
+ '会话信息与逐条发言表可直接导入；缺少结构时使用AI解析转换。':'Import a complete two-sheet template directly; use AI conversion when structure is missing.',
  '正在预检':'Checking input','需要解析转换':'Conversion needed','等待上传':'Waiting for a file',
  '文件核对中；任务信息可以继续填写。':'Checking the file; you can keep editing task information.',
  '已识别 {0} 条记录，请核对预览。':'Found {0} records. Check the preview.',

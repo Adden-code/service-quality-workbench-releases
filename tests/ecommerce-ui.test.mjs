@@ -1,7 +1,9 @@
+import {createEcommerceSample as legacySample} from '../public/ecommerce-sample.mjs';
+import {SYSTEM_EC_HEADERS} from '../public/ecommerce-system-source.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
-import { createEcommerceSample } from '../public/ecommerce-sample.mjs';
+import { createEcommerceSample } from './system-ec-fixture.mjs';
 import { parseEcommerceFile } from '../public/ecommerce-input.mjs';
 import { EC_RULE_IDS } from '../public/ecommerce-schema.mjs';
 import {EC_HEADERS} from '../public/ecommerce-schema.mjs';
@@ -56,7 +58,7 @@ async function ready(overrides) {
   return { h, manager, d: h.dialog };
 }
 async function sessionFixture() {
-  const parsed = await parseEcommerceFile(await sampleFile());
+  const parsed = await parseEcommerceFile(new File([await legacySample()],'legacy.xlsx'));
   return parsed.sessions.map(session => ({ ...session, taskId: 'EC-TASK', aiResults: [], aiExecution: { status: 'not_started' }, review: { status: '待审核', drafts: {} } }));
 }
 
@@ -70,14 +72,14 @@ test('manager opens the upload stage without selecting rules or loading fictiona
   assert.match(html,/id="ec-name"[^>]*value=""[^>]*placeholder="请填写：批次名-日期"/);
   assert.match(html, /modal-backdrop/); assert.match(html, /id="ec-file"/); assert.match(html, /id="ec-name"/); assert.match(html, /id="ec-reviewer"/);
   assert.match(html,/data-act="ec-template-download"[^>]*>下载标准模板/);
-  assert.doesNotMatch(html,/一键体验|虚构Excel/);assert.match(html,/原人工参考.*不会.*模型/);
+  assert.doesNotMatch(html,/一键体验|虚构Excel/);assert.match(html,/评价类型由AI归类后人工核对/);
   assert.match(html,/data-act="ec-next"[^>]*disabled/);
   assert.match(html,/请填写任务名称，才能继续/);
   manager.input(event('ec-name','合成试点-20261115'));assert.match(manager.dialog(d),/本机操作标签可修改/);
   manager.input(event('ec-reviewer','自定义复核人'));assert.equal(d.reviewer,'自定义复核人');
 });
 
-const multiSheetFile=async()=>new File([await workbook(['中文 源表','Other Data'].map(name=>({name,headers:[...EC_HEADERS,'产品系列'],rows:[Array(23).fill(''),[...Array(8).fill(''),'评论','回复','5','管理员','2026-11-01 09:00:00','2026-11-01 10:00:00',...Array(8).fill(''),'PRIVATE_EXTENSION']]})))],'多表.xlsx');
+const multiSheetFile=async()=>new File([await workbook(['中文 源表','Other Data'].map(name=>({name,headers:[...SYSTEM_EC_HEADERS,'产品系列'],rows:[SYSTEM_EC_HEADERS.map((_,i)=>({4:'VMALL-MX-HWB2C',5:'评论',6:'回复',7:'5',8:'管理员',9:'2026-11-01 09:00:00',16:'2026-11-01 10:00:00'}[i]||'')).concat('PRIVATE_EXTENSION')]})))],'多表.xlsx');
 test('multiple compatible worksheets use explicit selector and retain the chosen source on preview and creation',async()=>{
  const {createEcommerceManager}=await api(),h=harness(),manager=createEcommerceManager(h.ctx);await manager.action('ec-open');const d=h.dialog;
  manager.input(event('ec-name','选择表任务'));manager.input(event('ec-reviewer','审核人'));manager.change(event('ec-file','',{files:[await multiSheetFile()]}));await settled(d);
@@ -111,7 +113,7 @@ test('uploaded Sheet4 preserves entered labels and proceeds to explicit rule ver
   assert.equal(d.name, '我的电商批次'); assert.equal(d.reviewer, '审核甲'); assert.equal(h.creates.length, 0);
   const basisHtml=manager.dialog(d);assert.match(basisHtml,/class="btn" data-act="ec-create"[^>]*>仅创建，稍后质检/);assert.match(basisHtml,/class="btn primary" data-act="ec-create-start"[^>]*>创建并开始AI质检/);assert.doesNotMatch(basisHtml,/data-act="ec-create(?:-start)?"[^>]*disabled/);
   d.step=1;const html = manager.dialog(d);
-  assert.match(html, /前5条/); assert.match(html, /原人工参考/); assert.match(html, /第2行原标准（仅保留原文）/); assert.match(html, /Sheet4/); assert.match(html, /原始输入/);
+  assert.match(html, /前5条/); assert.doesNotMatch(html, /原人工参考|第2行原标准/); assert.match(html, /Sheet4/); assert.match(html, /原始输入/);
   assert.match(html, /缺少评论时间/);
   assert.doesNotMatch(html, /data-act="ec-next"[^>]*disabled/);
 });
@@ -122,7 +124,7 @@ test('template download is an empty same-structure workbook rather than a sample
   assert.equal(h.downloads.length, 1);
   const download = h.downloads[0]; assert.match(download.filename, /\.xlsx$/);
   const parsed = await parseEcommerceFile(new File([download.blob], download.filename));
-  assert.equal(parsed.valid, false);assert.match(parsed.errors.join('；'),/没有|至少/);assert.equal(h.creates.length,0);
+  assert.equal(parsed.valid, false);assert.match(parsed.errors.join('；'),/没有|至少|1至500/);assert.equal(h.creates.length,0);
 });
 
 test('invalid replacement retains the failed source for conversion while clearing prior preview and source metadata', async () => {

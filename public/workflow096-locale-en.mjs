@@ -66,7 +66,7 @@ export const WORKFLOW096_EN=Object.freeze({
  '校正消息边界：拆分本片段':'Correct message boundaries: split this segment',
  '源文本位置 {0}–{1}；填写单元格原文中从0开始的拆分偏移。两部分均保留并重新核对。':'Source offsets {0}–{1}. Enter a zero-based UTF-16 split offset in the original cell text. Both parts are retained and must be checked again.',
  '拆分偏移':'Split offset','拆分原因（必填）':'Split reason (required)','按来源位置拆分':'Split at the source offset',
- '人工确认后仍须通过原标准双表预检，并绑定有效规则与资料':'Human confirmation is followed by the standard two-sheet preflight and binding of valid rules and reference materials',
+ '人工确认后仍须通过原会话信息与逐条发言表预检，并绑定有效规则与资料':'Human confirmation is followed by the standard two-sheet preflight and binding of valid rules and reference materials',
  '核对完成，继续绑定依据':'Checks complete; continue to bind the basis',
  '清洗片段结构无效。':'The cleaning segment structure is invalid.',
  '清洗来源定位、顺序或完整覆盖不一致。':'The source locations, order or full coverage do not match.',

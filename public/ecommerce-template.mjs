@@ -1,5 +1,5 @@
+import {SYSTEM_EC_HEADERS} from './ecommerce-system-source.mjs';
 import {workbook} from './io.mjs';
-import {EC_HEADERS} from './ecommerce-schema.mjs';
 
 export const ECOMMERCE_RULE_DESCRIPTIONS=[
   ['回复时效','北京时间连续自然时间，含晚间、周末；超过24小时不通过，恰好24小时通过。时间缺失、无效或倒置时待判定。'],
@@ -8,9 +8,12 @@ export const ECOMMERCE_RULE_DESCRIPTIONS=[
   ['操作步骤结构','至少3个操作、排查或解决步骤且未按1、2、3顺序编号时不通过；普通列举和礼貌用语不自动算操作步骤。'],
   ['公开回复隐私','实际公开回复披露个人隐私信息时不通过；输入材料中的订单号本身不等于公开泄露。'],
 ];
-export function createEcommerceTemplate(){
-  const standards=Array(22).fill('');
-  ECOMMERCE_RULE_DESCRIPTIONS.forEach(([,description],index)=>{standards[15+index]=description;});
-  standards[21]='第2行为判断标准；第3行起填写业务评论。可更改工作表名称；核心22列顺序不变，扩展列追加在后并原样留存。原人工参考可留空，仅用于后续对照。';
-  return workbook([{name:'Sheet4',headers:[...EC_HEADERS],rows:[standards]}]);
-}
+export function createEcommerceTemplate(){return workbook([{name:'系统导出',headers:[...SYSTEM_EC_HEADERS],rows:[]}]);}
+
+export const BUILTIN_ECOMMERCE_RULE_DESCRIPTIONS=[
+ ['回复时效','按评论与首次回复时间的自然时间差计算；未回复时计算至本次质检时间。严格超过所选阈值才不通过；无法核实时间时明确标注。'],
+ ['文本质量','检查拼写、语法、标点或表情误用、语句不通顺或歧义；任一问题成立即不通过，并说明依据。'],
+ ['针对性及批次重复','回复须回应具体问题、诉求或夸赞；完全无关，或至少2条回复归一化后相似度达到85%，均可能不通过。相似比较未完成只标记对应子项。'],
+ ['操作步骤结构','3步及以上指导须完整编号；好评正向包含开头语、产品价值、结束语，好评负向包含开头语、致歉、方案、结束语。中英文正文超过200字符可省略结束语。'],
+ ['公开回复隐私','公开回复不得含用户个人信息或敏感违规内容；掩码个人信息同样不允许。原始输入中的订单信息本身不等于公开披露。'],
+];

@@ -1,7 +1,7 @@
 import {d as businessText,businessContent,translationControls} from './content-translation-ui.mjs';
 import {html as uiHtml,uiLiteral,uiAttributes,t as uiT,translateError as uiError} from './i18n.mjs';
 import { parseEcommerceFile } from './ecommerce-input.mjs';
-import {createEcommerceTemplate,ECOMMERCE_RULE_DESCRIPTIONS} from './ecommerce-template.mjs';
+import {createEcommerceTemplate,ECOMMERCE_RULE_DESCRIPTIONS,BUILTIN_ECOMMERCE_RULE_DESCRIPTIONS} from './ecommerce-template.mjs';
 import {creationSteps,executionSettingsFields} from './task-workbench.mjs';
 import {DEFAULT_EXECUTION_SETTINGS,normalizeExecutionSettings} from './execution-settings.mjs';
 import { EC_HEADERS, EC_RULE_IDS } from './ecommerce-schema.mjs';
@@ -12,7 +12,7 @@ import {sceneRuntimeForm,readSceneRuntime} from './scene-configuration-ui.mjs';
 import {importFlowView} from './import-flow-ui.mjs';
 
 const THRESHOLD = 24;
-const TEMPLATE_NAME = '电商评论_Sheet4空白模板.xlsx';
+const TEMPLATE_NAME = '电商评论_业务系统导出23列模板.xlsx';
 const XLSX_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const ACTIONS = new Set(['ec-open','ec-template-download','ec-next','ec-back','ec-confirm','ec-preview','ec-create','ec-create-start']);
 const TEST_RULES=ECOMMERCE_RULE_DESCRIPTIONS;
@@ -38,12 +38,12 @@ function preview(d) {
   const sessions = d.parsed.sessions;
   const record = sessions[0]?.ecommerce;
   return uiHtml`<section class="import-preview" aria-label="电商评论导入预览"><div class="file-result">${icon('file', 22)}<div><strong>${e(d.fileName)}</strong><small>${e(record.sheet)} · ${sessions.length}条评论 · 完整保留原始输入与原文件</small><small>工作表序号 ${e(d.parsed.selectedSheetIndex)} · 扩展列 ${e(record.extensions?.headers.length??0)}</small></div>${badge('预检通过', 'success')}</div>
-    <h3 class="field-label">前5条评论预览</h3><div class="table-wrap"><table><thead><tr><th>源行</th><th>评论内容</th><th>实际回复</th><th>管理员</th><th>原人工参考</th></tr></thead><tbody>${sessions.slice(0, 5).map(session => {
+    <h3 class="field-label">前5条评论预览</h3><div class="table-wrap"><table><thead><tr><th>源行</th><th>评论内容</th><th>实际回复</th><th>管理员</th><th>站点</th></tr></thead><tbody>${sessions.slice(0, 5).map(session => {
       const source = session.ecommerce, raw = source.raw;
-      return uiHtml`<tr><td>${e(source.sheet)} · 第${e(source.row)}行</td>${textCell(raw[8])}${textCell(raw[9])}${textCell(raw[11])}<td>${raw.slice(15, 22).some(value => value.trim()) ? uiT('有，逐项对照时保留原值') : uiT('无')}</td></tr>`;
+      return uiHtml`<tr><td>${e(source.sheet)} · 第${e(source.row)}行</td>${textCell(raw[8])}${textCell(raw[9])}${textCell(raw[11])}<td>${e(raw[3]||uiT('未提供'))}</td></tr>`;
     }).join('')}</tbody></table></div>
     ${d.parsed.warnings?.length ? uiHtml`<div class="soft-note warning"><div><strong>待核对提示</strong><ul>${d.parsed.warnings.map(warning => uiHtml`<li>${e(uiT(warning))}</li>`).join('')}</ul></div></div>` : ''}
-    <details class="input-transcript original-source"><summary>核对来源工作表第2行原标准（仅保留原文）</summary><div class="table-wrap"><table><thead><tr><th>原列名</th><th>原标准</th></tr></thead><tbody>${[...(record?.standards||[]),...(record?.extensions?.standards||[])].map((value,index)=>value.trim()?uiHtml`<tr>${textCell(index<22?record.headers[index]:record.extensions.headers[index-22])}${textCell(value)}</tr>`:'').join('')}</tbody></table></div></details>${record.sourceColumns?uiHtml`<p class="hint">核心字段已按表头定位；源物理列号随任务冻结，中英文导出的源列映射表可追溯原位置。</p>`:''}</section>`;
+    ${record.schemaVersion===6?'':uiHtml`<details class="input-transcript original-source"><summary>核对来源工作表第2行原标准（仅保留原文）</summary><div class="table-wrap"><table><thead><tr><th>原列名</th><th>原标准</th></tr></thead><tbody>${[...(record?.standards||[]),...(record?.extensions?.standards||[])].map((value,index)=>value.trim()?uiHtml`<tr>${textCell(index<22?record.headers[index]:record.extensions.headers[index-22])}${textCell(value)}</tr>`:'').join('')}</tbody></table></div></details>`}${record.sourceColumns?uiHtml`<p class="hint">核心字段已按表头定位；源物理列号随任务冻结，中英文导出的源列映射表可追溯原位置。</p>`:''}</section>`;
 }
 
 /** Standalone import UI. Persistence and model execution remain with the caller. */
@@ -85,12 +85,13 @@ export function createEcommerceManager(ctx) {
     delete d.conversion;delete d.reviewedMapping;d.file = null; d.parsed = null; d.previewConfirmed=false;d.fileName = ''; d.sourceName = ''; d.source = null; d.error = '';
     return d.parseSequence;
   }
-  async function inspect(d, file, {selectedSheet,availableSheetNames=[]}={}) {
+  async function inspect(d, file, {selectedSheet,availableSheetNames=[],reviewedMapping,conversion}={}) {
     const sequence = invalidate(d);
     d.file=file;d.fileName=file?.name||'';d.pendingFile=file;d.selectedSheet=selectedSheet??null;d.availableSheetNames=[...availableSheetNames];
+    d.reviewedMapping=reviewedMapping;if(conversion)d.conversion=conversion;
     d.loading = true; d.busy = 'parse'; render();
     try {
-      const parsed = await parseEcommerceFile(file, { thresholdHours: d.thresholdHours||THRESHOLD, selectedSheet });
+      const parsed = await parseEcommerceFile(file, { thresholdHours: d.thresholdHours||THRESHOLD, selectedSheet, standardOnly:true, reviewedMapping, batchSite:d.batchSite||'' });
       if (current() !== d || d.parseSequence !== sequence) return;
       d.availableSheetNames=[...parsed.availableSheetNames];d.selectedSheet=parsed.selectedSheet;
       if (!parsed.valid) {if(parsed.availableSheetNames.length>1){d.file=file;d.fileName=file.name;d.sourceName=file.name;d.parsed=parsed;} d.error = parsed.errors.join('；') || '文件预检失败，请核对来源工作表。'; return; }
@@ -127,7 +128,7 @@ export function createEcommerceManager(ctx) {
         d.versions=ctx.getRuleVersions?.()||[];d.error='';
       } else if (act === 'ec-preview') {
         if (!d.file) throw new Error('请先选择有效的.xlsx文件进行预览。');
-        await inspect(d, d.file,{selectedSheet:d.selectedSheet,availableSheetNames:d.availableSheetNames});
+        await inspect(d, d.file,{selectedSheet:d.selectedSheet,availableSheetNames:d.availableSheetNames,reviewedMapping:d.reviewedMapping,conversion:d.conversion});
       } else if (act === 'ec-create'||act==='ec-create-start') {
         d.autoStart=act==='ec-create-start';
         if(d.autoStart&&ctx.ensureModelReady&&!await ctx.ensureModelReady(d))return true;
@@ -164,11 +165,12 @@ export function createEcommerceManager(ctx) {
     const d = current(), target = event?.target;
     if (d?.type !== 'ecommerce-import') return false;
     if(['triage-mode','triage-enabled','triage-threshold'].includes(target?.id)){try{d.reviewPolicy=readTriagePolicy(globalThis.document?.getElementById?.('overlay-root')||globalThis.document,d.reviewPolicy);d.error='';if(target.id==='triage-mode')render();}catch(error){d.error=error.message;feedback(d,d.error);}return true;}
+    if(target?.id==='ec-batch-site'){d.batchSite=target.value.trim();const file=d.file;if(file)void inspect(d,file,{selectedSheet:d.selectedSheet,availableSheetNames:d.availableSheetNames,reviewedMapping:d.reviewedMapping,conversion:d.conversion});return true;}
     if(target?.id==='ec-threshold'){
       if(d.loading||d.expectedCreated||usesRuleSet(d))return true;
       const hours=Number(target.value);if(!Number.isFinite(hours)||hours<=0||hours>720){d.thresholdError='回复时效阈值须大于0且不超过720小时。';feedback(d,d.thresholdError);syncCreate(d);return true;}
       d.thresholdError='';
-      d.thresholdHours=hours;d.rulesConfirmed=false;const file=d.file;if(file)void inspect(d,file,{selectedSheet:d.selectedSheet,availableSheetNames:d.availableSheetNames});else render();return true;
+      d.thresholdHours=hours;d.rulesConfirmed=false;const file=d.file;if(file)void inspect(d,file,{selectedSheet:d.selectedSheet,availableSheetNames:d.availableSheetNames,reviewedMapping:d.reviewedMapping,conversion:d.conversion});else render();return true;
     }
     if(['ec-concurrency','ec-batch-size'].includes(target?.id)){
       d.executionSettings={...DEFAULT_EXECUTION_SETTINGS,...d.executionSettings,[target.id==='ec-concurrency'?'concurrency':'batchSize']:Number(target.value)};
@@ -192,14 +194,14 @@ export function createEcommerceManager(ctx) {
     if (d?.type !== 'ecommerce-import') return null;
     const frozen = Boolean(d.expectedCreated || (d.loading && d.busy !== 'parse'));
     const busy = Boolean(d.loading), closeDisabled = busy ? 'disabled' : '';
-    const selected=selectedVersion(d),ruleSet=usesRuleSet(d);
-    const rules=uiHtml`<section class="policy-section" data-ecommerce-built-in-checks><h3>本场景内置五项检核（只读）</h3><p>本场景使用内置五项检核，无需从规则目录勾选；升级走检核口径管理。</p><ul class="task-basis-list">${TEST_RULES.map(([name],index)=>uiHtml`<li><strong>${e(uiT(name))}</strong> <span class="mono">${e(EC_RULE_IDS[index])}</span></li>`).join('')}</ul><p class="hint">管理入口：质检规则 → 场景筛选“电商评论回复” → 电商检核口径。当前支持调整时效配置，其他四项沿用所选版本的已支持口径。</p></section>${ruleSet?ruleSetSummary(selected):''}<details class="policy-section" ${d.versions?.length?'':'open'}><summary>${ruleSet?uiT('其他四项V1口径与适用范围'):uiT('五项业务口径与适用范围')}</summary><ol class="guide-list">${TEST_RULES.map(([name,detail],index)=>ruleSet&&index===0?'':uiHtml`<li><strong>${e(uiT(name))}</strong><small> ${e(EC_RULE_IDS[index])}</small><p>${e(uiT(index===0?detail.replaceAll('24小时',`${d.thresholdHours||24}小时`):detail))}</p></li>`).join('')}</ol><p class="hint">来源Sheet4已确认口径；保留现有版本“测试规则、非正式制度”的适用范围。必要证据缺失时待判定，不会自动覆盖旧目录版本。</p></details>`;
+    const selected=selectedVersion(d),ruleSet=usesRuleSet(d),TEST_RULES=ctx.getSceneConfig?.()?BUILTIN_ECOMMERCE_RULE_DESCRIPTIONS:ECOMMERCE_RULE_DESCRIPTIONS;
+    const rules=uiHtml`<section class="policy-section" data-ecommerce-built-in-checks><h3>本场景内置五项检核（只读）</h3><p>本场景使用内置五项检核，无需从规则目录勾选；升级走检核口径管理。</p><ul class="task-basis-list">${TEST_RULES.map(([name],index)=>uiHtml`<li><strong>${e(uiT(name))}</strong> <span class="mono">${e(EC_RULE_IDS[index])}</span></li>`).join('')}</ul><p class="hint">管理入口：质检规则 → 场景筛选“电商评论回复” → 电商检核口径。当前支持调整时效配置，其他四项沿用所选版本的已支持口径。</p></section>${ruleSet?ruleSetSummary(selected):''}<details class="policy-section" ${d.versions?.length?'':'open'}><summary>${ruleSet?uiT('其他四项检查标准与适用范围'):uiT('五项业务口径与适用范围')}</summary><ol class="guide-list">${TEST_RULES.map(([name,detail],index)=>ruleSet&&index===0?'':uiHtml`<li><strong>${e(uiT(name))}</strong><small> ${e(EC_RULE_IDS[index])}</small><p>${e(uiT(index===0?detail.replaceAll('24小时',`${d.thresholdHours||24}小时`):detail))}</p></li>`).join('')}</ol><p class="hint">以所选场景发布的检查标准为准。历史任务保留创建时的标准；更改目录不会重算旧结果。</p></details>`;
     return uiHtml`<div class="modal-backdrop" data-backdrop><section class="modal wide import-modal ecommerce-import" role="dialog" aria-modal="true" aria-labelledby="dialog-title" tabindex="-1" aria-busy="${busy}">
       <header class="modal-head"><div><h2 id="dialog-title">新建质检任务 · 电商评论回复</h2></div><button class="icon-btn" data-act="close-modal" aria-label="关闭弹窗" ${closeDisabled}>${icon('close',18)}</button></header>
       <div class="modal-body">${creationSteps(d.step===2?2:1)}<div class="form-error" id="ec-error" role="alert">${e(uiError(d.error||''))}</div>
-      ${d.step!==2?importFlowView(d,{ecommerce:true,label:'电商评论回复',preview:preview(d),extra:sheetSelection(d,frozen)}):uiHtml`<div class="file-result">${icon('file',22)}<div><strong>${e(d.fileName)}</strong><small>${d.parsed?.sessions?.length||0}条评论 · ${e(d.reviewer)}</small></div></div>${rules}<div class="field-group"><label class="field-label" for="ec-basis-version">本次规则版本</label><select class="field" id="ec-basis-version" ${ctx.getSceneConfig?.()?'disabled':''}><option value="">请选择已确认的规则版本</option>${(d.versions||[]).map(v=>uiHtml`<option value="${e(ecommerceVersionKey(v))}" ${d.basisVersion===ecommerceVersionKey(v)?'selected':''}>${e(businessText(v.title||v.version))} · ${e(v.version)}${v.ruleSetId?` · ${e(v.ruleSetId)}`:''}</option>`).join('')}</select></div>${!d.versions?.length?uiHtml`<section class="ec-rule-confirmation"><p>当前没有已确认的受支持版本，请对照上传文件第2行原标准核对以上五项口径。</p><label class="check-label"><input type="checkbox" id="ec-confirm-rules" ${d.rulesConfirmed?'checked':''}>已核对来源工作表原标准；确认本次按北京时间连续自然时间${e(d.thresholdHours||24)}小时、同一管理员至少3条批次重复及上述五项口径执行。</label><button class="btn" data-act="ec-confirm" ${busy?'disabled':''}>确认并登记本次业务规则</button></section>`:''}<details class="input-transcript" data-dialog-disclosure="ec-settings"><summary>执行设置</summary><div class="field-group"><label class="field-label" for="ec-threshold">回复时效阈值（小时）</label><input class="field" id="ec-threshold" type="number" min="0.01" max="720" step="any" value="${e(d.thresholdHours||24)}" ${busy||ruleSet?'disabled':''}></div>${executionSettingsFields(d.executionSettings,'ec')}${ctx.getSceneConfig?.()?sceneRuntimeForm(ctx.getSceneConfig(),d.sceneRuntime,d.sceneOverrideReason):triagePolicyFields(d.reviewPolicy||{version:2,mode:'rule-calibrated',enabled:true,calibrationStatus:'per-rule',rules:[]})}<p>${ruleSet?uiT('采用规则集冻结的类型阈值与日历；以上旧版单一阈值不参与本次计算。'):uiT('阈值默认24小时；修改后重新解析原文件，按本次设置覆盖时效项并随任务冻结。')}任务创建后手动开始AI执行，可暂停与继续；失败只重试未完成项，人工记录保留。</p><p>首次运行前请在工作台的模型设置中配置接口。</p></details>`}
-      <div class="soft-note">${icon('info',14)}<div>原人工参考仅用于后续对照，不会发送给模型。原始输入完整保留。</div><p>按规则级标定策略执行：已启用达标规则的符合项且证据校验通过才可免审，每规则每批5%强制抽检，至少5条（不足5条全检）；其余判定进入人工。关闭免审时，所有初判均须人工确认。</p></div></div>
-      <footer class="modal-footer"><small>${busy?uiT('正在处理…'):uiT('原文件、规则版本及审核记录保存在本机工作区')}</small><div><button class="btn" data-act="import-save-close" ${closeDisabled}>保存草稿并关闭</button><button class="btn" data-act="${d.step===2?'ec-back':'close-modal'}" ${closeDisabled}>${d.step===2?uiT('上一步'):uiT('取消')}</button>${d.step===2?uiHtml`<button class="btn" data-act="ec-create" ${createDisabled(d)?'disabled':''}>仅创建，稍后质检</button><button class="btn primary" data-act="ec-create-start" ${createDisabled(d)?'disabled':''}>创建并开始AI质检</button>`:uiHtml`<button class="btn primary" data-act="ec-next" ${!usable(d)||!labelsValid(d)||busy||(d.requirePreviewConfirmation&&!d.previewConfirmed)?'disabled':''}>下一步：依据与执行设置</button>`}</div></footer></section></div>`;
+      ${d.step!==2?importFlowView(d,{ecommerce:true,label:'电商评论回复',preview:preview(d),extra:sheetSelection(d,frozen)+(d.parsed?.sessions?.some(s=>s.ecommerce?.systemSource&&!s.ecommerce.raw[3])||d.batchSite?uiHtml`<label class="field-label" for="ec-batch-site">未识别运营商时使用的本批站点（选填）</label><input id="ec-batch-site" class="field" maxlength="80" value="${e(d.batchSite||'')}"><p class="hint">只补充无法识别的记录；已识别站点不变。留空时统计为未提供。</p>`:'')}):uiHtml`<div class="file-result">${icon('file',22)}<div><strong>${e(d.fileName)}</strong><small>${d.parsed?.sessions?.length||0}条评论 · ${e(d.reviewer)}</small></div></div>${rules}<div class="field-group"><label class="field-label" for="ec-basis-version">本次规则版本</label><select class="field" id="ec-basis-version" ${ctx.getSceneConfig?.()?'disabled':''}><option value="">请选择已确认的规则版本</option>${(d.versions||[]).map(v=>uiHtml`<option value="${e(ecommerceVersionKey(v))}" ${d.basisVersion===ecommerceVersionKey(v)?'selected':''}>${e(businessText(v.title||v.version))} · ${e(v.version)}${v.ruleSetId?` · ${e(v.ruleSetId)}`:''}</option>`).join('')}</select></div>${!d.versions?.length?uiHtml`<section class="ec-rule-confirmation"><p>当前没有已确认的受支持版本，请对照上传文件第2行原标准核对以上五项口径。</p><label class="check-label"><input type="checkbox" id="ec-confirm-rules" ${d.rulesConfirmed?'checked':''}>已核对来源工作表原标准；确认本次按北京时间连续自然时间${e(d.thresholdHours||24)}小时、同一管理员至少3条批次重复及上述五项口径执行。</label><button class="btn" data-act="ec-confirm" ${busy?'disabled':''}>确认并登记本次业务规则</button></section>`:''}<details class="input-transcript" data-dialog-disclosure="ec-settings"><summary>执行设置</summary><div class="field-group"><label class="field-label" for="ec-threshold">回复时效阈值（小时）</label><input class="field" id="ec-threshold" type="number" min="0.01" max="720" step="any" value="${e(d.thresholdHours||24)}" ${busy||ruleSet?'disabled':''}></div>${executionSettingsFields(d.executionSettings,'ec')}${ctx.getSceneConfig?.()?sceneRuntimeForm(ctx.getSceneConfig(),d.sceneRuntime,d.sceneOverrideReason):triagePolicyFields(d.reviewPolicy||{version:2,mode:'rule-calibrated',enabled:true,calibrationStatus:'per-rule',rules:[]})}<p>${ruleSet?uiT('按本任务保存的时效标准计算；下方可核对本次参数。'):uiT('阈值默认24小时；修改后重新解析原文件，按本次设置覆盖时效项并随任务冻结。')}任务创建后手动开始AI执行，可暂停与继续；失败只重试未完成项，人工记录保留。</p><p>首次运行前请在工作台的模型设置中配置接口。</p></details>`}
+      <div class="soft-note">${icon('info',14)}<div>评价类型由AI归类后人工核对；原表正负向标记仅作对照，全部原列完整保留。</div><p>按规则级标定策略执行：已启用达标规则的符合项且证据校验通过才可免审，每规则每批5%强制抽检，至少5条（不足5条全检）；其余判定进入人工。关闭免审时，所有初判均须人工确认。</p></div></div>
+      <footer class="modal-footer"><small>${busy?uiT('正在处理…'):uiT('原文件、规则版本及审核记录保存在本机工作区')}</small><div><button class="btn" data-act="import-save-close" ${closeDisabled}>保存草稿并关闭</button><button class="btn" data-act="${d.step===2?'ec-back':'close-modal'}" ${closeDisabled}>${d.step===2?uiT('上一步'):uiT('取消')}</button>${d.step===2?uiHtml`<button class="btn" data-act="ec-create" ${createDisabled(d)?'disabled':''}>仅创建，稍后质检</button><button class="btn primary" data-act="ec-create-start" ${createDisabled(d)?'disabled':''}>创建并开始AI质检</button>`:uiHtml`<button class="btn primary" data-act="ec-next" ${!usable(d)||!labelsValid(d)||busy||(d.requirePreviewConfirmation&&!d.previewConfirmed)?'disabled':''}>下一步：检查标准与运行安排</button>`}</div></footer></section></div>`;
   }
 
   return { dialog, action, change, input, reconcile };

@@ -3,6 +3,7 @@
 import {validateEcommerceSourceColumns} from './ecommerce-columns.mjs';
 import {validateReviewedEcommerceMapping} from './ecommerce-conversion.mjs';
 export function ecommerceDeliverySource(snapshot){
+  if(snapshot.sourceFormat==='business-export-23.v1')return{sheet:snapshot.sourceSheet,headers:[],standards:[],values:()=>[],mapping:null};
   const sheet=snapshot.sourceSheet??{name:'Sheet4',index:null};
   if(!sheet||typeof sheet.name!=='string'||!sheet.name.trim()||sheet.name.length>80||sheet.index!==null&&(!Number.isSafeInteger(sheet.index)||sheet.index<1||sheet.index>16384))throw new Error('业务交付来源工作表无效。');
   const extensions=snapshot.extensions??{headers:[],standards:[]},n=extensions.headers?.length;

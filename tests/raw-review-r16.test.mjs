@@ -22,8 +22,8 @@ test('quote highlighting recomputes literal locations and escapes source markup,
 test('a quote absent from the raw row cannot create a fake highlight',()=>{
  const f=fixture(),html=api.highlightRawText(f.session.rawTranscript.text,[{quote:'not present'}]);assert.doesNotMatch(html,/<mark\b/);
 });
-test('attention rules remain visible with only the first expanded to avoid building every evidence panel',()=>{
- const f=fixture();api.rawReviewView(f.state,f.ui,{session:f.session,queue:f.queue});assert.deepEqual(f.ui.openRules,['SYN1']);f.session.aiResults[1].verdict='符合';f.session.aiResults[1].confidence=0.99;f.session.aiResults[1].evidenceQuotes=[{quote:'Guaranteed.',matches:matchRawQuote(f.session.rawTranscript.text,'Guaranteed.')}];f.session.aiResults[1].rawValidation.reasonCodes=[];f.ui.rawSelectedSession=null;f.ui.openRules=[];api.rawReviewView(f.state,f.ui,{session:f.session,queue:f.queue});assert.deepEqual(f.ui.openRules,['SYN1']);
+test('attention rules show compact inline controls before optional evidence details',()=>{
+ const f=fixture();api.rawReviewView(f.state,f.ui,{session:f.session,queue:f.queue});assert.deepEqual(f.ui.openRules,[]);f.session.aiResults[1].verdict='符合';f.session.aiResults[1].confidence=0.99;f.session.aiResults[1].evidenceQuotes=[{quote:'Guaranteed.',matches:matchRawQuote(f.session.rawTranscript.text,'Guaranteed.')}];f.session.aiResults[1].rawValidation.reasonCodes=[];f.ui.rawSelectedSession=null;f.ui.openRules=[];api.rawReviewView(f.state,f.ui,{session:f.session,queue:f.queue});assert.deepEqual(f.ui.openRules,[]);
 });
 test('English review labels do not translate or replace the original Arabic and literal source',t=>{
  setLocale('en',{storage:null});t.after(()=>setLocale('zh',{storage:null}));const f=fixture(),html=api.rawReviewView(f.state,f.ui,{session:f.session,queue:f.queue});assert.match(html,/Original transcript/);assert.match(html,/Rule results/);assert.match(html,/هل يمكنني الاسترجاع/);

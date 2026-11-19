@@ -11,7 +11,7 @@ const uiCell=value=>cell(uiLabel(value));
 
 /** Original spreadsheet answers are a comparison reference, never model input or a final review. */
 export function ecommerceReferenceView(session, state) {
-  if (!session?.ecommerce) return '';
+  if (!session?.ecommerce||session.ecommerce.schemaVersion===6) return '';
   const source = session.ecommerce, review = session.review || {};
   const safeSession = { ...session, aiResults: session.aiResults || [], review: { ...review, drafts: review.drafts || {} } };
   const rows = ecommerceComparison(safeSession), confirmed = review.status === '已确认';

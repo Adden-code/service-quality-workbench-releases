@@ -25,3 +25,7 @@
 .raw-review-shell[data-reading-mode="source"] .raw-rule-pane,.raw-review-shell[data-reading-mode="rules"] .raw-original-pane,.raw-review-shell:not([data-reading-mode="split"]) [data-reading-divider]{display:none}
 .scene-review-evidence table{width:100%;border-collapse:collapse}.scene-review-evidence th,.scene-review-evidence td{padding:8px;text-align:start;border-bottom:1px solid #ddd;white-space:normal;overflow-wrap:anywhere}
 @media(max-width:980px){.raw-review-shell{grid-template-columns:minmax(0,1fr);height:auto}.raw-review-shell [data-reading-divider]{display:none}}
+
+.raw-inline-editor{padding:8px 14px}.raw-inline-choices{display:flex;flex-wrap:wrap;gap:5px}.raw-inline-choices button[aria-pressed="true"]{background:#fbe7eb;border-color:#b52135;color:#8e1426}.raw-inline-editor textarea{width:100%;margin:4px 0 6px}.raw-rule-pane>header{padding:10px 14px}.raw-rule-pane>header h2{font-size:16px;margin:0}.raw-rule-pane>header p{margin:5px 0}.raw-review-context>summary{font-size:12px;cursor:pointer}.raw-rule-card:focus{outline:2px solid #b52135;outline-offset:2px}
+
+.raw-card-preview{margin:6px 14px;color:#4d5b71;font-size:12px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}.raw-card-evidence{display:block;margin:0 14px;color:#995b00;font-size:11px}

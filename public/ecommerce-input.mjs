@@ -1,3 +1,4 @@
+import {parseSystemTables} from './ecommerce-system-input.mjs';
 // Core22入口。评价类型、人工答案和扩展列只留原始记录，不投影为判断上下文。
 import { readXlsx, XLSX_ROW_NUMBER, XLSX_DATE_SYSTEM, XLSX_SHEET_NAMES } from './io.mjs';
 import { ecommerceSourceProjection, validateEcommerceRecord, ecommerceTimeValues, ecommerceRecordId } from './ecommerce-schema.mjs';
@@ -30,7 +31,7 @@ function toSession(record, warnings) {
 }
 
 /** Fail atomically: no sessions are returned when structural validation fails. */
-export async function parseEcommerceFile(file, { thresholdHours = 24, selectedSheet, reviewedMapping } = {}) {
+export async function parseEcommerceFile(file, { thresholdHours = 24, selectedSheet, reviewedMapping, standardOnly=false, batchSite='' } = {}) {
   const errors = [], warnings = [];
   let availableSheetNames=[],chosenSheet=null,selectedSheetIndex=null;
   const result = sessions => ({ valid: errors.length === 0, errors: [...new Set(errors)], warnings, availableSheetNames, selectedSheet:chosenSheet, selectedSheetIndex, sessions: errors.length ? [] : sessions, turnCount: errors.length ? 0 : sessions.reduce((total, session) => total + session.turns.length, 0) });
@@ -43,6 +44,8 @@ export async function parseEcommerceFile(file, { thresholdHours = 24, selectedSh
     if (!bytes.byteLength) throw new Error('电商文件为空。');
     if (bytes.byteLength > MAX_FILE) throw new Error('电商文件大小超过8MB，请分批导入。');
     const tables = await readXlsx(bytes,{maxColumns:16384}),sheetNames=tables[XLSX_SHEET_NAMES],physical = values => values[XLSX_ROW_NUMBER];
+    const system=parseSystemTables(tables,{fileSha256:await sha256(bytes),thresholdHours,selectedSheet,reviewedMapping:reviewedMapping?.schemaVersion===2?reviewedMapping:undefined,batchSite});if(system)return system;
+    if(standardOnly&&!reviewedMapping)throw new Error('文件与业务系统默认导出格式不同。请使用AI解析转换，核对列对应后继续；原文件无需改写。');
     const mappings=new Map(),headerFailures=new Map();let verifiedMapping,reviewedSha256;
     if(reviewedMapping!==undefined){
       if(!reviewedMapping||!Object.hasOwn(tables,reviewedMapping.sheet)||selectedSheet&&selectedSheet!==reviewedMapping.sheet)throw new Error('确认映射的来源工作表与本次选择不一致。');

@@ -7,7 +7,7 @@ import {derivedOverall} from './scene-aggregate.mjs';
 export function sceneAggregateNotice(state,session,results){
  const task=state.tasks.find(t=>t.id===session.taskId),summary=derivedOverall(task?.executionSnapshot,results.map(r=>({...r,verdict:r.final?.verdict||r.verdict})));if(!summary)return'';
  const en=getLocale()==='en',labels={'符合':'Pass','不符合':'Fail','不适用':'NA','无法判定':'Undetermined','未执行':'Not executed'};
- return`<p class="soft-note scene-aggregate-notice"><strong>${en?'Current aggregate':'当前子项汇总'}：${e(en?labels[summary.verdict]:summary.verdict)}</strong> · ${en?'NP-R01 is derived from the 16 checks and updates after item corrections. It requires no separate review. Undetermined and not executed never count as Pass.':'NP-R01自动汇总，随16个子项更新，不计入人工待办；无法判定和未执行不计为通过。'}</p>`;
+ return`<p class="soft-note scene-aggregate-notice"><strong>${en?'Current aggregate':'当前子项汇总'}：${e(en?labels[summary.verdict]:summary.verdict)}</strong> · ${summary.algorithm==='fail-only.v2'?(en?'NP-R01: any Fail makes the overall Fail; otherwise judged conversations Pass. Undetermined checks remain separately visible.':`NP-R01自动汇总：已判会话有Fail则Fail，否则Pass。${summary.unknownCount?`含 ${summary.unknownCount} 项无法判定，单独留痕。`:''}`):en?'NP-R01 is derived from the 16 checks and updates after item corrections. It requires no separate review. Undetermined and not executed never count as Pass.':'NP-R01自动汇总，随16个子项更新，不计入人工待办；无法判定和未执行不计为通过。'}</p>`;
 }
 const businessTerms={
  'firstResponseDuration':['首次响应时长','First response time'],'queryWaitDuration':['单次查询等待时长','Query wait time'],

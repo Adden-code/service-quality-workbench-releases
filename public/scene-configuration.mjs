@@ -127,14 +127,15 @@ export function validateSceneTemplate(t,config){
  if(config.aggregateRuleId&&t.columns.filter(c=>c.field==='overall').length!==1)fail('整体派生规则必须且只能对应一个整体通过列。');
  if(config.aggregateRuleId&&t.columns.some(c=>c.ruleId===config.aggregateRuleId&&c.condition))fail('整体派生列不能仅在Fail时填写。');
  if(t.renderMode!==undefined&&!['legacy','configured'].includes(t.renderMode))fail('模板渲染模式不受支持。');
- if(t.aggregate!=='fail-then-unknown-then-pass'||t.auditMode!=='complete-appendix')fail('聚合及固定审计附录不得删除或改写。');
+ if(t.aggregate!==(config.aggregatePolicy==='fail-only.v2'?'fail-only.v2':'fail-then-unknown-then-pass')||t.auditMode!=='complete-appendix')fail('聚合及固定审计附录不得删除或改写。');
  if(!['consultation','ecommerce-43'].includes(t.legacyAdapter))fail('兼容模板适配器无效。');
 }
 export function validateSceneConfiguration(c){
- keys(c,['schemaVersion','id','sceneId','version','status','engine','executionMode','aggregateRuleId','ruleExecutionPolicies','referenceMaterials','ruleBindings','basis','capabilities','taxonomyRef','exceptionRefs','timingPolicy','runtimeFields','templateRef','failurePolicy','ruleDependencies','allowedRuleCategories','timingRuleMetrics','inspectionLanguage','sourceRefs','contentHash','createdAt','publishedAt','actor','reason'],'场景配置');
+ keys(c,['schemaVersion','id','sceneId','version','status','engine','executionMode','aggregateRuleId','aggregatePolicy','ruleExecutionPolicies','referenceMaterials','ruleBindings','basis','capabilities','taxonomyRef','exceptionRefs','timingPolicy','runtimeFields','templateRef','failurePolicy','ruleDependencies','allowedRuleCategories','timingRuleMetrics','inspectionLanguage','sourceRefs','contentHash','createdAt','publishedAt','actor','reason'],'场景配置');
  if(c.schemaVersion!==SCENE_SCHEMA||!isSceneKey(c.sceneId)||!['conversation','ecommerce'].includes(c.engine)||!['draft','published','retired'].includes(c.status)||!['legacy','configured'].includes(c.executionMode))fail('场景配置类型或版本无效。');if(c.engine==='ecommerce'&&c.capabilities?.some(a=>a.key==='timing'))fail('电商时效由冻结的电商检核口径执行，不可叠加会话首次响应/查询时效。');text(c.id,'配置标识');version(c.version);
  list(c.ruleBindings,'冻结规则',200);unique(c.ruleBindings.map(r=>r.ruleId),'冻结规则');for(const r of c.ruleBindings){keys(r,['ruleId','ruleVersion'],'规则版本绑定');text(r.ruleId,'规则标识');text(r.ruleVersion,'规则版本');}
  if(c.aggregateRuleId!==undefined&&(c.aggregateRuleId!=='NP-R01'||c.sceneId!=='新品产品咨询'||c.engine!=='conversation'||c.executionMode!=='configured'||!c.ruleBindings.some(r=>r.ruleId===c.aggregateRuleId)||c.ruleBindings.length!==17))fail('新品整体派生须明确绑定NP-R01及完整17条规则，不能套用于旧任务或其他场景。');
+ if(c.aggregatePolicy!==undefined&&(!c.aggregateRuleId||c.aggregatePolicy!=='fail-only.v2'))fail('整体派生版本无效。');
  if(c.aggregateRuleId&&(c.ruleDependencies[c.aggregateRuleId]?.length||c.timingRuleMetrics?.[c.aggregateRuleId]))fail('整体派生规则不独立请求前置能力或时效判定。');
  if(!c.basis||!Array.isArray(c.basis.rules)||!Array.isArray(c.basis.policies)||c.basis.rules.length!==c.ruleBindings.length||c.ruleBindings.some(r=>!c.basis.rules.some(x=>x.id===r.ruleId&&x.version===r.ruleVersion&&isSessionCheckRule(x))))fail('场景冻结规则内容与绑定不一致。');
  list(c.capabilities,'辅助能力',SCENE_CAPABILITIES.length);unique(c.capabilities.map(x=>x.key),'能力');

@@ -300,7 +300,7 @@ export async function finalizeCleaningDraft(draft,{source,reviewer,conversionRev
   const cleaningReportSnapshot=buildCleaningReportSnapshot(draft,{source,reviewer,conversionReview,now});
   const sessions=sessionsFromDraft(draft);if(!sessions.length)fail('全部行均已弃用，不能创建空任务；原行和原因仍保留在当前草稿。');
   const bytes=await workbook([{name:'会话信息',headers:INFO_HEADERS,rows:sessions.map(session=>INFO.map(key=>session[key]))},{name:'会话明细',headers:TURN_HEADERS,rows:sessions.flatMap(session=>session.turns.map(turn=>[session.id,turn.id,turn.role,turn.speaker,turn.at,turn.text]))}]);
-  const parsed=await parseBusinessInput({name:'会话清洗_标准双表草稿.xlsx',size:bytes.byteLength,arrayBuffer:async()=>bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength)});
+  const parsed=await parseBusinessInput({name:'会话清洗_会话信息与逐条发言表草稿.xlsx',size:bytes.byteLength,arrayBuffer:async()=>bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength)});
   if(!parsed.valid)return {...parsed,bytes:null,cleaningReportSnapshot:null};
   validateCleaningReportSnapshot(cleaningReportSnapshot,{source,sessions:parsed.sessions});return {...parsed,bytes,cleaningReportSnapshot};
  }catch(error){return {valid:false,errors:[error?.message||'清洗确认或原双表预检未通过。'],warnings:[],sessions:[],turnCount:0,bytes:null,cleaningReportSnapshot:null};}

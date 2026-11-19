@@ -1,3 +1,4 @@
+import {systemDeliveryView} from './ecommerce-system-delivery.mjs';
 import {evidenceAuditHtml} from './evidence-audit.mjs';
 import {configuredDelivery,buildSceneReportHtml} from './scene-delivery.mjs';
 import {hasReviewPolicy,triageReportNotice} from './triage-export.mjs';
@@ -111,6 +112,7 @@ function vocHtml(snapshot,enrichment){
 const styles=reportStyles;
 
 export function buildBusinessReportHtml(snapshot,enrichment={},options={}){
+ snapshot=systemDeliveryView(snapshot);
  if(configuredDelivery(snapshot))return buildSceneReportHtml(snapshot,enrichment,options);
   if(snapshot?.deliveryType==='consultation-v1')return buildConsultationReportHtml(snapshot,enrichment,options);
   if(!snapshot||snapshot.schemaVersion!==1||!Array.isArray(snapshot.records)||!snapshot.metrics)throw new Error('业务交付快照无效。');

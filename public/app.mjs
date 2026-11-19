@@ -1,3 +1,4 @@
+import {rawInlineKeyboard} from './raw-inline-review.mjs';
 import {installReadingControls} from './raw-review-layout.mjs';
 installReadingControls();
 import {clientBuild} from './build-identity.mjs';
@@ -714,6 +715,7 @@ for(const eventName of ['input','change'])document.addEventListener(eventName,ev
 document.addEventListener('input',event=>updateTaskDraftInput(dialog,event.target));
 document.addEventListener('input',()=>importDraftManager.schedule());
 document.addEventListener('input',event=>{if(!sceneConfigurationManager.input(event))scenarioManager.input(event);});
+document.addEventListener('input',event=>{const rule=event.target.dataset?.rawInlineReason;if(rule&&ui.rawInlineDrafts?.[ui.selectedId]?.[rule])ui.rawInlineDrafts[ui.selectedId][rule].reason=event.target.value;});
 document.addEventListener('input',event=>importManager.input(event));
 document.addEventListener('input',event=>ecommerceManager.input(event));
 document.addEventListener('input',event=>ruleSetManager.input(event));
@@ -791,6 +793,7 @@ document.addEventListener('keydown',event=>{
  if(event.ctrlKey&&event.key==='Enter'&&typing){const button=document.querySelector('[data-act="ec-inline-confirm"]');if(button&&!button.disabled){event.preventDefault();button.click();}}
 });
 const reviewShortcutHandler=createReviewShortcutHandler({getContext:()=>({page:ui.page,dialogOpen:Boolean(dialog||closingOverlay),saving,dirty:persistenceBlocked||workspace.hasPending||workspace.conflicted,composing:Boolean(composingInput),activeElement:document.activeElement,selectedId:ui.selectedId,queue:document.querySelector('.review-shell,.raw-review-shell')?reviewQueue(scoped(),ui):[]}),onNavigate:({sessionId})=>{const button=[...document.querySelectorAll('.session-item[data-act="select-session"]')].find(item=>item.dataset.id===sessionId);if(button){button.click();return true;}const select=document.getElementById('raw-review-session');if(select&&[...select.options].some(option=>option.value===sessionId)){select.value=sessionId;select.dispatchEvent(new Event('change',{bubbles:true}));return true;}return false;},onEdit:()=>{const control=firstReviewActionControl(document.querySelector('.review-page'),'edit');if(!control)return false;control.click();return true;},onConfirm:()=>{const control=firstReviewActionControl(document.querySelector('.review-page'),'confirm');if(!control)return false;control.click();return true;}});
+document.addEventListener('keydown',event=>{if(ui.page==='review'&&!dialog&&!saving)rawInlineKeyboard(event);});
 document.addEventListener('keydown',reviewShortcutHandler);
 window.addEventListener('hashchange',()=>{if(saving||workspaceBackupManager.blocksNavigation)return;const route=location.hash.slice(1);if(navigation.some(n=>n[0]===route)){ui.page=route;closeDialog({immediate:true});render();}});
 window.addEventListener('beforeunload',event=>{if(workspaceBackupManager.isBusy){event.preventDefault();event.returnValue='';}});
