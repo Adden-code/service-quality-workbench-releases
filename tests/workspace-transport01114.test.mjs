@@ -5,7 +5,7 @@ import {createWorkspaceDecoderCore} from '../public/workspace-decode-core.mjs';
 import {mergeWorkspacePatch} from '../public/workspace-patch.mjs';
 import {createWorkbenchServer} from '../server.mjs';
 import {createWorkspaceClient} from '../public/workspace-client.mjs';
-import {largeWorkspace} from './workspace-performance-fixture.mjs';
+import {largeWorkspace,writePerformanceSources} from './workspace-performance-fixture.mjs';
 test('record transport pins revisions, hashes pages and transfers only changed records beyond journal horizon',async()=>{
  let now=0,bytes=0;const transport=createWorkspaceTransport({pageBytes:512,now:()=>now});
  const decoder=createWorkspaceDecoderCore({fetchImpl:async url=>{const [,lease,hash,index]=url.match(/parts\/([^/]+)\/([^/]+)\/(\d+)$/);const b=transport.page(lease,hash,Number(index));assert.ok(b.length<=512);bytes+=b.length;return new Response(b);}});
@@ -16,6 +16,20 @@ test('record transport pins revisions, hashes pages and transfers only changed r
  const b=await decode(transport.prepare(changed),1);assert.equal(b.patch.sessions.length,1);assert.deepEqual(mergeWorkspacePatch(a,b).state,changed.state);assert.ok(bytes<initialBytes/3);
  assert.equal((await decode(envelope)).revision,1,'old lease remains pinned');
  now=120001;assert.throws(()=>transport.page(envelope.lease,envelope.manifest.hash,0),/过期/);
+});
+test('incremental PUT stays below request limit for a 40MB workspace and preserves source integrity, conflicts and replay',async t=>{
+ const root=path.resolve('tests/artifacts/transport01114');await fs.mkdir(root,{recursive:true});const dir=await fs.mkdtemp(path.join(root,'write-')),raw=largeWorkspace({megabytes:40});await fs.writeFile(path.join(dir,'workspace.json'),JSON.stringify(raw));await writePerformanceSources(dir);
+ const server=await createWorkbenchServer({dataDir:dir,storageMode:'sharded'});await new Promise(r=>server.listen(0,'127.0.0.1',r));const origin='http://127.0.0.1:'+server.address().port,writes=[];let drop=false;
+ const fetchImpl=async(url,options={})=>{const r=await fetch(origin+url,{...options,headers:{Origin:origin,...options.headers}});if(options.method==='PUT'){writes.push({body:options.body,bytes:Buffer.byteLength(options.body),status:r.status});if(drop){drop=false;await r.arrayBuffer();throw Error('synthetic lost PUT reply');}}return r;};
+ const client=createWorkspaceClient({fetchImpl,incrementalTransport:true,structuralSharing:true}),other=createWorkspaceClient({fetchImpl,incrementalTransport:true});
+ t.after(async()=>{client.close();other.close();await new Promise(r=>server.close(r));assert.ok(dir.startsWith(root+path.sep));await fs.rm(dir,{recursive:true,force:true});});
+ await client.load();await other.load();assert.ok(Buffer.byteLength(JSON.stringify(raw))>40*1024*1024);
+ await client.transact(next=>next);assert.ok(writes[0].bytes<1000);assert.ok(JSON.parse(writes[0].body).patch);assert.equal(client.revision,2);
+ await assert.rejects(other.transact(next=>next),/更新/);await other.reload();assert.equal(other.revision,2);
+ await assert.rejects(client.transact(next=>{next.state.sessions[0].turns[0].text='tampered';return next;}),/原文.*不可改写/);assert.equal(client.revision,2);
+ await assert.rejects(client.transact(next=>{next.state.tasks[0].source.sha256='f'.repeat(64);return next;}),/不可.*改写|原文件/);assert.equal(client.revision,2);
+ drop=true;await assert.rejects(client.transact(next=>next),/未确认/);assert.ok(client.hasPending);const lost=JSON.parse(writes.at(-1).body);await client.retryPending();assert.equal(client.revision,3);assert.equal(client.hasPending,false);assert.equal(JSON.parse(writes.at(-1).body).mutationId,lost.mutationId);
+ await other.reload();assert.deepEqual(other.snapshot.state,client.snapshot.state);
 });
 test('negotiated client loads large workspaces in bounded slices and retains revision conflict/idempotent semantics',async t=>{
  const root=path.resolve('tests/artifacts/transport01114');await fs.mkdir(root,{recursive:true});const dir=await fs.mkdtemp(path.join(root,'test-')),raw=largeWorkspace({count:40,megabytes:3});await fs.writeFile(path.join(dir,'workspace.json'),JSON.stringify(raw));

@@ -1,6 +1,6 @@
 import {createRecordWriter,isRecordIndex,readRecordDocument} from './workspace-records.mjs';
 import {applyReviewCommand} from '../public/review-command.mjs';
-import {workspacePatch} from '../public/workspace-patch.mjs';
+import {workspacePatch,mergeWorkspacePatch} from '../public/workspace-patch.mjs';
 import {installBuiltinSceneUpgrade} from './builtin-scene-upgrade.mjs';
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
@@ -250,14 +250,17 @@ export async function createWorkspaceStore({dataDir,fsOps=fs,catalogSeed=null,sc
         return persist({...document,revision:document.revision+1,state:next.state,catalog:next.catalog});
       });
     },
-    save(input){
+    save(input,{snapshot=true}={}){
       const request=clone(input);
       return serial(async()=>{
         if(!object(request)||!Number.isSafeInteger(request.baseRevision)||request.baseRevision<0||typeof request.mutationId!=='string'||!request.mutationId.trim()||request.mutationId.length>128)throw new WorkspaceError('保存请求版本或 mutationId 无效。');
-        const fingerprint=digest(canonical({baseRevision:request.baseRevision,state:request.state,catalog:request.catalog}));
+        const delta=Object.hasOwn(request,'patch');
+        if(delta){const p=request.patch;if(Object.keys(request).some(k=>!['baseRevision','mutationId','patch'].includes(k))||!object(p)||Object.keys(p).some(k=>!['tasks','sessions','removedTasks','removedSessions','tasksOrder','sessionsOrder','state','catalog'].includes(k))||!object(p.state)||!['tasks','sessions','removedTasks','removedSessions'].every(k=>Array.isArray(p[k]))||['tasks','sessions'].some(k=>p[k].some(v=>!object(v)||typeof v.id!=='string')||new Set(p[k].map(v=>v.id)).size!==p[k].length)||['removedTasks','removedSessions'].some(k=>p[k].some(v=>typeof v!=='string'))||['tasksOrder','sessionsOrder'].some(k=>p[k]!==undefined&&(!Array.isArray(p[k])||p[k].some(v=>typeof v!=='string'))))throw new WorkspaceError('工作区变更切片格式无效。');}
+        const fingerprint=digest(canonical(delta?{baseRevision:request.baseRevision,patch:request.patch}:{baseRevision:request.baseRevision,state:request.state,catalog:request.catalog}));
         const replay=document.mutations.find(item=>item.id===request.mutationId);
-        if(replay){if(replay.digest!==fingerprint)throw new WorkspaceError('相同 mutationId 对应不同请求。',409);return {...await read(),replayed:true};}
+        if(replay){if(replay.digest!==fingerprint)throw new WorkspaceError('相同 mutationId 对应不同请求。',409);return {...(snapshot?await read():{initialized:true,revision:document.revision}),replayed:true};}
         if(request.baseRevision!==document.revision)throw new WorkspaceError('工作区已由另一页面更新，请保留编辑内容后重新加载。',409);
+        if(delta){if(!document.state)throw new WorkspaceError('未初始化工作区不能使用增量保存。');let merged;try{merged=mergeWorkspacePatch(document,{baseRevision:request.baseRevision,revision:request.baseRevision+1,patch:request.patch});}catch(error){throw new WorkspaceError(error.message);}request.state=merged.state;request.catalog=merged.catalog;}
         if(canonical(request.catalog?.deletedRules||[])!==canonical(document.catalog?.deletedRules||[]))throw new WorkspaceError('规则删除审计只能通过专用删除入口追加，历史内容不可改写。');
         const deletedEvents=catalog=>(catalog?.events||[]).filter(event=>(document.catalog?.deletedRules||[]).some(entry=>event.kind==='rules'&&entry.id===event.id&&entry.version===event.version));
         if(canonical(deletedEvents(request.catalog))!==canonical(deletedEvents(document.catalog)))throw new WorkspaceError('已删除规则的历史操作记录不可改写。');
@@ -268,7 +271,7 @@ export async function createWorkspaceStore({dataDir,fsOps=fs,catalogSeed=null,sc
         const monitored=monitorCalibrations(request.state);
         validateWorkspace(monitored,request.catalog,request.state,{trustedCalibration:true});
         const next={schemaVersion:1,revision:document.revision+1,state:monitored,catalog:request.catalog,mutations:[...document.mutations,{id:request.mutationId,digest:fingerprint}]};
-        return persist(next);
+        return persist(next,{snapshot});
       });
     },
     putSource(bytes,name){

@@ -372,7 +372,7 @@ export async function createWorkbenchServer({dataDir=process.env.DEMO_DATA_DIR||
         if(req.method!=='PUT')throw new WorkspaceError('Method not allowed',405);
         requireMutation('application/json');const bytes=await body(req,maxBodyBytes);let request;
         try{request=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(bytes));}catch{throw new WorkspaceError('保存请求不是有效 JSON。');}
-        await json(res,200,{...await store.save(request),token});return;
+        await json(res,200,{...await store.save(request,{snapshot:req.headers['x-workspace-sync']!=='records-v1'}),initialized:true,token});return;
       }
       if(pathname==='/api/sources'){
         if(req.method!=='POST')throw new WorkspaceError('Method not allowed',405);

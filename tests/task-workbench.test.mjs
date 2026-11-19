@@ -42,8 +42,9 @@ test('detail aggregates paused queue, physical rows, attempts, review and task-s
   const html=module.taskDetailView(state,{...ui,taskDetailId:task.id});
   assert.match(html,/材料与依据/);assert.match(html,/AI执行/);assert.match(html,/人工审核/);assert.match(html,/双报告/);
   assert.match(html,/data-act="resume-ai"/);assert.doesNotMatch(html,/data-act="pause-ai"/);
-  assert.match(html,/第1段 · 尝试 2/);assert.doesNotMatch(html,/第2段 · 尝试/);
-  assert.match(html,/第4行/);assert.match(html,/尝试 2/);assert.match(html,/请求超时/);assert.match(html,/未完成/);
+  assert.match(html,/查看明细（每页25条）/);assert.doesNotMatch(html,/请求超时/);
+  const loaded=module.taskDetailView(state,{...ui,taskDetailId:task.id,executionPages:{[task.id]:{offset:0,total:3,rows:task.aiQueue.rows.map(r=>({...r,batchIndex:1}))}}});
+  assert.match(loaded,/<td>4<\/td><td>1 \/ 2<\/td>/);assert.match(loaded,/请求超时/);assert.match(loaded,/未完成/);
   assert.match(html,/task-detail-export/);assert.match(html,/task-detail-report/);
 });
 

@@ -1,5 +1,5 @@
 import {createWorkspaceDecoder} from './workspace-decoder.mjs';
-import {mergeWorkspacePatch} from './workspace-patch.mjs';
+import {mergeWorkspacePatch,workspacePatch} from './workspace-patch.mjs';
 import {createBusinessState} from './domain.mjs';
 import {createBusinessCatalog,validateCatalog} from './catalog.mjs';
 import {migrateBusinessWorkspace} from './business-state.mjs';
@@ -73,7 +73,7 @@ export function createWorkspaceClient({fetchImpl=globalThis.fetch,storage=null,t
   }
   function prepare(next){
     stateCheck(next?.state);validateCatalog(next.catalog);
-    pending={body:JSON.stringify({baseRevision:acknowledged.revision,mutationId:mutationId(),state:next.state,catalog:next.catalog})};
+    pending={body:JSON.stringify({baseRevision:acknowledged.revision,mutationId:mutationId(),...(incrementalTransport&&acknowledged.initialized?{patch:workspacePatch(acknowledged,next)}:{state:next.state,catalog:next.catalog})})};
   }
   function legacy(){
     try{
