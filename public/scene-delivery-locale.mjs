@@ -3,6 +3,9 @@ import {resultProvenanceSheet} from './triage-export.mjs';
 import {createReportLocale,englishReportValue} from './report-locale.mjs';
 
 const labels={
+ '冻结快照审计':'Frozen snapshot audit','内容类型':'Content type','分块序号':'Part number','总块数':'Total parts','内容SHA-256':'Content SHA-256','JSON分块（按序拼接）':'JSON chunk (concatenate in order)',
+ '冻结内容SHA-256':'Frozen content SHA-256','交付快照指纹':'Delivery snapshot fingerprint','完整冻结模板保存在冻结快照审计页的 deliverySnapshot JSON 分块中。':'The complete frozen template is retained in the deliverySnapshot JSON chunks in Frozen snapshot audit.',
+ '人工确认':'Human confirmed','原表历史人工参考':'Historical human reference','AI初判':'AI initial','AI终判':'AI final','待人工确认':'Pending human confirmation',
  '整体：已判且完成所选审核口径的会话，有Fail则Fail，否则Pass；NA和无法判定不阻断，含无法判定单列。未执行及待人工确认不计入最终通过率。子项：NA仅业务不适用，无法判定独立统计。':'Overall: under the selected review scope, any Fail means Fail; otherwise judged conversations Pass. NA and undetermined checks do not block Pass; undetermined counts remain visible. Unexecuted and pending confirmation records are excluded from the final denominator. Item NA means inapplicable; undetermined checks are counted separately.',
  '结果说明':'Result notes','无法判定子项说明':'Undetermined checks','待确认':'Awaiting confirmation',
  '证据核验状态':'Evidence verification status','AI证据核验状态':'AI evidence verification','证据核验审计':'Verification audit','证据核验明细':'Evidence verification','已核验':'Verified','未核验':'Unverified','人工提供':'Human provided',
