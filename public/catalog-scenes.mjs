@@ -57,7 +57,10 @@ export function sceneRuleAvailability({state={},catalog={},scene,effectiveDate}=
 }
 export const eligibleSceneRules=options=>sceneRuleAvailability(options).rules;
 export function assertTaskCatalogScene({state={},catalog,scene,basisSnapshot}){
-  if(scene==='电商评论回复'&&isBusinessEcommerceBasis(basisSnapshot)){validateBusinessEcommerceBasis(basisSnapshot);const matches=(state.sceneConfigurations||[]).filter(c=>c.sceneId===scene&&c.status==='published'&&JSON.stringify(c.basis.rules)===JSON.stringify(basisSnapshot.rules)&&JSON.stringify(c.basis.businessProfile)===JSON.stringify(basisSnapshot.businessProfile)&&JSON.stringify(c.basis.policies)===JSON.stringify(basisSnapshot.policies));if(matches.length!==1)throw new Error('内置电商依据必须来自已发布场景。');return true;}
+  // Template-only versions may intentionally share identical inspection rules.
+  // Membership is required here; the task's exact configuration/template version
+  // is independently frozen and validated by the scene execution snapshot.
+  if(scene==='电商评论回复'&&isBusinessEcommerceBasis(basisSnapshot)){validateBusinessEcommerceBasis(basisSnapshot);const matches=(state.sceneConfigurations||[]).filter(c=>c.sceneId===scene&&c.status==='published'&&JSON.stringify(c.basis.rules)===JSON.stringify(basisSnapshot.rules)&&JSON.stringify(c.basis.businessProfile)===JSON.stringify(basisSnapshot.businessProfile)&&JSON.stringify(c.basis.policies)===JSON.stringify(basisSnapshot.policies));if(matches.length===0)throw new Error('内置电商依据必须来自已发布场景。');return true;}
   const stageA=scene==='电商评论回复'&&basisSnapshot?.ruleSetSnapshot;
   const derivedPolicyId=stageA?`EC-TIME-${basisSnapshot.ruleSetSnapshot.ruleSetId}`:null;
   for(const kind of ['rules','policies'])for(const record of basisSnapshot?.[kind]||[]){
