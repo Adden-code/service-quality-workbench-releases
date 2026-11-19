@@ -98,7 +98,7 @@ test('program-only R16 staging preserves every raw runtime module and includes n
  const inputs={nodeExe:path.join(dir,'node.exe'),nodeLicense:path.join(dir,'LICENSE.txt'),javaRuntime,jarPath:path.join(dir,'synthetic-worker.jar')};
  for(const name of [inputs.nodeExe,inputs.nodeLicense,inputs.jarPath,path.join(javaRuntime,'bin/java.exe')])await fs.writeFile(name,'SYNTHETIC runtime placeholder; never execute');
  const result=await buildPortable({outputDir:path.join(dir,'output'),...inputs,archive:false,split:false}),meta=JSON.parse(await fs.readFile(path.join(result.root,'portable-info.json'),'utf8')),manifest=JSON.parse(await fs.readFile(path.join(result.root,'文件校验清单.json'),'utf8'));
- assert.equal(meta.version,'0.11.12');assert.equal(meta.factoryReady,false);assert.equal(meta.catalogSeedIncluded,false);assert.equal(meta.catalog,null);assert.equal(meta.catalogInfo,null);assert.equal(meta.sourceDataIncluded,false);assert.equal(meta.credentialsIncluded,false);
+ assert.equal(meta.version,'0.11.13');assert.equal(meta.factoryReady,false);assert.equal(meta.catalogSeedIncluded,false);assert.equal(meta.catalog,null);assert.equal(meta.catalogInfo,null);assert.equal(meta.sourceDataIncluded,false);assert.equal(meta.credentialsIncluded,false);
  assert.ok(!manifest.files.some(entry=>/^(?:data|tests|docs\/samples)\/|catalog-seed\.json|(?:^|\/)\.env|\.secrets|sample.*\.xlsx/i.test(entry.path)));
  for(const rel of ['server/raw-inspection.mjs','server/raw-source.mjs','server/raw-structure-jobs.mjs','public/raw-locale-en.mjs','public/raw-review-view.mjs','public/raw-golden.mjs']){
   assert.ok(manifest.files.some(entry=>entry.path===rel),rel);assert.deepEqual(await fs.readFile(path.join(result.root,rel)),await fs.readFile(path.join(project,rel)),rel);
@@ -107,7 +107,7 @@ test('program-only R16 staging preserves every raw runtime module and includes n
 });
 
 test('release version and bilingual instructions define raw direct inspection, legacy drafts and all four golden metrics',async()=>{
- const {productVersion}=await import('../packaging/version.mjs');assert.equal(productVersion,'0.11.12');
+ const {productVersion}=await import('../packaging/version.mjs');assert.equal(productVersion,'0.11.13');
  const pkg=JSON.parse(await fs.readFile(path.join(project,'package.json'),'utf8'));assert.equal(pkg.version,productVersion);
  for(const text of [selfServiceGuide('en'),englishUsageGuide(productVersion),triageWorkflowGuide('en'),acceptanceChecklist('en')]){
   for(const phrase of ['Raw direct inspection','legacy','0.90','90%','FAIL recall','uncertainty','wrong original AI-final PASS','denominator'])assert.ok(text.toLowerCase().includes(phrase.toLowerCase()),phrase);

@@ -17,5 +17,7 @@ export function sceneCapabilitySchema(input){
   timing:object({firstCustomer:ref,firstAgent:ref,queries:{type:'array',maxItems:200,items:object({issueId:string,topic:string,start:ref,end:ref,evidence})},completeCoverage:{const:true}})
  };
  if(!shapes[input.capability])throw Object.assign(new Error('未知辅助能力。'),{code:'INVALID_INPUT'});
- return object({status:{enum:['completed','uncertain']},value:nullable(shapes[input.capability]),confidence:{type:'number',minimum:0,maximum:1},reason:string,evidence});
+ const schema=object({status:{enum:['completed','uncertain']},value:nullable(shapes[input.capability]),confidence:{type:'number',minimum:0,maximum:1},reason:string,evidence});
+ if(input.capability==='ecommerceClassification'){shapes.ecommerceClassification.allOf=[{if:{properties:{polarity:{enum:['positive','invalid']}}},then:{properties:{vocKind:{const:'none'}}}}];schema.allOf=[{if:{properties:{status:{const:'uncertain'}}},then:{properties:{value:{type:'null'}}}}];}
+ return schema;
 }
