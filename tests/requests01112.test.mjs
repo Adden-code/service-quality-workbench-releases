@@ -46,3 +46,7 @@ test('changing batch site after confirmed conversion preserves the mapping and r
  for(let i=0;i<300&&d.loading;i++)await new Promise(r=>setTimeout(r,2));
  assert.equal(d.loading,false);assert.equal(d.parsed.valid,true,d.error);assert.deepEqual(d.reviewedMapping,receipt);assert.equal(d.parsed.sessions[0].ecommerce.row,3);assert.equal(d.parsed.sessions[0].ecommerce.raw[3],'Synthetic site');
 });
+
+test('new builtin ecommerce explanations are translated without changing original material',async()=>{
+ const {t,setLocale}=await import('../public/i18n.mjs'),{BUILTIN_ECOMMERCE_RULE_DESCRIPTIONS}=await import('../public/ecommerce-template.mjs');setLocale('en');try{for(const pair of BUILTIN_ECOMMERCE_RULE_DESCRIPTIONS)for(const value of pair)assert.doesNotMatch(t(value),/\p{Script=Han}/u);}finally{setLocale('zh');}
+});
