@@ -1,4 +1,4 @@
-export const DEFAULT_EXECUTION_SETTINGS=Object.freeze({concurrency:1,batchSize:20,maxWorkBytes:64000});
+export const DEFAULT_EXECUTION_SETTINGS=Object.freeze({concurrency:4,batchSize:20,maxWorkBytes:64000});
 export const DEFAULT_RAW_EXECUTION_SETTINGS=Object.freeze({...DEFAULT_EXECUTION_SETTINGS,concurrency:4});
 export function normalizeExecutionSettings(value={}, {raw=false}={}){
   const settings={...(raw?DEFAULT_RAW_EXECUTION_SETTINGS:DEFAULT_EXECUTION_SETTINGS),...value};

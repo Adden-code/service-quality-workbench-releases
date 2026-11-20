@@ -19,13 +19,13 @@ async function translationFixture(t,{rows=80,hook,trace=false,maxAttempts=2}={})
  await fs.mkdir(base,{recursive:true});const dir=await fs.mkdtemp(base+'/translations-');
  const state={tasks:['A','B'].map(id=>({id,basisSnapshot:{rules:[],policies:[]}})),sessions:['A','B'].map(taskId=>({id:'session-'+taskId,taskId,turns:Array.from({length:rows},(_,index)=>({id:index+1,text:`合成会话 ${taskId} 第 ${index+1} 条，请核查产品描述。`}))}))};
  const calls=[],traceStore=trace?await createWorkflowTraceStore({dataDir:dir}):undefined;
- const options={dataDir:dir,store:{read:async()=>({state:structuredClone(state),revision:1})},modelConfig:{getPrivate:()=>({...config})},client:{engine:'synthetic',async enrichBusinessReport(request){calls.push({input:structuredClone(request.input),at:Date.now()});return hook?hook(request):answer(request.input);}},traceStore,retryDelayMs:1,maxAttempts};
+ const options={dataDir:dir,store:{read:async()=>({state:structuredClone(state),revision:1})},modelConfig:{getPrivate:()=>({...config})},client:{engine:'synthetic',async enrichBusinessReport(request){calls.push({input:structuredClone(request.input),at:Date.now()});return hook?hook(request):answer(request.input);}},traceStore,retryDelayMs:1,maxAttempts,concurrency:2};
  let service=await createTranslationJobs(options);
  t.after(async()=>{await service.close();await traceStore?.close();assert.ok(path.resolve(dir).startsWith(path.resolve(base)+path.sep));await fs.rm(dir,{recursive:true,force:true});});
  return{calls,dir,traceStore,get service(){return service;},async restart(){await service.close();service=await createTranslationJobs(options);}};
 }
 
-test('R17 default 2 and configured 4 requests overlap within each independent task; pause drains without dispatching more',async t=>{
+test('R17 configured 2 and overridden 4 requests overlap within each independent task; pause drains without dispatching more',async t=>{
  const gate=gates(),f=await translationFixture(t,{hook:request=>gate.hook(request)});t.after(()=>gate.release());
  assert.equal((await f.service.create({jobId:'task-a',source:source('A'),targetLang:'en'})).concurrency,2);
  await until(()=>gate.requests.length===2);
@@ -122,14 +122,14 @@ test('R17 parallel trace registration splits at 64 nodes with complete unique pr
 test('R17 report translation and independent analysis overlap; another report starts while the first is active',async t=>{
  const data=await consultationRuntimeFixture(3);await fs.mkdir(base,{recursive:true});const dir=await fs.mkdtemp(base+'/reports-');
  const calls=[],pending=[];let released=false;
- const options={dataDir:dir,store:{read:async()=>({state:structuredClone(data.state),revision:1}),getSource:async()=>({...data.task.source,bytes:data.bytes})},modelConfig:{getPrivate:()=>({...config})},client:{engine:'synthetic',async enrichBusinessReport(request){calls.push(request);if(!released)await new Promise(resolve=>pending.push(resolve));return consultationReportAnswer(request.kind,request.input);}},retryDelayMs:1};
+ const options={dataDir:dir,store:{read:async()=>({state:structuredClone(data.state),revision:1}),getSource:async()=>({...data.task.source,bytes:data.bytes})},modelConfig:{getPrivate:()=>({...config})},client:{engine:'synthetic',async enrichBusinessReport(request){calls.push(request);if(!released)await new Promise(resolve=>pending.push(resolve));return consultationReportAnswer(request.kind,request.input);}},retryDelayMs:1,concurrency:2};
  const service=await createReportJobs(options);t.after(async()=>{released=true;pending.forEach(resolve=>resolve());await service.close();assert.ok(path.resolve(dir).startsWith(path.resolve(base)+path.sep));await fs.rm(dir,{recursive:true,force:true});});
  await service.create({jobId:'report-a',taskId:data.task.id});await until(()=>calls.length===2);assert.deepEqual(new Set(calls.map(call=>call.kind)),new Set(['translation','consultationAnalysis']));
  await service.create({jobId:'report-b',taskId:data.task.id,conclusionMode:'ai'});await until(()=>calls.length===4);await service.pause('report-a');await service.pause('report-b');released=true;pending.forEach(resolve=>resolve());await service.waitForIdle();assert.equal(calls.length,4);
  await service.resume('report-a');await service.resume('report-b');await service.waitForIdle();assert.equal((await service.get('report-a')).status,'completed');assert.equal((await service.get('report-b')).status,'completed');
 });
 
-test('R17 180-row identical uncached workload compares serialized provider with default 2 and configured 3',async t=>{
+test('R17 180-row identical uncached workload compares serialized provider with configured 2 and 3',async t=>{
  const providerDelayMs=Number(process.env.SERVICE_R17_BENCHMARK_DELAY_MS??200);assert.ok(Number.isSafeInteger(providerDelayMs)&&providerDelayMs>=1&&providerDelayMs<=28000);
  const results=[];let baselineRequests;
  for(const concurrency of [1,2,3]){

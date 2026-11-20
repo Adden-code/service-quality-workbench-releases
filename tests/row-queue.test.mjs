@@ -20,7 +20,9 @@ async function setup(t,inspect,count=3,commonAdmin=false,options={}){
  const bytes=await createEcommerceSample(),parsed=await parseEcommerceFile({name:'fixture.xlsx',size:bytes.length,arrayBuffer:async()=>bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength)});
  if(commonAdmin)for(const s of parsed.sessions){s.ecommerce.raw[11]='同一虚构管理员';s.ecommerce.raw[9]+=' 虚构记录'+s.ecommerce.row;Object.assign(s,ecommerceSourceProjection(s.ecommerce));}
  const source=await store.putSource(bytes,'fixture.xlsx'),catalog=ensureEcommerceCatalog(createCatalog());
- const state=createImportedTask(createInitialState(),{name:'虚构逐行队列',reviewer:'审核员',sessions:parsed.sessions.slice(0,count),source,basisSnapshot:createBasisSnapshot(catalog,{effectiveDate:'2026-10-30',ruleIds:EC_RULE_IDS})});
+ // Checkpoint, pause and credential-recovery cases require undispatched rows;
+ // keep this fixture explicitly serial rather than relying on new-task defaults.
+ const state=createImportedTask(createInitialState(),{name:'虚构逐行队列',reviewer:'审核员',executionSettings:{concurrency:1},sessions:parsed.sessions.slice(0,count),source,basisSnapshot:createBasisSnapshot(catalog,{effectiveDate:'2026-10-30',ruleIds:EC_RULE_IDS})});
  await store.save({state,catalog,baseRevision:0,mutationId:'initial'});
  const calls=[],client={inspectEcommerceRow:async request=>{calls.push(request);return inspect?inspect(request,calls.length):semantic(request.session);},compareEcommerceReplies:async({block,plan})=>({similarPairs:[],checkedIds:block.representativeIds})};
  let privateConfig={connectionTested:true,apiKey:'fixture-never-network',model:'fixture',...options.config};

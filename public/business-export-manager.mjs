@@ -7,6 +7,7 @@ import {CUSTOMER_ONLY,CONVERSATION_UNVERIFIED,normalizeRoleEvidenceMode} from '.
 import {getLocale,translateError} from './i18n.mjs';
 import {createTranslationClient} from './content-translation-client.mjs';
 import {collectReportTranslationFields} from './report-locale.mjs';
+import {readBusinessConcurrencyPreference,writeBusinessConcurrencyPreference,validBusinessConcurrency} from './business-concurrency-preference.mjs';
 
 const terminal=status=>['completed','completed_with_warnings'].includes(status);
 const aborted=error=>error?.name==='AbortError';
@@ -17,13 +18,13 @@ const fileName=value=>String(value||'电商质检').replace(/[\x00-\x1f<>:"/\\|?
 const makeId=()=>`report-${globalThis.crypto?.randomUUID?.()||`${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`}`;
 const shortHash=value=>{let hash=0xcbf29ce484222325n;for(const char of value)hash=BigInt.asUintN(64,(hash^BigInt(char.codePointAt(0)))*0x100000001b3n);return hash.toString(16).padStart(16,'0');};
 const emptyModel=()=>({job:null,result:null,busy:false,downloading:false,loading:false,error:'',notice:'',stale:false,nodeDetail:null,history:[],historyTaskId:'',historyLoading:false,historyError:'',translationJob:null,translationResult:null,translationKey:'',translationError:'',translationBusy:false,translationTriedKey:'',translationNotGenerated:false});
-const historySummary=job=>Object.fromEntries(['id','taskId','taskName','createdAt','updatedAt','status','options','reportLanguage','progress','warningsCount','resultAvailable'].filter(key=>job[key]!==undefined).map(key=>[key,job[key]]));
+const historySummary=job=>Object.fromEntries(['id','taskId','taskName','createdAt','updatedAt','status','concurrency','options','reportLanguage','progress','warningsCount','resultAvailable'].filter(key=>job[key]!==undefined).map(key=>[key,job[key]]));
 const newestFirst=(a,b)=>String(b.createdAt||'').localeCompare(String(a.createdAt||''));
 const savedReportLanguage=job=>job.options?.reportLanguage||job.reportLanguage||job.options?.targetLang||'zh';
 const message=(zh,en)=>getLocale()==='en'?en:zh;
 const errorMessage=(error,zh,en)=>error?.message?translateError(error):message(zh,en);
 
-export function createBusinessExportManager({api,getState,getUI,onRender=()=>{},download,notify=()=>{},pollMs=1500,buildXlsx=buildBusinessDeliveryXlsx,createSnapshot=createBusinessDeliverySnapshot,buildConsultationXlsx=buildConsultationDeliveryXlsx,createConsultationSnapshot=createConsultationDeliverySnapshot,translationClient}={}){
+export function createBusinessExportManager({api,getState,getUI,onRender=()=>{},download,notify=()=>{},pollMs=1500,buildXlsx=buildBusinessDeliveryXlsx,createSnapshot=createBusinessDeliverySnapshot,buildConsultationXlsx=buildConsultationDeliveryXlsx,createConsultationSnapshot=createConsultationDeliverySnapshot,translationClient,concurrencyStorage}={}){
   if(typeof api!=='function'||typeof getState!=='function'||typeof getUI!=='function'||typeof download!=='function')throw new TypeError('业务导出管理器缺少必要依赖。');
   let active=false,disposed=false,epoch=0,timer=null,nodeVersion=0,hydratedKey='',defaultedLanguage=false,lastLocale=getLocale();
   const controllers=new Set(),pendingIds=new Map(),derivedIds=new Map(),authorizedDerivedBases=new Set();
@@ -39,7 +40,7 @@ export function createBusinessExportManager({api,getState,getUI,onRender=()=>{},
     const allowed=tasks.find(t=>t.id===ui.businessTaskId)?.executionSnapshot?.runtime.values.outputLanguages;if(allowed?.length){if(!allowed.includes(ui.businessTargetLang))ui.businessTargetLang=allowed[0];if(!allowed.includes(ui.businessReportLanguage))ui.businessReportLanguage=allowed[0];}
     if(![CUSTOMER_ONLY,CONVERSATION_UNVERIFIED].includes(ui.businessRoleEvidenceMode)||!isConsultationTask(state,tasks.find(task=>task.id===ui.businessTaskId)))ui.businessRoleEvidenceMode=CUSTOMER_ONLY;
     const rawTask=tasks.find(task=>task.id===ui.businessTaskId)?.inputMode==='raw-transcript-v1';
-    if(![2,3,4].includes(ui.businessConcurrency))ui.businessConcurrency=2;
+    if(!validBusinessConcurrency(ui.businessConcurrency))ui.businessConcurrency=readBusinessConcurrencyPreference(concurrencyStorage);
     return{concurrency:ui.businessConcurrency,taskId:ui.businessTaskId,conclusionMode:ui.businessConclusionMode,targetLang:ui.businessTargetLang,reportLanguage:ui.businessReportLanguage,roleEvidenceMode:rawTask?CONVERSATION_UNVERIFIED:ui.businessRoleEvidenceMode};
   }
   const keyOf=options=>`${options.taskId}|${options.conclusionMode}|${options.targetLang}|${options.reportLanguage||'zh'}|${options.roleEvidenceMode||CUSTOMER_ONLY}`;
@@ -115,12 +116,12 @@ export function createBusinessExportManager({api,getState,getUI,onRender=()=>{},
           model.translationNotGenerated=true;return;
         }
         model.translationTriedKey=key;
-        try{answer=await translations.create({jobId:id,source:{kind:'report',jobId:model.job.id},targetLang:'en',...(options.concurrency!==2?{concurrency:options.concurrency}:{})});}
+        try{answer=await translations.create({jobId:id,source:{kind:'report',jobId:model.job.id},targetLang:'en',concurrency:options.concurrency});}
         catch(createError){
           if(!current(version,options))return;
           // A definite config/source conflict cannot be overwritten. A fresh ID
           // creates a new derived view while preserving the older translation job.
-          if(createError.status===409){id=`report-en-${makeId().slice(7)}`;derivedIds.set(key,id);answer=await translations.create({jobId:id,source:{kind:'report',jobId:model.job.id},targetLang:'en',...(options.concurrency!==2?{concurrency:options.concurrency}:{})});}
+          if(createError.status===409){id=`report-en-${makeId().slice(7)}`;derivedIds.set(key,id);answer=await translations.create({jobId:id,source:{kind:'report',jobId:model.job.id},targetLang:'en',concurrency:options.concurrency});}
           else{try{answer=await translations.get(id);}catch{throw createError;}}
         }
       }
@@ -211,7 +212,7 @@ export function createBusinessExportManager({api,getState,getUI,onRender=()=>{},
           await adopt(saved.job,version,options);if(current(version,options)){model.notice=message('已找回上次保存的后台生成任务。','Recovered the saved background report job.');notify(model.notice);}return;
         }catch(error){if(!current(version,options)||aborted(error))return;if(error.status!==404)throw error;}
       }
-      try{answer=await request('/api/report-jobs',{method:'POST',body:{jobId,...(options.concurrency!==2?{concurrency:options.concurrency}:{}),taskId:options.taskId,conclusionMode:options.conclusionMode,targetLang:options.targetLang,reportLanguage:options.reportLanguage,...(options.roleEvidenceMode===CONVERSATION_UNVERIFIED?{roleEvidenceMode:options.roleEvidenceMode}:{})}});}
+      try{answer=await request('/api/report-jobs',{method:'POST',body:{jobId,concurrency:options.concurrency,taskId:options.taskId,conclusionMode:options.conclusionMode,targetLang:options.targetLang,reportLanguage:options.reportLanguage,...(options.roleEvidenceMode===CONVERSATION_UNVERIFIED?{roleEvidenceMode:options.roleEvidenceMode}:{})}});}
       catch(error){
         if(!current(version,options)||aborted(error))return;
         const definitive=error.status>=400&&error.status<500&&![408,429].includes(error.status);
@@ -302,7 +303,7 @@ export function createBusinessExportManager({api,getState,getUI,onRender=()=>{},
       return true;
     },
     handleChange(id,value){
-      if(id==='business-concurrency'){const concurrency=Number(value);if(!disposed&&[2,3,4].includes(concurrency)&&!model.busy&&model.job?.status!=='running'){getUI().businessConcurrency=concurrency;render();}return true;}
+      if(id==='business-concurrency'){const concurrency=Number(value);if(!disposed&&validBusinessConcurrency(concurrency)&&!model.busy&&model.job?.status!=='running'){getUI().businessConcurrency=concurrency;writeBusinessConcurrencyPreference(concurrency,concurrencyStorage);render();}return true;}
       const fields={'business-task':'businessTaskId','business-conclusion-mode':'businessConclusionMode','business-target-lang':'businessTargetLang','business-report-language':'businessReportLanguage','business-role-evidence-mode':'businessRoleEvidenceMode'};
       if(disposed||!Object.hasOwn(fields,id))return false;const key=fields[id];
       if(key==='businessRoleEvidenceMode'&&getState().tasks.find(task=>task.id===getUI().businessTaskId)?.inputMode==='raw-transcript-v1')return false;

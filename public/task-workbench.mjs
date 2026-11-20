@@ -36,8 +36,10 @@ export function canSetRawRunConcurrency(task){
   return task?.inputMode==='raw-transcript-v1'&&(!task.aiQueue||['failed','partial','cancelled'].includes(task.aiQueue.status));
 }
 export function taskStartSettings(task,ui={}){
-  if(task.aiQueue?.settings&&!canSetRawRunConcurrency(task))return normalizeExecutionSettings(task.aiQueue.settings);
-  const raw=task.inputMode==='raw-transcript-v1',settings=normalizeExecutionSettings(task.aiQueue?.settings??task.executionSettings,{raw});
+  // New tasks persist their selected defaults. Older structured tasks/queues
+  // without a saved concurrency keep their original one-worker behavior.
+  if(task.aiQueue?.settings&&!canSetRawRunConcurrency(task))return normalizeExecutionSettings({concurrency:1,...task.aiQueue.settings});
+  const raw=task.inputMode==='raw-transcript-v1',settings=normalizeExecutionSettings({concurrency:raw?4:1,...(task.aiQueue?.settings??task.executionSettings)},{raw});
   if(raw&&ui.rawStartConcurrency?.[task.id]!==undefined)settings.concurrency=ui.rawStartConcurrency[task.id];
   return normalizeExecutionSettings(settings,{raw});
 }

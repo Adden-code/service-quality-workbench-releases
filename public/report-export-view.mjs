@@ -59,7 +59,7 @@ export function englishBusinessExportView(state,ui,model,tasks){
 }
 
 export function reportConcurrencyControl(ui,job,locked=false){
- const en=getLocale()==='en',n=[2,3,4].includes(ui.businessConcurrency)?ui.businessConcurrency:2;
- return `<label for="business-concurrency"><span>${en?'Generate in parallel':'同时生成'}</span><select id="business-concurrency" ${locked?'disabled':''}>${[2,3,4].map(value=>`<option value="${value}" ${n===value?'selected':''}>${value}${en?' at a time':'路'}${value===2?(en?' (default)':'（默认）'):''}</option>`).join('')}</select><small>${job?.status==='running'?(en?`This job: ${job.concurrency??2} at a time`:`本次任务：${job.concurrency??2}路`):(en?'Applies to the next job; slows down automatically on rate limits':'对下次生成生效；遇接口限流自动降速')}</small></label>`;
+ const en=getLocale()==='en',n=[2,3,4].includes(ui.businessConcurrency)?ui.businessConcurrency:4;
+ return `<label for="business-concurrency"><span>${en?'Generate in parallel':'同时生成'}</span><select id="business-concurrency" ${locked?'disabled':''}>${[2,3,4].map(value=>`<option value="${value}" ${n===value?'selected':''}>${value}${en?' at a time':'路'}${value===4?(en?' (default)':'（默认）'):''}</option>`).join('')}</select><small>${job?.status==='running'?(en?`This job: ${job.concurrency??2} at a time`:`本次任务：${job.concurrency??2}路`):(en?'Applies to the next job; slows down automatically on rate limits':'对下次生成生效；遇接口限流自动降速')}</small></label>`;
 }
 import {getLocale} from './i18n.mjs';

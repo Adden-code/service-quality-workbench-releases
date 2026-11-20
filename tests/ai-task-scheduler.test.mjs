@@ -80,7 +80,8 @@ test('failed retesting of the same configuration prevents automatic dispatch of 
 
 test('pausing an active task pauses the task queue and waitForIdle returns after in-flight work settles',async t=>{
   const gate=deferred(),entered=deferred();const f=await fixture(t,{counts:[2,1],cleanup:gate.resolve,inspect:async(request,n)=>{if(n===1){entered.resolve();await gate.promise;}return result(request);}});
-  const [a,b]=f.taskIds;await f.ai.start(a,'pause-A');await entered.promise;await f.ai.start(b,'pause-B');await f.ai.pause(a);gate.resolve();await f.ai.waitForIdle();
+  // Keep one row pending so this test isolates pause/resume, independent of new-task defaults.
+  const [a,b]=f.taskIds;await f.ai.start(a,'pause-A',{concurrency:1});await entered.promise;await f.ai.start(b,'pause-B');await f.ai.pause(a);gate.resolve();await f.ai.waitForIdle();
   assert.equal(f.calls.length,1);assert.equal(f.ai.runtime().queueStatus,'paused');assert.deepEqual(f.ai.runtime().queue.map(item=>item.status),['paused','queued']);
   await f.ai.resume(a);await f.ai.waitForIdle();assert.deepEqual(f.calls.map(call=>call.sessionId),['SYNTH-1-1','SYNTH-1-2','SYNTH-2-1']);
 });

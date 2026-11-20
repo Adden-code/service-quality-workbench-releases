@@ -48,7 +48,8 @@ function validateOutput(value,input){
 }
 async function abortable(operation,signal){if(signal.aborted)throw Object.assign(new Error('interrupted'),{code:'INTERRUPTED'});let cancel;try{return await Promise.race([Promise.resolve().then(operation),new Promise((_,reject)=>{cancel=()=>reject(Object.assign(new Error('interrupted'),{code:'INTERRUPTED'}));signal.addEventListener('abort',cancel,{once:true});})]);}finally{if(cancel)signal.removeEventListener('abort',cancel);}}
 
-export async function createTranslationJobs({dataDir,store,modelConfig,client,traceStore,reportJobs,collectReportFields,fsOps,maxAttempts=2,retryDelayMs=500,concurrency=2,onError=()=>{}}={}){
+// New-job defaults never migrate the concurrency of an existing saved job.
+export async function createTranslationJobs({dataDir,store,modelConfig,client,traceStore,reportJobs,collectReportFields,fsOps,maxAttempts=2,retryDelayMs=500,concurrency=4,onError=()=>{}}={}){
  if(!Number.isSafeInteger(maxAttempts)||maxAttempts<1||maxAttempts>3||!Number.isSafeInteger(retryDelayMs)||retryDelayMs<0||retryDelayMs>60000)throw new TypeError('Invalid translation retry budget.');
  if(!validJobConcurrency(concurrency))throw new TypeError('Translation concurrency must be an integer from 2 to 4.');
  const files=await createTranslationJobStore({dataDir,...(fsOps?{fsOps}:{})}),jobs=new Map(),snapshots=new Map(),outputs=new Map(),active=new Map();let closing=false,closePromise,serialTail=Promise.resolve(),pendingOperations=0;

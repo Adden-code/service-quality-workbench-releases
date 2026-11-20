@@ -16,9 +16,9 @@ async function fixture(settings){
  const state=createImportedTask(createBusinessState(),{name:'Synthetic concurrency',source,sessions:parsed.sessions,basisSnapshot,reviewer:'Synthetic Reviewer',now:at,...(settings===undefined?{}:{executionSettings:settings})});
  return{parsed,catalog,basisSnapshot,state,task:state.tasks[0]};
 }
-test('raw settings default to four; ecommerce and structured defaults remain one',()=>{
+test('new raw, ecommerce and structured execution settings default to four',()=>{
  assert.equal(normalizeExecutionSettings(undefined,{raw:true}).concurrency,4);
- assert.equal(normalizeExecutionSettings().concurrency,1);
+ assert.equal(normalizeExecutionSettings().concurrency,4);
  for(const concurrency of [1,2,3,4])assert.equal(normalizeExecutionSettings({concurrency},{raw:true}).concurrency,concurrency);
  for(const concurrency of [0,5,1.5,NaN,'4'])assert.throws(()=>normalizeExecutionSettings({concurrency},{raw:true}));
 });
