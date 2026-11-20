@@ -12,7 +12,7 @@ const client={engine:'synthetic-report-parser',async enrichBusinessReport({kind,
  return parseReportEnrichment(JSON.stringify(value),prepareReportEnrichment(kind,input,retryFeedback),{allowPartial:true});
 }};
 const config={configured:true,connectionTested:true,baseUrl:'http://127.0.0.1:1/v1',model:'synthetic-only',authMode:'none',apiKey:null};
-const server=await createWorkbenchServer({dataDir:await fs.mkdtemp(path.join(out,'workspace-')),arkClient:client,modelConfig:{publicConfig:()=>({...config,executionEngine:'native-node'}),getPrivate:()=>config}});await new Promise(r=>server.listen(0,'127.0.0.1',r));const origin=`http://127.0.0.1:${server.address().port}`;
+const server=await createWorkbenchServer({dataDir:await fs.mkdtemp(path.join(out,'workspace-')),catalogSeed:null,sceneSeed:null,arkClient:client,modelConfig:{publicConfig:()=>({...config,executionEngine:'native-node'}),getPrivate:()=>config}});await new Promise(r=>server.listen(0,'127.0.0.1',r));const origin=`http://127.0.0.1:${server.address().port}`;
 let token;const api=async(route,body,method=body?'POST':'GET')=>{const r=await fetch(origin+route,{method,headers:{Origin:origin,...(token?{'X-Workspace-Token':token}:{}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});const v=await r.json();assert.ok(r.ok,JSON.stringify(v));token=v.token||token;return v;};
 const browser=await chromium.launch({headless:true,executablePath:'C:/Users/42910/AppData/Local/ms-playwright/chromium-1228/chrome-win64/chrome.exe'}),page=await browser.newPage({viewport:{width:1440,height:1000},reducedMotion:'reduce'});page.setDefaultTimeout(20000);const errors=[];page.on('pageerror',e=>errors.push(e.message));
 try{
