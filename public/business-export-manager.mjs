@@ -16,7 +16,10 @@ const contentKey=snapshot=>canonical({deliveryType:snapshot.deliveryType,taskId:
 const fileName=value=>String(value||'电商质检').replace(/[\x00-\x1f<>:"/\\|?*]/g,'_').slice(0,80);
 const makeId=()=>`report-${globalThis.crypto?.randomUUID?.()||`${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`}`;
 const shortHash=value=>{let hash=0xcbf29ce484222325n;for(const char of value)hash=BigInt.asUintN(64,(hash^BigInt(char.codePointAt(0)))*0x100000001b3n);return hash.toString(16).padStart(16,'0');};
-const emptyModel=()=>({job:null,result:null,busy:false,downloading:false,loading:false,error:'',stale:false,nodeDetail:null,translationJob:null,translationResult:null,translationKey:'',translationError:'',translationBusy:false,translationTriedKey:'',translationNotGenerated:false});
+const emptyModel=()=>({job:null,result:null,busy:false,downloading:false,loading:false,error:'',notice:'',stale:false,nodeDetail:null,history:[],historyTaskId:'',historyLoading:false,historyError:'',translationJob:null,translationResult:null,translationKey:'',translationError:'',translationBusy:false,translationTriedKey:'',translationNotGenerated:false});
+const historySummary=job=>Object.fromEntries(['id','taskId','taskName','createdAt','updatedAt','status','options','reportLanguage','progress','warningsCount','resultAvailable'].filter(key=>job[key]!==undefined).map(key=>[key,job[key]]));
+const newestFirst=(a,b)=>String(b.createdAt||'').localeCompare(String(a.createdAt||''));
+const savedReportLanguage=job=>job.options?.reportLanguage||job.reportLanguage||job.options?.targetLang||'zh';
 const message=(zh,en)=>getLocale()==='en'?en:zh;
 const errorMessage=(error,zh,en)=>error?.message?translateError(error):message(zh,en);
 
@@ -44,6 +47,20 @@ export function createBusinessExportManager({api,getState,getUI,onRender=()=>{},
   const current=(version,options)=>!disposed&&epoch===version&&keyOf(selection())===keyOf(options);
   function clearTimer(){if(timer!==null){clearTimeout(timer);timer=null;}}
   function invalidate(){epoch++;nodeVersion++;model.translationBusy=false;clearTimer();for(const controller of controllers)controller.abort();controllers.clear();}
+  function rememberJob(job){
+    if(model.historyTaskId!==job.taskId){model.historyTaskId=job.taskId;model.history=[];}
+    const previous=model.history.find(item=>item.id===job.id);if(olderThan(job,previous))return;
+    model.history=[historySummary(job),...model.history.filter(item=>item.id!==job.id)].sort(newestFirst);
+    getUI().businessJobId=job.id;
+  }
+  function resetCurrent(taskId){
+    const history=model.historyTaskId===taskId?{history:model.history,historyTaskId:taskId,historyError:model.historyError}:{};
+    model={...emptyModel(),...history};
+  }
+  function useJobOptions(job){
+    const ui=getUI();ui.businessTaskId=job.taskId;ui.businessConclusionMode=job.options?.conclusionMode||'combined';ui.businessTargetLang=job.options?.targetLang||'zh';ui.businessReportLanguage=savedReportLanguage(job);ui.businessRoleEvidenceMode=job.options?.roleEvidenceMode||CUSTOMER_ONLY;ui.businessJobId=job.id;defaultedLanguage=false;
+    const options=selection();hydratedKey=keyOf(options);return options;
+  }
   async function request(path,options={}){
     const controller=new AbortController();controllers.add(controller);
     try{return await api(path,{...options,signal:controller.signal});}
@@ -129,7 +146,7 @@ export function createBusinessExportManager({api,getState,getUI,onRender=()=>{},
     if(model.result?.job?.id===job.id&&olderThan(resultJob,model.result.job))return model.result;
     if(model.translationKey&&(!terminal(resultJob.status)||translationContext({...result,job:resultJob})!==model.translationKey))resetTranslation();
     model.result={...result,job:resultJob};markStale(snapshot);
-    if(result.job&&matches(result.job,options)&&result.job.id===job.id&&!olderThan(result.job,model.job))model.job=result.job;
+    if(result.job&&matches(result.job,options)&&result.job.id===job.id&&!olderThan(result.job,model.job)){model.job=result.job;rememberJob(result.job);}
     return model.result;
   }
   async function adopt(job,version,options,{result=true}={}){
@@ -137,25 +154,39 @@ export function createBusinessExportManager({api,getState,getUI,onRender=()=>{},
     if(!job||!matches(job,options))throw new Error('服务器返回的交付任务与当前选择不一致。');
     if(olderThan(job,model.job))return;
     if(model.job?.id!==job.id){model.result=null;model.nodeDetail=null;model.stale=false;resetTranslation();}
-    model.job=job;model.error='';pendingIds.delete(keyOf(options));render();
+    model.job=job;model.error='';rememberJob(job);pendingIds.delete(keyOf(options));render();
     if(result&&job.resultAvailable!==false&&(!model.result||terminal(job.status)&&model.result.job?.updatedAt!==job.updatedAt))await loadResult(job,version,options);
     if(current(version,options))await ensureTranslation(version,options,{refresh:true});
     if(current(version,options))render();
   }
-  async function hydrate(){
-    const options=selection(),version=epoch;
+  async function hydrate({restore=true}={}){
+    let options=selection();const version=epoch;
     if(!options.taskId||disposed)return;
     hydratedKey=keyOf(options);
-    if(model.job&&!matches(model.job,options)){model.job=null;model.result=null;model.nodeDetail=null;model.stale=false;}
-    model.loading=true;render();
+    if(model.historyTaskId!==options.taskId||model.job&&!matches(model.job,options))resetCurrent(options.taskId);
+    model.loading=true;model.historyLoading=true;model.historyError='';let listed=false;render();
     try{
       const answer=await request(`/api/report-jobs?taskId=${encodeURIComponent(options.taskId)}`);
       if(!current(version,options))return;
-      const jobs=(answer?.jobs||[]).filter(job=>matches(job,options)).sort((a,b)=>String(b.createdAt||'').localeCompare(String(a.createdAt||'')));
-      const expectedId=pendingIds.get(keyOf(options)),job=jobs.find(item=>item.id===expectedId)||jobs[0];
-      if(job)await adopt(job,version,options);
-      else{model.job=null;model.result=null;model.nodeDetail=null;model.stale=false;}
-    }catch(error){if(current(version,options)&&!aborted(error))model.error=errorMessage(error,'读取已保存的交付任务失败。','Could not read saved report jobs.');}
+      const jobs=(answer?.jobs||[]).filter(job=>job?.taskId===options.taskId&&typeof job.id==='string').sort(newestFirst);
+      model.history=jobs.map(historySummary);model.historyTaskId=options.taskId;model.historyLoading=false;listed=true;
+      const matching=jobs.filter(job=>matches(job,options)),expectedId=pendingIds.get(keyOf(options)),preferredId=model.job?.id||getUI().businessJobId;
+      const job=matching.find(item=>item.id===expectedId)||matching.find(item=>item.id===preferredId)||(restore?jobs.find(item=>item.id===preferredId):null)||matching.find(item=>item.status==='running')||(restore?jobs.find(item=>item.status==='running'):null)||matching[0]||(restore?jobs[0]:null);
+      if(job){if(!matches(job,options)||restore&&defaultedLanguage&&job.options?.reportLanguage)options=useJobOptions(job);await adopt(job,version,options);}
+      else{model.job=null;model.result=null;model.nodeDetail=null;model.stale=false;resetTranslation();}
+    }catch(error){if(current(version,options)&&!aborted(error)){const errorText=errorMessage(error,'读取已保存的交付任务失败。','Could not read saved report jobs.');if(listed)model.error=errorText;else model.historyError=errorText;}}
+    finally{if(current(version,options)){model.loading=false;model.historyLoading=false;render();schedule();}}
+  }
+  async function mountJob(id){
+    const selected=selection(),candidate=model.historyTaskId===selected.taskId&&model.history.find(job=>job.id===id&&job.taskId===selected.taskId);
+    if(!candidate)return;
+    invalidate();authorizedDerivedBases.clear();resetCurrent(selected.taskId);const version=epoch,options=useJobOptions(candidate);model.loading=true;render();
+    try{
+      const answer=await request(`/api/report-jobs/${encodeURIComponent(id)}`);if(!current(version,options))return;
+      if(answer.job?.id!==id||answer.job?.taskId!==selected.taskId)throw new Error(message('历史交付任务与当前选择不一致，请刷新历史记录。','The saved report does not match this selection. Refresh the history.'));
+      await adopt(answer.job,version,options);
+      if(current(version,options))model.notice=message('已载入历史交付，可查看保存的进度、节点及下载文件。','Saved deliverable loaded. Inspect its progress and nodes, or download its files.');
+    }catch(error){if(current(version,options)&&!aborted(error))model.error=errorMessage(error,'读取历史交付失败，请刷新历史后重试。','Could not load the saved deliverable. Refresh history and retry.');}
     finally{if(current(version,options)){model.loading=false;render();schedule();}}
   }
   async function poll(){
@@ -169,7 +200,7 @@ export function createBusinessExportManager({api,getState,getUI,onRender=()=>{},
     const options=selection();if(!options.taskId){notify(message('先创建可导出的业务质检任务。','Create an exportable business quality task first.'),true);return;}
     if(model.busy||model.loading)return;
     if(model.job?.status==='running'){notify(message('当前选择已有正在生成的交付任务，可查看节点进度。','A report job is already running for this selection. Inspect its saved execution nodes.'));return;}
-    const key=keyOf(options),previousId=pendingIds.get(key);invalidate();const version=epoch,jobId=previousId||makeId();pendingIds.set(key,jobId);model.busy=true;model.error='';render();
+    const key=keyOf(options),previousId=pendingIds.get(key);invalidate();hydratedKey=key;const version=epoch,jobId=previousId||makeId();pendingIds.set(key,jobId);model.busy=true;model.error='';model.notice='';render();
     try{
       let answer;
       if(previousId){
@@ -177,10 +208,10 @@ export function createBusinessExportManager({api,getState,getUI,onRender=()=>{},
           const saved=await request(`/api/report-jobs/${encodeURIComponent(previousId)}`);
           if(!current(version,options))return;
           if(options.reportLanguage==='en')authorizedDerivedBases.add(saved.job.id);
-          await adopt(saved.job,version,options);notify(message('已找回上次保存的后台生成任务。','Recovered the saved background report job.'));return;
+          await adopt(saved.job,version,options);if(current(version,options)){model.notice=message('已找回上次保存的后台生成任务。','Recovered the saved background report job.');notify(model.notice);}return;
         }catch(error){if(!current(version,options)||aborted(error))return;if(error.status!==404)throw error;}
       }
-      try{answer=await request('/api/report-jobs',{method:'POST',body:{jobId,...(options.concurrency!==2?{concurrency:options.concurrency}:{}),taskId:options.taskId,conclusionMode:options.conclusionMode,targetLang:options.targetLang,...(options.roleEvidenceMode===CONVERSATION_UNVERIFIED?{roleEvidenceMode:options.roleEvidenceMode}:{})}});}
+      try{answer=await request('/api/report-jobs',{method:'POST',body:{jobId,...(options.concurrency!==2?{concurrency:options.concurrency}:{}),taskId:options.taskId,conclusionMode:options.conclusionMode,targetLang:options.targetLang,reportLanguage:options.reportLanguage,...(options.roleEvidenceMode===CONVERSATION_UNVERIFIED?{roleEvidenceMode:options.roleEvidenceMode}:{})}});}
       catch(error){
         if(!current(version,options)||aborted(error))return;
         const definitive=error.status>=400&&error.status<500&&![408,429].includes(error.status);
@@ -192,7 +223,11 @@ export function createBusinessExportManager({api,getState,getUI,onRender=()=>{},
       }
       if(!current(version,options))return;
       if(options.reportLanguage==='en')authorizedDerivedBases.add(answer.job.id);
-      await adopt(answer.job,version,options);notify(message('已开始后台生成，可查看进度和节点。','Background generation started. Progress and execution nodes are available.'));
+      await adopt(answer.job,version,options);
+      if(!current(version,options))return;
+      const reused=answer.reused===true||answer.job?.reused===true;
+      model.notice=reused?message('已载入相同冻结快照的已有交付，未重复运行基础分析。可查看进度、重试缺失项或下载。','Loaded the existing deliverable for this frozen snapshot without repeating base analysis. Inspect progress, retry missing items or download.'):'';
+      notify(model.notice||message('已开始后台生成，可查看进度和节点。','Background generation started. Progress and execution nodes are available.'));
     }catch(error){if(current(version,options)&&!aborted(error)){model.error=errorMessage(error,'生成请求未完成。','The generation request could not be completed.');notify(model.error,true);}}
     finally{if(current(version,options)){model.busy=false;render();schedule();}}
   }
@@ -248,11 +283,13 @@ export function createBusinessExportManager({api,getState,getUI,onRender=()=>{},
     finally{if(current(version,options)){model.downloading=false;render();}}
   }
   return{
-    view(state,ui){const options=selection();if(model.result&&matches(model.job,options))markStale(model.result.snapshot);return businessExportView(state,ui,model.job&&!matches(model.job,options)?{...model,job:null,result:null,nodeDetail:null,stale:false}:model);},
-    setActive(value){const next=!!value;if(disposed)return;if(next===active){if(active&&hydratedKey!==keyOf(selection())){invalidate();void hydrate();}return;}active=next;if(!active){invalidate();model.busy=false;model.downloading=false;model.loading=false;return;}void hydrate();},
+    view(state,ui){const options=selection();if(model.result&&matches(model.job,options))markStale(model.result.snapshot);const scopedModel=model.historyTaskId&&model.historyTaskId!==options.taskId?emptyModel():model;return businessExportView(state,ui,scopedModel.job&&!matches(scopedModel.job,options)?{...scopedModel,job:null,result:null,nodeDetail:null,stale:false,translationJob:null,translationResult:null,translationError:'',notice:''}:scopedModel);},
+    setActive(value){const next=!!value;if(disposed)return;if(next===active){if(active&&hydratedKey!==keyOf(selection())){invalidate();authorizedDerivedBases.clear();model.busy=false;model.downloading=false;void hydrate({restore:false});}return;}active=next;if(!active){invalidate();authorizedDerivedBases.clear();model.busy=false;model.downloading=false;model.loading=false;model.historyLoading=false;return;}void hydrate();},
     async handleAction(action,button){
       if(disposed||!String(action).startsWith('business-'))return false;
       if(action==='business-generate')await generate();
+      else if(action==='business-job-mount')await mountJob(button?.dataset?.jobId);
+      else if(action==='business-history-refresh'){if(!model.busy&&!model.downloading){invalidate();authorizedDerivedBases.clear();await hydrate({restore:false});}}
       else if(action==='business-generate-english')await generateEnglish();
       else if(action==='business-pause')await control('pause',button?.dataset?.stage);
       else if(action==='business-resume')await control('resume',button?.dataset?.stage);
@@ -273,7 +310,7 @@ export function createBusinessExportManager({api,getState,getUI,onRender=()=>{},
       if(key==='businessRoleEvidenceMode'&&(![CUSTOMER_ONLY,CONVERSATION_UNVERIFIED].includes(value)||!isConsultationTask(getState(),getState().tasks.find(task=>task.id===getUI().businessTaskId))))return false;
       if(key==='businessConclusionMode'&&!['ai','combined'].includes(value)||['businessTargetLang','businessReportLanguage'].includes(key)&&!['zh','en'].includes(value))return false;
       if(getUI()[key]===value)return true;
-      getUI()[key]=value;if(key==='businessTaskId')getUI().businessRoleEvidenceMode=CUSTOMER_ONLY;if(key==='businessReportLanguage'){defaultedLanguage=false;getUI().businessTargetLang=value;}invalidate();model=emptyModel();render();if(active)void hydrate();return true;
+      getUI()[key]=value;getUI().businessJobId='';if(key==='businessTaskId')getUI().businessRoleEvidenceMode=CUSTOMER_ONLY;if(key==='businessReportLanguage'){defaultedLanguage=false;getUI().businessTargetLang=value;}invalidate();authorizedDerivedBases.clear();resetCurrent(getUI().businessTaskId);hydratedKey=keyOf(selection());render();if(active)void hydrate({restore:key==='businessTaskId'});return true;
     },
     close(){if(disposed)return;active=false;disposed=true;invalidate();},
   };

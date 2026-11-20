@@ -16,7 +16,7 @@ test('portable allowlist includes only required runtime modules with no develope
 test('business package product version is shared without changing the control schema',async()=>{
  const packageJson=JSON.parse(await fs.readFile(new URL('../package.json',import.meta.url),'utf8'));
  const {portableVersion}=await import(moduleUrl);
- assert.equal(packageJson.version,'0.11.16');assert.equal(portableVersion,packageJson.version);
+ assert.equal(packageJson.version,'0.11.17');assert.equal(portableVersion,packageJson.version);
  const versionUrl=new URL('../packaging/version.mjs',import.meta.url);
  assert.ok(existsSync(versionUrl),'产品版本应有共享来源');
  const {productVersion}=await import(versionUrl);assert.equal(productVersion,packageJson.version);
@@ -46,11 +46,11 @@ test('stage-only build creates complete manifest without a ZIP or transfer parts
  assert.equal(info.archive,null);assert.equal(info.parts,undefined);
  assert.deepEqual((await fs.readdir(outputDir)).sort(),['package-info.json','会话质检工作台'].sort());
  const metadata=JSON.parse(await fs.readFile(path.join(info.root,'portable-info.json'),'utf8'));
- assert.equal(metadata.version,'0.11.16');assert.equal(metadata.schemaVersion,1);assert.equal(metadata.sourceDataIncluded,false);assert.equal(metadata.credentialsIncluded,false);
+ assert.equal(metadata.version,'0.11.17');assert.equal(metadata.schemaVersion,1);assert.equal(metadata.sourceDataIncluded,false);assert.equal(metadata.credentialsIncluded,false);
  const manifest=JSON.parse(await fs.readFile(path.join(info.root,'文件校验清单.json'),'utf8'));
- assert.equal(manifest.version,'0.11.16');assert.equal(manifest.schemaVersion,1);
+ assert.equal(manifest.version,'0.11.17');assert.equal(manifest.schemaVersion,1);
  const build=JSON.parse(await fs.readFile(path.join(info.root,'packaging/build-identity.json'),'utf8'));
- assert.equal(build.version,metadata.version);assert.match(build.buildId,/^0\.11\.16-[a-f0-9]{16}$/);assert.match(build.sourceCommit,/^[a-f0-9]{40}$/);
+ assert.equal(build.version,metadata.version);assert.match(build.buildId,/^0\.11\.17-[a-f0-9]{16}$/);assert.match(build.sourceCommit,/^[a-f0-9]{40}$/);
  assert.match(await fs.readFile(path.join(info.root,'public/build-identity.mjs'),'utf8'),new RegExp(build.buildId));
  assert.ok(manifest.files.some(file=>file.path==='packaging/build-identity.json'));
  assert.ok(manifest.files.some(file=>file.path==='server/ecommerce-comparison.mjs'));

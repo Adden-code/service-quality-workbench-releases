@@ -24,7 +24,7 @@ test('active hydration is idempotent and recovers matching option jobs after ref
   const {createBusinessExportManager}=await implementation(),state=managerState(),ui=businessUI(),calls=[];const job=summaryFixture();
   const manager=createBusinessExportManager({api:async(path,options={})=>{calls.push({path,options});if(path.includes('?taskId='))return{jobs:[summaryFixture({id:'wrong-en',options:{conclusionMode:'combined',targetLang:'en'}}),job]};if(path.endsWith('/result'))return{snapshot:reportFixture().snapshot,enrichment:{},job};return{job};},getState:()=>state,getUI:()=>ui,onRender:()=>{},download:()=>{},notify:()=>{},pollMs:100000});
   manager.setActive(true);manager.setActive(true);await tick();await tick();
-  assert.equal(calls.filter(call=>call.path.includes('?taskId=')).length,1);assert.ok(manager.view(state,ui).includes('report-test'));assert.ok(!manager.view(state,ui).includes('wrong-en'));
+  assert.equal(calls.filter(call=>call.path.includes('?taskId=')).length,1);assert.ok(manager.view(state,ui).includes('report-test'));assert.match(manager.view(state,ui),/data-job-id="wrong-en"/);assert.match(manager.view(state,ui),/data-job-id="report-test" aria-current="true"/);
   manager.setActive(false);const count=calls.length;await tick();assert.equal(calls.length,count);assert.ok(!calls.some(call=>call.path.endsWith('/pause')));manager.close();
 });
 test('uncertain generation response is reconciled by job ID without a duplicate chargeable POST',async()=>{
@@ -113,7 +113,7 @@ test('external application option changes cannot display an old job while the ne
   const {createBusinessExportManager}=await implementation(),state=managerState(),ui=businessUI(),job=summaryFixture();let lists=0;
   const manager=createBusinessExportManager({api:async path=>{if(path.includes('?taskId=')){lists++;return{jobs:lists===1?[job]:[]};}return path.endsWith('/result')?{...reportFixture(),job}:{job};},getState:()=>state,getUI:()=>ui,onRender:()=>{},download:()=>{},notify:()=>{},pollMs:100000});
   manager.setActive(true);await tick();await tick();assert.ok(manager.view(state,ui).includes('report-test'));
-  ui.businessTargetLang='en';assert.ok(!manager.view(state,ui).includes('report-test'));manager.setActive(true);manager.setActive(true);await tick();await tick();assert.equal(lists,2);assert.ok(!manager.view(state,ui).includes('report-test'));manager.close();
+  ui.businessTargetLang='en';assert.ok(!manager.view(state,ui).includes('class="panel bd-run"'));assert.ok(!manager.view(state,ui).includes('aria-current="true"'));manager.setActive(true);manager.setActive(true);await tick();await tick();assert.equal(lists,2);assert.ok(!manager.view(state,ui).includes('report-test'));manager.close();
 });
 
 test('each download completion reports failed translations and the actual affected record count',async()=>{

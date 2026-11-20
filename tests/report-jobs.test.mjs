@@ -97,6 +97,54 @@ test('backup busy probe keeps a softly paused report busy until its result is pe
 test('source changes reject reuse of a job ID while old delivery remains frozen',async t=>{
  const f=await fixture(t);await f.service.create({jobId:'immutable',taskId:f.taskId});await f.service.waitForIdle();const before=await f.service.getResult('immutable');const changed=inputState();changed.tasks[0].name='changed title';f.setState(changed);await assert.rejects(f.service.create({jobId:'immutable',taskId:f.taskId}),/冲突|不同|变化/);assert.deepEqual((await f.service.getResult('immutable')).snapshot,before.snapshot);await assert.rejects(f.service.get('../bad'),/标识|不存在/);
 });
+
+test('01117 different request IDs atomically reuse the same frozen report across tabs and restart',async t=>{
+ let release,enter;const gate=new Promise(r=>release=r),entered=new Promise(r=>enter=r);
+ const f=await fixture(t,{hook:async request=>{enter();await gate;return answer(request.kind,request.input);}});
+ try{
+  const requests=Array.from({length:4},(_,i)=>({jobId:`tab-${i}`,taskId:f.taskId,reportLanguage:'zh'}));
+  const created=await Promise.all(requests.map(input=>f.service.create(input)));await entered;
+  assert.equal(new Set(created.map(j=>j.id)).size,1);assert.equal(created.filter(j=>j.reused===true).length,3);
+  assert.equal((await f.service.list(f.taskId)).length,1);release();await f.service.waitForIdle();const calls=f.calls.length;
+  const before=await f.service.getResult(created[0].id);await f.restart();f.setConfig({configured:false,apiKey:null});
+  const recovered=await f.service.create({jobId:'after-restart',taskId:f.taskId,reportLanguage:'en'});
+  assert.equal(recovered.id,created[0].id);assert.equal(recovered.reused,true);assert.equal(recovered.options.reportLanguage,'zh');
+  assert.equal(f.calls.length,calls);assert.deepEqual((await f.service.getResult(recovered.id)).snapshot,before.snapshot);
+  assert.equal((await fs.readdir(path.join(f.dir,'report-jobs'))).length,1);
+ }finally{release();}
+});
+
+test('01117 semantic snapshot changes create a new job without changing historical outputs',async t=>{
+ const f=await fixture(t);await f.service.create({jobId:'before-review',taskId:f.taskId});await f.service.waitForIdle();
+ const before=await f.service.getResult('before-review'),state=inputState();state.sessions[0].aiResults[1].reason='Updated verified explanation';f.setState(state);
+ const changed=await f.service.create({jobId:'after-review',taskId:f.taskId});await f.service.waitForIdle();
+ assert.equal(changed.id,'after-review');assert.notEqual(changed.snapshotFingerprint,before.job.snapshotFingerprint);
+ assert.deepEqual((await f.service.getResult('before-review')).snapshot,before.snapshot);assert.equal((await f.service.list(f.taskId)).length,2);
+});
+
+test('01117 incomplete existing reports are mounted, never silently rerun by generate',async t=>{
+ const f=await fixture(t,{hook:()=>{throw Object.assign(new Error('bad output'),{code:'INVALID_OUTPUT'});}});
+ await f.service.create({jobId:'incomplete-original',taskId:f.taskId});await f.service.waitForIdle();const calls=f.calls.length;
+ const mounted=await f.service.create({jobId:'incomplete-new-id',taskId:f.taskId});
+ assert.equal(mounted.id,'incomplete-original');assert.equal(mounted.reused,true);assert.equal(mounted.status,'completed_with_warnings');assert.equal(f.calls.length,calls);
+});
+
+test('01117 restored partial output remains pending and retry preserves accepted translations',async t=>{
+ let partial=true,accepted;const f=await fixture(t,{hook:({kind,input})=>{const result=answer(kind,input);if(kind!=='translation'||!partial)return result;if(accepted)return{items:[]};accepted=result.items[0].id;return{items:[result.items[0]]};}});
+ await f.service.create({jobId:'partial-crash',taskId:f.taskId});await f.service.waitForIdle();await f.service.close();
+ const file=path.join(f.dir,'report-jobs','partial-crash','job.json'),job=JSON.parse(await fs.readFile(file,'utf8')),unit=job.units.find(u=>u.partialResult);assert.ok(unit);job.status='running';unit.status='running';await fs.writeFile(file,JSON.stringify(job));
+ const before=f.calls.length;await f.restart();assert.equal((await f.service.get('partial-crash')).nodes.find(n=>n.id===unit.id).status,'pending');assert.equal(f.calls.length,before);partial=false;
+ await f.service.resume('partial-crash');await f.service.waitForIdle();assert.equal((await f.service.get('partial-crash')).status,'completed');assert.ok(f.calls.slice(before).filter(c=>c.kind==='translation').every(c=>!c.input.items.some(i=>i.id===accepted)));
+});
+
+test('01117 coercion events persist in attempt history and survive committed-output recovery',async t=>{
+ const {prepareReportEnrichment,parseReportEnrichment}=await import('../server/report-enrichment.mjs');
+ const f=await fixture(t,{hook:({kind,input})=>{const value=answer(kind,input);if(kind==='caseHighlights')value.cases.forEach(c=>c.score='5');return parseReportEnrichment(JSON.stringify(value),prepareReportEnrichment(kind,input));}});
+ await f.service.create({jobId:'audit-recovery',taskId:f.taskId});await f.service.waitForIdle();let job=await f.service.get('audit-recovery');const node=job.nodes.find(n=>n.kind==='caseHighlights');
+ let detail=await f.service.getNode(job.id,node.id);assert.deepEqual(detail.attempts[0].coercion.changes.map(c=>[c.before,c.after]),[['5',5]]);
+ await f.service.close();const file=path.join(f.dir,'report-jobs',job.id,'job.json'),saved=JSON.parse(await fs.readFile(file,'utf8')),unit=saved.units.find(u=>u.id===node.id);saved.status='running';unit.status='running';unit.history=[];await fs.writeFile(file,JSON.stringify(saved));await f.restart();
+ detail=await f.service.getNode(job.id,node.id);assert.equal(detail.attempts[0].coercion.changes[0].after,5);const disk=JSON.parse(await fs.readFile(file,'utf8'));assert.equal(disk.units.find(u=>u.id===node.id).history[0].coercion.changes[0].before,'5');
+});
 test('closing while create is waiting for workspace data never leaves a running job on disk',async t=>{
  const f=await fixture(t);let entered,release;const seen=new Promise(resolve=>entered=resolve),gate=new Promise(resolve=>release=resolve),read=f.store.read;
  f.store.read=async()=>{entered();await gate;return read();};const creation=f.service.create({jobId:'close-create',taskId:f.taskId});await seen;const stopping=f.service.close();release();await creation.catch(()=>{});await stopping;

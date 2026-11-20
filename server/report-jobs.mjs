@@ -1,5 +1,5 @@
 import {createJobScheduler,validJobConcurrency,serialOperations,interleaveReportUnits} from './bounded-job-scheduler.mjs';
-import {validatePartialReportResult} from './report-enrichment.mjs';
+import {validatePartialReportResult,rebuildValidatedReportAudit} from './report-enrichment.mjs';
 const reportVocKind=(snapshot,id)=>{const a=snapshot.sceneAudit?.find(a=>a.id===id);return a?.review?.classification?.runId===a?.execution?.runId?a?.review?.classification?.vocKind:a?.capabilities?.outputs?.ecommerceClassification?.value?.vocKind;};
 import {createHash} from 'node:crypto';
 import {isVoidedTask} from '../public/task-lifecycle.mjs';
@@ -19,6 +19,12 @@ const copy=value=>structuredClone(value),now=()=>new Date().toISOString();
 const canonical=value=>Array.isArray(value)?'['+value.map(canonical).join(',')+']':value&&typeof value==='object'?'{'+Object.keys(value).sort().map(key=>JSON.stringify(key)+':'+canonical(value[key])).join(',')+'}':JSON.stringify(value);
 const hash=value=>createHash('sha256').update(typeof value==='string'?value:canonical(value)).digest('hex');
 const fingerprint=snapshot=>{const value=copy(snapshot);delete value.createdAt;return hash(value);};
+function outputAudit(output,secret){
+ const audit={};
+ if(output?.coercion?.version===1&&Array.isArray(output.coercion.changes))audit.coercion=bounded(output.coercion,secret);
+ if(output?.evidenceValidation?.version===1&&Array.isArray(output.evidenceValidation.matches))audit.evidenceValidation=bounded({version:1,matches:output.evidenceValidation.matches.map(({rawQuote,...match})=>({...match,rawQuote:(rawQuote||'').slice(0,240),quotePreview:(rawQuote||'').length>240,rawQuoteSha256:hash(rawQuote||''),rawQuoteCharacters:(rawQuote||'').length}))},secret);
+ return audit;
+}
 const retryable=code=>['invalid_output','timeout','network','rate_limit','provider_unavailable','provider_error'].includes(code);
 const fatal=code=>['authentication','permission','request_rejected','not_configured'].includes(code);
 const messages={invalid_input:'报告分析输入、字段配置或冻结依据无效，请检查后重试；未生成的分析保留为缺失。',invalid_output:'模型输出未通过完整性校验。',timeout:'模型调用超时。',network:'模型连接失败。',rate_limit:'模型服务限流。',provider_unavailable:'模型服务暂不可用。',authentication:'模型鉴权失败，已停止后续调用。',permission:'模型权限不足，已停止后续调用。',request_rejected:'模型拒绝当前请求配置，已停止后续调用。',not_configured:'模型尚未配置，译文和AI分析未生成。',output_truncated:'模型输出被截断，未采用不完整内容。',input_too_large:'输入超过模型请求预算，原文未截断。',interrupted:'任务中断，已完成的内容保留。',provider_error:'模型生成失败。'};
@@ -75,9 +81,10 @@ export async function createReportJobs({dataDir,store,modelConfig,client,traceSt
     const saved=await files.result(job.id,unit.id);
     if(saved){
      if(saved.sha256!==hash(JSON.stringify(saved.value)))throw new ReportJobError('中断节点输出的指纹不一致，原文件已保留。',500,'REPORT_STORAGE');
-     unit.resultSha256=saved.sha256;unit.status='completed';outputs.set(job.id+'/'+unit.id,saved.value);
      const attempt=await files.attempt(job.id,unit.id,unit.attempts);
-     if(attempt?.status==='completed'&&!unit.history.some(item=>item.attempt===unit.attempts)){const {input,output,...info}=attempt;unit.history.push(info);unit.durationMs+=info.durationMs||0;unit.completedAt=info.completedAt;}
+     const partial=Boolean(saved.value?.partial||(unit.partialResult&&attempt?.status!=='completed'));
+     unit.resultSha256=saved.sha256;unit.status=partial?'pending':'completed';if(partial)unit.partialResult=true;else delete unit.partialResult;outputs.set(job.id+'/'+unit.id,saved.value);
+     if(attempt&&!unit.history.some(item=>item.attempt===unit.attempts)){const {input,output,...info}=attempt;unit.history.push(info);unit.durationMs+=info.durationMs||0;unit.completedAt=info.completedAt;}
     }else unit.status='pending';
    }
    await persist(job);
@@ -156,6 +163,8 @@ export async function createReportJobs({dataDir,store,modelConfig,client,traceSt
       if(unit.kind==='consultationAnalysis'){
        const previous=unit.history.findLast(item=>item.errorCode==='invalid_output');
        if(previous){const saved=await files.attempt(job.id,unit.id,previous.attempt);retryFeedback=consultationRetryFeedback(saved?.output?.diagnostic,input);}
+      }else if(['caseHighlights','issueClusters','voc'].includes(unit.kind)&&unit.history.some(item=>item.errorCode==='invalid_output')){
+       retryFeedback={kind:unit.kind,code:'invalid_output'};
       }
       output=await step(`${unit.id}-a${unit.attempts}-execute`,unit.label,{kind:unit.kind,input,...(retryFeedback?{validationFeedback:retryFeedback}:{})},async()=>{
        if(unit.kind==='translation'){
@@ -178,8 +187,8 @@ export async function createReportJobs({dataDir,store,modelConfig,client,traceSt
      }catch(cause){if(isStorageError(cause)){work.stopped=true;throw cause;}error=cause;const code=failure(cause).errorCode;if(fatal(code))job.stopReason=code;}
      unit.durationMs+=Math.max(0,Date.now()-started);unit.completedAt=now();
      if(!error&&output?.partial)error=Object.assign(new Error('partial report output'),{code:'INVALID_OUTPUT',partialOutput:output});
-     if(error?.partialOutput){const old=outputs.get(job.id+'/'+unit.id);const safe=copy(error.partialOutput);if(old?.cases?.length){safe.cases=[...new Map([...old.cases,...safe.cases].map(c=>[c.id,c])).values()].sort((a,b)=>b.score-a.score).slice(0,input.limit);if(safe.cases.length>=Math.min(input.limit,input.candidates.length)){delete safe.partial;error=null;output=safe;}}unit.partialResult=Boolean(error);unit.resultSha256=await files.saveResult(job.id,unit.id,safe);outputs.set(job.id+'/'+unit.id,safe);}
-     const problem=error?failure(error):null;const info={attempt:unit.attempts,startedAt:unit.startedAt,completedAt:unit.completedAt,durationMs:Math.max(0,Date.now()-started),status:error?'failed':'completed',...(problem||{})};unit.history.push(info);
+     if(error?.partialOutput){const old=outputs.get(job.id+'/'+unit.id);let safe=copy(error.partialOutput);if(old?.cases?.length){safe.cases=[...new Map([...old.cases,...safe.cases].map(c=>[c.id,c])).values()].sort((a,b)=>b.score-a.score).slice(0,input.limit);safe=rebuildValidatedReportAudit(safe,'cases');if(safe.cases.length>=Math.min(input.limit,input.candidates.length)){delete safe.partial;error=null;output=safe;}}unit.partialResult=Boolean(error);if(error){error.partialOutput=safe;unit.resultSha256=await files.saveResult(job.id,unit.id,safe);outputs.set(job.id+'/'+unit.id,safe);}}
+     const problem=error?failure(error):null;const info={attempt:unit.attempts,startedAt:unit.startedAt,completedAt:unit.completedAt,durationMs:Math.max(0,Date.now()-started),status:error?'failed':'completed',...(problem||{}),...outputAudit(error?.partialOutput??output,work.config.apiKey)};unit.history.push(info);
      await files.saveAttempt(job.id,unit.id,unit.attempts,{...info,input:bounded(input,work.config.apiKey),...(retryFeedback?{validationFeedback:bounded(retryFeedback,work.config.apiKey)}:{}),output:bounded(error?.traceOutput??output??null,work.config.apiKey)});
      if(!error){delete unit.partialResult;const safe=copy(output);unit.resultSha256=await files.saveResult(job.id,unit.id,safe);outputs.set(job.id+'/'+unit.id,safe);unit.status='completed';await persist(job);break;}
      const willRetry=canDispatch()&&retryable(problem.errorCode)&&attempt<maxAttempts;unit.status=closing||work.paused||problem.errorCode==='interrupted'||willRetry?'pending':'failed';Object.assign(unit,problem);await persist(job);
@@ -199,13 +208,18 @@ export async function createReportJobs({dataDir,store,modelConfig,client,traceSt
  }
  return{
   create(input){return serial(async()=>{
-   if(closing)throw new ReportJobError('服务正在关闭。',503);if(!input||typeof input!=='object'||Array.isArray(input)||Object.keys(input).some(key=>!['jobId','taskId','conclusionMode','targetLang','roleEvidenceMode','concurrency'].includes(key))||(input.concurrency!==undefined&&!validJobConcurrency(input.concurrency)))throw new ReportJobError('交付任务参数无效。');
+   if(closing)throw new ReportJobError('服务正在关闭。',503);if(!input||typeof input!=='object'||Array.isArray(input)||Object.keys(input).some(key=>!['jobId','taskId','conclusionMode','targetLang','reportLanguage','roleEvidenceMode','concurrency'].includes(key))||(input.concurrency!==undefined&&!validJobConcurrency(input.concurrency))||(input.reportLanguage!==undefined&&!['zh','en'].includes(input.reportLanguage)))throw new ReportJobError('交付任务参数无效。');
    const id=reportJobId(input.jobId);if(typeof input.taskId!=='string'||!input.taskId.trim()||input.taskId.length>160)throw new ReportJobError('请选择质检任务。');
    const doc=await store.read();const allowed=doc.state.tasks.find(t=>t.id===input.taskId)?.executionSnapshot?.runtime.values.outputLanguages;if(allowed&&!allowed.includes(input.targetLang??'zh'))throw new ReportJobError('输出语种不在本任务冻结的运行参数内，请使用已选语种。');if(isVoidedTask(doc.state.tasks.find(task=>task.id===input.taskId)))throw new ReportJobError('作废任务仅供追溯，不能生成新交付物。');let snapshot;try{const task=doc.state.tasks?.find(value=>value.id===input.taskId),original=isConsultationTask(doc.state,task)?await loadConsultationOriginal({state:doc.state,task,store}):undefined;snapshot=createBusinessDeliverySnapshot(doc.state,{taskId:input.taskId,conclusionMode:input.conclusionMode??'combined',targetLang:input.targetLang??'zh',roleEvidenceMode:input.roleEvidenceMode,original,now:now()});}catch(error){throw new ReportJobError(error.message);}
    const signature=fingerprint(snapshot);
-   if(jobs.has(id)){const old=find(id);if(old.snapshotFingerprint!==signature)throw new ReportJobError('相同任务标识对应不同来源或口径，不能覆盖；请重新生成。',409);return summary(await visibleJob(old));}
+   if(jobs.has(id)){const old=find(id);if(old.snapshotFingerprint!==signature)throw new ReportJobError('相同任务标识对应不同来源或口径，不能覆盖；请重新生成。',409);return{...summary(await visibleJob(old)),reused:true};}
+   // Serialized with creation: different tabs/request IDs must share the same frozen delivery.
+   // The established fingerprint includes source, conclusions, language and frozen configuration;
+   // only generation time is excluded. Existing snapshots and their hashes are never rewritten.
+   const existing=[...jobs.values()].filter(job=>job.taskId===input.taskId&&job.snapshotFingerprint===signature).sort((a,b)=>b.createdAt.localeCompare(a.createdAt))[0];
+   if(existing)return{...summary(await visibleJob(existing)),reused:true};
    const config=modelConfig.getPrivate(),saved=modelConfigSnapshot(config),configFingerprint=modelConfigFingerprint(config),prepared=plan(snapshot,configFingerprint),createdAt=now();
-   const job={schemaVersion:1,id,concurrency:input.concurrency??concurrency,taskId:input.taskId,taskName:snapshot.taskName,createdAt,updatedAt:createdAt,status:'running',phase:'snapshot',completedAt:null,sourceRevision:doc.revision??null,snapshotFingerprint:signature,options:{conclusionMode:snapshot.conclusionMode,targetLang:snapshot.targetLang,...(snapshot.roleEvidenceMode===CONVERSATION_UNVERIFIED?{roleEvidenceMode:CONVERSATION_UNVERIFIED}:{})},modelConfig:saved,modelConfigFingerprint:configFingerprint,units:prepared.units,traceRunIds:[],round:1,resumeCount:0,...(snapshot.deliveryType==='consultation-v1'?{planVersion:consultationReportPlanVersion(snapshot)}:{})};
+   const job={schemaVersion:1,id,concurrency:input.concurrency??concurrency,taskId:input.taskId,taskName:snapshot.taskName,createdAt,updatedAt:createdAt,status:'running',phase:'snapshot',completedAt:null,sourceRevision:doc.revision??null,snapshotFingerprint:signature,options:{conclusionMode:snapshot.conclusionMode,targetLang:snapshot.targetLang,...(input.reportLanguage?{reportLanguage:input.reportLanguage}:{}),...(snapshot.roleEvidenceMode===CONVERSATION_UNVERIFIED?{roleEvidenceMode:CONVERSATION_UNVERIFIED}:{})},modelConfig:saved,modelConfigFingerprint:configFingerprint,units:prepared.units,traceRunIds:[],round:1,resumeCount:0,...(snapshot.deliveryType==='consultation-v1'?{planVersion:consultationReportPlanVersion(snapshot)}:{})};
    // Reserve the deliverable in the workspace serial queue before writing its frozen output.
    // This closes the race with task invalidation; a failed file write remains conservatively logged.
    if(store.updateTaskLifecycle)await store.updateTaskLifecycle([input.taskId],'deliverable',{deliveryId:id,kind:'business-report'});

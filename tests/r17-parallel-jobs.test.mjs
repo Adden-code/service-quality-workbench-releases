@@ -125,7 +125,7 @@ test('R17 report translation and independent analysis overlap; another report st
  const options={dataDir:dir,store:{read:async()=>({state:structuredClone(data.state),revision:1}),getSource:async()=>({...data.task.source,bytes:data.bytes})},modelConfig:{getPrivate:()=>({...config})},client:{engine:'synthetic',async enrichBusinessReport(request){calls.push(request);if(!released)await new Promise(resolve=>pending.push(resolve));return consultationReportAnswer(request.kind,request.input);}},retryDelayMs:1};
  const service=await createReportJobs(options);t.after(async()=>{released=true;pending.forEach(resolve=>resolve());await service.close();assert.ok(path.resolve(dir).startsWith(path.resolve(base)+path.sep));await fs.rm(dir,{recursive:true,force:true});});
  await service.create({jobId:'report-a',taskId:data.task.id});await until(()=>calls.length===2);assert.deepEqual(new Set(calls.map(call=>call.kind)),new Set(['translation','consultationAnalysis']));
- await service.create({jobId:'report-b',taskId:data.task.id});await until(()=>calls.length===4);await service.pause('report-a');await service.pause('report-b');released=true;pending.forEach(resolve=>resolve());await service.waitForIdle();assert.equal(calls.length,4);
+ await service.create({jobId:'report-b',taskId:data.task.id,conclusionMode:'ai'});await until(()=>calls.length===4);await service.pause('report-a');await service.pause('report-b');released=true;pending.forEach(resolve=>resolve());await service.waitForIdle();assert.equal(calls.length,4);
  await service.resume('report-a');await service.resume('report-b');await service.waitForIdle();assert.equal((await service.get('report-a')).status,'completed');assert.equal((await service.get('report-b')).status,'completed');
 });
 
