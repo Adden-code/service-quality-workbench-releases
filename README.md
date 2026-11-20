@@ -1,5 +1,17 @@
 # 会话质检工作台
 
+## 0.11.19 批次信息、并发记忆与紧凑审核 · 完整内置候选版
+
+**[免登录下载完整安装包（17条规则＋两场景）](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.19-full/QualityWorkbench-0.11.19-Full-Setup-Windows-x64.exe)**
+
+[发布与验收说明](https://github.com/Adden-code/service-quality-workbench-releases/releases/tag/v0.11.19-full) · [升级指引](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.19-full/Hotfix-Guide-zh.txt) · [SHA256](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.19-full/SHA256.txt) · [源码提交](https://github.com/Adden-code/service-quality-workbench-releases/commit/5ff51e6672dc2fe95ed053b0733724c24a540561)
+
+需求23补齐抽检周期与报告地区填写及冻结；需求24新任务默认4路并记住2/3/4选择、限流自动降速；需求25电商审核头部一行化、底部提示收纳、阅读宽度最大85%并按任务记忆。
+
+历史任务与报告不回溯。本版包含0.11.18需求21/22修复，无需再次装载规则。升级前备份停服覆盖安装并刷新页面。实际安装、合成批次与浏览器完整路径已核验；不以模拟结果代替内网真实模型效果。
+
+安装器97764748字节；SHA256：`1ca0fed390c5880d2d1d5d5cc9eba75451fd9a1728b40caf5eae733302062a94`。7附件匿名完整下载核验；源码分支`source-v0.11.19`。含获准公开规则示例，不含客户批次或凭据。
+
 ## 0.11.18 电商口径与弹窗修复 · 完整内置候选版
 
 **[免登录下载完整安装包（17条规则＋两场景）](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.18-full/QualityWorkbench-0.11.18-Full-Setup-Windows-x64.exe)**
