@@ -41,7 +41,7 @@ test('exports preserve AI evidence status after manual confirmation and include 
  const grouped=appendEvidenceSheets([{name:'Main',headerDepth:2,headers:['Group'],rows:[['Name'],['Data']],rowNumbers:[null,7]}],snapshot);assert.equal(grouped[0].rows[1].at(-1),'未核验');assert.equal(evidenceStatusLabel(session.review.drafts[session.expectedRuleIds[0]],{human:true}),'未核验');
 });
 test('reading preferences are bounded, task-specific and tolerate unavailable storage',()=>{
- const map=new Map(),storage={getItem:k=>map.get(k),setItem:(k,v)=>map.set(k,v)};saveReadingLayout('A',{ratio:65,mode:'source',font:20},storage);assert.equal(readingLayout('A',storage).ratio,65);assert.equal(readingLayout('B',storage).font,16);assert.equal(saveReadingLayout('A',{ratio:999,mode:'bad',font:0},storage).ratio,75);assert.doesNotThrow(()=>readingLayout('A',{getItem(){throw Error('unavailable');}}));
+ const map=new Map(),storage={getItem:k=>map.get(k),setItem:(k,v)=>map.set(k,v)};saveReadingLayout('A',{ratio:65,mode:'source',font:20},storage);assert.equal(readingLayout('A',storage).ratio,65);assert.equal(readingLayout('B',storage).font,16);assert.equal(saveReadingLayout('A',{ratio:999,mode:'bad',font:0},storage).ratio,85);assert.doesNotThrow(()=>readingLayout('A',{getItem(){throw Error('unavailable');}}));
 });
 
 test('known legacy quote-only failures stop poisoning breaker counts without rewriting old outcomes',()=>{
