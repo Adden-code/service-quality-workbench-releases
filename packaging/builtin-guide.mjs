@@ -3,6 +3,11 @@ export function builtinUsageGuide(version,language='zh'){
 
 Distribution follows the authorization recorded for this release. This complete edition includes approved rule text and examples. It does not include business conversations, evaluation batches or credentials.
 
+New in 0.11.19
+- EC import can freeze an optional sampling period and report region. Manual report region overrides the banner only; row sites and timing standards do not change. Blank labels stay unknown.
+- New delivery jobs default to four parallel batches. Your 2/3/4 choice is remembered in this browser. Existing jobs keep their saved concurrency; rate limits still trigger slowdown.
+- EC review shows one compact status row; expand it for execution details. Drag the divider up to 85%; the width is remembered per task. Confirm-button help explains draft versus final decisions.
+
 Clean installation
 1. Install and launch Quality Workbench. An empty workspace receives 17 NP catalog rules and two published scenario configurations. No rule files or sample conversations are required.
 2. In Scenarios > View configuration, inspect each frozen configuration. Daily task creation does not expose administrator capability settings. AI-assisted rule import is for new subjects in the administrator workflow.
@@ -26,6 +31,11 @@ Retain earlier installers and external data directories. Use Stop Quality Workbe
  return `会话质检工作台 ${version} · 两场景完整内置版
 
 传播范围以本次发行记录的授权为准。本完整版包含获准的规则原文与案例，不包含真实业务会话、评价批次或凭据。
+
+0.11.19 使用变化
+• 电商上传核对可选填抽检周期与报告地区，随新任务冻结。手工报告地区优先显示，但不改变逐条站点与时效；留空如实显示未提供。
+• 新交付任务默认同时生成4路，2/3/4选择在本机浏览器记忆；旧任务保持原并发，接口限流仍自动降速。
+• 电商审核头部默认一行摘要，点击展开查看执行记录；拖动分隔条最大85%，按任务记忆。确认按钮悬停提示草稿与最终结论的区别。
 
 全新安装
 1. 安装并启动。空工作区自动装载17条新品目录规则、两个已发布场景配置，无需导入规则或会话示例。
