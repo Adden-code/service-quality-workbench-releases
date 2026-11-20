@@ -1,5 +1,19 @@
 # 会话质检工作台
 
+## 0.11.18 电商口径与弹窗修复 · 完整内置候选版
+
+**[免登录下载完整安装包（17条规则＋两场景）](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.18-full/QualityWorkbench-0.11.18-Full-Setup-Windows-x64.exe)**
+
+[发布与验收说明](https://github.com/Adden-code/service-quality-workbench-releases/releases/tag/v0.11.18-full) · [升级指引](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.18-full/Hotfix-Guide-zh.txt) · [SHA256](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.18-full/SHA256.txt) · [源码提交](https://github.com/Adden-code/service-quality-workbench-releases/commit/96690abd019018fbd5999eade1b727f4b289e8f4)
+
+需求21校准电商回复结构、姓名称呼、文本显著错误、针对性四项口径；可选两处显著错误门槛默认关闭。新口径随配置冻结，历史任务不回溯，时效与批次相似规则保持。需求22修复弹窗内拖选到遮罩误关闭。
+
+升级前备份停服覆盖安装，刷新页面。存量在“场景管理→电商评论回复→场景配置→更新电商检核口径”发布，再新建任务或使用新规则重检；专用入口保留本机站点标准、分组、新品及历史任务。旧标定不自动适配新口径。
+
+本地合成回归、实际安装、浏览器与Node/Java本地网关验证通过。内网180行准确率目标尚待复测，不把模拟输出当真实模型效果。
+
+安装器97768156字节；SHA256：`24e0c06ca89f224a255d4fadac8dfb7dbae26f385d48556ce2412396f5784f0f`。7附件匿名完整下载核验；源码分支`source-v0.11.18`。含获准公开规则示例，不含客户批次或凭据。
+
 ## 0.11.17 报告分析与历史交付候选版 · 完整内置
 
 **[免登录下载完整安装包（17条规则＋两场景）](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.17-full/QualityWorkbench-0.11.17-Full-Setup-Windows-x64.exe)**
