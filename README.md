@@ -1,5 +1,19 @@
 # 会话质检工作台
 
+## 0.11.17 报告分析与历史交付候选版 · 完整内置
+
+**[免登录下载完整安装包（17条规则＋两场景）](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.17-full/QualityWorkbench-0.11.17-Full-Setup-Windows-x64.exe)**
+
+[发布与验收说明](https://github.com/Adden-code/service-quality-workbench-releases/releases/tag/v0.11.17-full) · [升级指引](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.17-full/Hotfix-Guide-zh.txt) · [SHA256](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.17-full/SHA256.txt) · [源码提交](https://github.com/Adden-code/service-quality-workbench-releases/commit/1f4b0808f67427d8558b509b5b545a71a724cb28)
+
+报告评分数字字符串和NFC规范等价引文可通过校验；节点保留转换原值/新值审计。历史交付可重新载入进度、节点、缺失重试和文件；导航刷新后续看。相同冻结内容由服务端原子防重，人工改判产生新快照时才新建作业。
+
+升级前备份停服、覆盖安装并刷新旧页面；本轮无需装载规则/场景新版。已有失败报告在历史列表载入→重试缺失项，已成功内容保持。只查看、挂载、下载不触发新的模型生成。
+
+实际安装后180行合成批次85节点、导航/刷新/历史恢复、防重、6个缺失节点重试及HTML/Excel下载通过。无外部模型调用；内网GLM真实效果待复测。17规则与两场景种子保持0.11.16原始字节。
+
+安装器97756808字节；SHA256：`f013aed2161534934223df50027c0c0bf494005094e16dfa4293008572f94d9f`。7附件匿名完整下载核验。源码分支`source-v0.11.17`；含已授权公开规则示例，不含客户批次或凭据。
+
 ## 0.11.16 电商报告按客服分组候选版 · 完整内置
 
 **[免登录下载完整安装包（17条规则＋两场景）](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.16-full/QualityWorkbench-0.11.16-Full-Setup-Windows-x64.exe)**
