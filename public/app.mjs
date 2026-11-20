@@ -68,7 +68,7 @@ const navigation=[['overview','工作概览'],['tasks','质检任务'],['review'
 let storageWarning='',persistenceBlocked=false,saving=false,toastTimer,dialog=null,previousFocus=null,pollTimer;
 let composingInput=null,suspendedTaskDraft=null;
 let lastPage=null,lastSession=null,keyboardInput=false;
-let overlayEpoch=0,closingOverlay=false,finishOverlayClose=null;
+let overlayEpoch=0,closingOverlay=false,finishOverlayClose=null,backdropPress=null;
 const searchKeys={'task-search':'taskQuery','review-search':'reviewQuery','catalog-search':'catalogQuery'};
 const ui={dataMode:'manual',page:'overview',period:'month',dashboardTaskId:INITIAL_TASK_ID,taskStatus:'全部',taskQuery:'',catalogQuery:'',reviewTaskId:INITIAL_TASK_ID,reviewStatus:'待确认',reviewQuery:'',selectedId:'',openRules:[],highlightedTurns:[],resultFilter:'全部',exportTaskId:INITIAL_TASK_ID,includePending:false,reportPeriod:'month',reportTaskId:INITIAL_TASK_ID};
 const workspace=createWorkspaceClient({structuralSharing:true,storage:{getItem:key=>localStorage.getItem(key)}});
@@ -521,8 +521,10 @@ function scheduleWorkspacePoll(){
 }
 
 document.addEventListener('click',async event=>{
+  const backdropClick=backdropPress?.released&&event.button===0&&event.target===backdropPress.target;
+  backdropPress=null;
   const button=event.target.closest('[data-act]');
-  if(!button){if(event.target.matches('[data-backdrop]'))closeDialog();return;}
+  if(!button){if(backdropClick)closeDialog();return;}
   if(button.disabled)return;
   event.preventDefault();const action=button.dataset.act,id=button.dataset.id;
   if(saving)return;
@@ -775,7 +777,19 @@ document.addEventListener('change',async event=>{
 document.addEventListener('dragover',event=>{if(event.target.closest('#upload-zone')){event.preventDefault();event.target.closest('#upload-zone').classList.add('drag');}});
 document.addEventListener('dragleave',event=>event.target.closest('#upload-zone')?.classList.remove('drag'));
 document.addEventListener('drop',event=>{if(event.target.closest('#upload-zone')){event.preventDefault();event.target.closest('#upload-zone').classList.remove('drag');parseFile(event.dataTransfer.files[0]);}});
-document.addEventListener('pointerdown',()=>{keyboardInput=false;document.documentElement.dataset.inputMethod='pointer';},{capture:true});
+document.addEventListener('pointerdown',event=>{
+  keyboardInput=false;document.documentElement.dataset.inputMethod='pointer';
+  // A drag from a field to the backdrop can dispatch click on their common
+  // ancestor. Only a primary press and release on this same backdrop may close it.
+  backdropPress=event.isPrimary&&event.button===0&&event.target.matches?.('[data-backdrop]')?{target:event.target,pointerId:event.pointerId,released:false}:null;
+},{capture:true});
+document.addEventListener('pointerup',event=>{
+  if(!backdropPress)return;
+  if(event.pointerId===backdropPress.pointerId&&event.button===0&&event.target===backdropPress.target&&document.elementFromPoint(event.clientX,event.clientY)===backdropPress.target)backdropPress.released=true;
+  else backdropPress=null;
+},{capture:true});
+document.addEventListener('pointercancel',()=>{backdropPress=null;},{capture:true});
+window.addEventListener('blur',()=>{backdropPress=null;});
 document.addEventListener('keydown',event=>{
   keyboardInput=true;document.documentElement.dataset.inputMethod='keyboard';
   cancelAllMotion();if(closingOverlay)finishOverlayClose?.();
