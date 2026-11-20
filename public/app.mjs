@@ -152,7 +152,7 @@ function reconcileEcommerceCreated(owner){
   if(task||sessions.some(Boolean))return 'conflict';
   return 'not_saved';
 }
-async function createEcommerceTask({file,parsed,name,reviewer,basisVersion,executionSettings,owner}){
+async function createEcommerceTask({file,parsed,name,reviewer,basisVersion,executionSettings,ecReportMetadata,owner}){
   const recovery=reconcileEcommerceCreated(owner);if(recovery==='saved')return;if(['pending','conflict'].includes(recovery))throw new Error('请先恢复或核对上次保存结果，未重复创建任务。');
   if(!parsed?.valid||!parsed.sessions?.length||!file)throw new Error('请先核对有效电商评论文件。');
   await importDraftManager.save(owner);
@@ -164,7 +164,7 @@ async function createEcommerceTask({file,parsed,name,reviewer,basisVersion,execu
     const selected=frozen?{version:frozen.rules[0].version,ruleIds:frozen.rules.map(r=>r.id)}:listExecutableEcommerceVersions(catalog,{asOf:date}).find(v=>ecommerceVersionKey(v)===basisVersion);
     if(!selected)throw new Error('所选电商规则版本不再可用，请重新选择已确认版本。');
     const nextCatalog=catalog,basisSnapshot=frozen||(selected.ruleSetId?createEcommerceRuleSetBasis(nextCatalog,{ruleSetId:selected.ruleSetId,version:selected.version,effectiveDate:date,now}):createBasisSnapshot(nextCatalog,{effectiveDate:date,ruleIds:[...selected.ruleIds],now}));
-    const next=createImportedTask(latest,{name,reviewer,fileName:file.name,sessions:structuredClone(parsed.sessions),source,basisSnapshot,executionSettings:normalizeExecutionSettings(executionSettings),reviewPolicy:normalizeReviewPolicy(owner.reviewPolicy||DEFAULT_REVIEW_POLICY),sceneRuntime:owner.sceneRuntime||{},sceneOverrideReason:owner.sceneOverrideReason||'',sceneConfigurationVersion:owner.sceneConfigurationVersion,now});
+    const next=createImportedTask(latest,{name,reviewer,fileName:file.name,sessions:structuredClone(parsed.sessions),source,basisSnapshot,ecReportMetadata,executionSettings:normalizeExecutionSettings(executionSettings),reviewPolicy:normalizeReviewPolicy(owner.reviewPolicy||DEFAULT_REVIEW_POLICY),sceneRuntime:owner.sceneRuntime||{},sceneOverrideReason:owner.sceneOverrideReason||'',sceneConfigurationVersion:owner.sceneConfigurationVersion,now});
     const task=next.tasks[0];owner.expectedCreated={task:structuredClone(task),sessions:structuredClone(next.sessions.filter(s=>s.taskId===task.id))};
     return{state:next,catalog:nextCatalog};
   });

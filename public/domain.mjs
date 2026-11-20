@@ -1,3 +1,4 @@
+import {normalizeEcReportMetadata} from './ec-report-metadata.mjs';
 import {hasCompletedAI,hasRawFallback} from './session-result-availability.mjs';
 import {newImportLineage,isRepeatedImport} from './import-lineage.mjs';
 import {requiresEcommerceClassification,classificationReviewed,classificationNeedsJudgment} from './ecommerce-classification-review.mjs';
@@ -467,7 +468,7 @@ export function createTask(state, { name, fileName, templateIds }) {
   return next;
 }
 
-export function createImportedTask(state,{name,fileName,sessions,source,basisSnapshot,reviewer,importMappingSnapshot,scenarioSnapshot,executionSettings,reviewPolicy,sceneRuntime={},sceneOverrideReason='',sceneConfigurationVersion,cleaningReportSnapshot,inputMode,evidenceContractVersion,rawImportOptions,reinspectionOf,now=new Date().toISOString()}) {
+export function createImportedTask(state,{name,fileName,sessions,source,basisSnapshot,reviewer,importMappingSnapshot,scenarioSnapshot,executionSettings,reviewPolicy,sceneRuntime={},sceneOverrideReason='',sceneConfigurationVersion,cleaningReportSnapshot,ecReportMetadata,inputMode,evidenceContractVersion,rawImportOptions,reinspectionOf,now=new Date().toISOString()}) {
   if(typeof name!=='string'||!name.trim()||name.length>1000)throw new Error('任务名称不能为空且不能超过1000字符。');
   if(typeof reviewer!=='string'||!reviewer.trim())throw new Error('请填写非空审核人标签。');
   actualTime(now);
@@ -521,7 +522,10 @@ export function createImportedTask(state,{name,fileName,sessions,source,basisSna
   }
   if(scenes.size!==1)throw new Error('混合场景请分批导入。');
   const scene=[...scenes][0],frozenScenario=freezeScenario(state,scene);
-  const executionSnapshot=freezeSceneExecution(state,scene,{basis:basisSnapshot,overrides:sceneRuntime,overrideReason:sceneOverrideReason,expectedVersion:sceneConfigurationVersion});
+  const systemEcommerce=sessions.every(session=>session.ecommerce?.systemSource);
+  if(ecReportMetadata!==undefined&&!systemEcommerce)throw new Error('批次报告信息仅适用于业务系统23列电商来源。');
+  const frozenEcReportMetadata=systemEcommerce?normalizeEcReportMetadata(ecReportMetadata):undefined;
+  const executionSnapshot=freezeSceneExecution(state,scene,{basis:basisSnapshot,overrides:sceneRuntime,overrideReason:sceneOverrideReason,expectedVersion:sceneConfigurationVersion,ecReportMetadata:frozenEcReportMetadata});
   if(executionSnapshot){const values=executionSnapshot.runtime.values;if(rawOptions)rawOptions.productDefault=values.productDefault;reviewPolicy=values.reviewMode==='rule-calibrated'?{version:2,mode:'rule-calibrated',enabled:reviewPolicy?.enabled!==false,calibrationStatus:'per-rule',rules:[]}:{version:1,enabled:reviewPolicy?.enabled!==false,confidenceThreshold:values.legacyConfidenceThreshold,calibrationStatus:'unvalidated'};}
   if(scenarioSnapshot!==undefined&&(!scenarioForTask({scene,scenarioSnapshot})||!sameScenarioConfig(scenarioSnapshot,frozenScenario)))throw new Error('提交的场景快照与当前注册配置不一致。');
   const capabilityErrors=checkScenarioCapabilities(frozenScenario,basisSnapshot.rules);if(capabilityErrors.length)throw new Error(capabilityErrors.join(' '));
@@ -545,9 +549,10 @@ export function createImportedTask(state,{name,fileName,sessions,source,basisSna
   });
   const task={id,name:name.trim(),fileName:String(fileName||source.name),mode:'manual',scene,scenarioSnapshot:clone(frozenScenario),aiStatus:'not_run',progress:0,status:'待审核',createdAt:now,source:clone(source),basisSnapshot:clone(basisSnapshot),sessionIds:added.map(s=>s.id)};
   if(executionSnapshot)task.executionSnapshot=executionSnapshot;
+  if(frozenEcReportMetadata)task.ecReportMetadata=clone(frozenEcReportMetadata);
   if(rawMode){task.inputMode=RAW_INPUT_MODE;task.evidenceContractVersion=RAW_EVIDENCE_VERSION;task.rawImportOptions=clone(rawOptions);if(parent)task.reinspectionOf=parent.id;}
   if(importMappingSnapshot!==undefined)task.importMappingSnapshot=clone(importMappingSnapshot);
-  if(rawMode||executionSettings!==undefined)task.executionSettings=normalizeExecutionSettings(executionSettings,{raw:rawMode});
+  task.executionSettings=normalizeExecutionSettings(executionSettings,{raw:rawMode});
   if(reviewPolicy!==undefined)task.reviewPolicy=normalizeReviewPolicy(reviewPolicy);
   if(reviewPolicy?.version===2){task.reviewPolicy=calibratedReviewPolicy(next,task,{enabled:reviewPolicy.enabled});for(const row of added)row.reviewPolicy=clone(task.reviewPolicy);}
   if(cleaningReportSnapshot!==undefined){validateCleaningReportSnapshot(cleaningReportSnapshot,{source,sessions:added});task.cleaningReportSnapshot=clone(cleaningReportSnapshot);}

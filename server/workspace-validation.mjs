@@ -1,3 +1,4 @@
+import {validateEcReportMetadata} from '../public/ec-report-metadata.mjs';
 import {validateImportLineages} from '../public/import-lineage.mjs';
 import {requiresEcommerceClassification,classificationReviewed,classificationNeedsJudgment} from '../public/ecommerce-classification-review.mjs';
 import {isBusinessEcommerceBasis} from '../public/ecommerce-business-profile.mjs';
@@ -266,6 +267,9 @@ export function validateWorkspace(state,catalog,previous=null,{authenticateNewSn
   for(const task of state.tasks){
     if(trustedReview)continue;
     try{validateTaskLifecycle(task);}catch(error){fail(error.message);}
+    if(task.ecReportMetadata!==undefined){try{validateEcReportMetadata(task.ecReportMetadata);}catch(error){fail(error.message);}if(task.mode!=='manual'||task.scene!=='电商评论回复'||!state.sessions.filter(row=>row.taskId===task.id).length||state.sessions.filter(row=>row.taskId===task.id).some(row=>!row.ecommerce?.systemSource))fail('批次报告信息仅适用于业务系统23列电商来源。');}
+    if(authenticateNewSnapshots&&!previous?.tasks.some(row=>row.id===task.id)&&task.mode==='manual'&&state.sessions.some(row=>row.taskId===task.id&&row.ecommerce?.systemSource)&&task.ecReportMetadata===undefined)fail('新建系统电商任务必须冻结批次报告信息，允许文本留空。');
+    const previousMetadataTask=previous?.tasks.find(row=>row.id===task.id);if(previousMetadataTask&&!equal(previousMetadataTask.ecReportMetadata,task.ecReportMetadata))fail('已保存任务的批次报告信息不可改写。');
     if(authenticateNewSnapshots&&!previous?.tasks.some(old=>old.id===task.id)&&task.lifecycle!==undefined)fail('新任务不能预置生命周期记录。');
     if(task.mode!=='manual'&&(task.inputMode!==undefined||task.rawImportOptions!==undefined||task.evidenceContractVersion!==undefined||task.reinspectionOf!==undefined||state.sessions.some(session=>session.taskId===task.id&&isRawTranscriptSession(session))))fail('原文直判来源只能属于独立业务任务。');
     text(task.name,'任务名称');text(task.status,'任务状态',80);strings(task.sessionIds,'任务会话关联');
@@ -305,7 +309,7 @@ export function validateWorkspace(state,catalog,previous=null,{authenticateNewSn
       if(authenticateNewSnapshots&&!previous?.tasks.some(record=>record.id===task.id&&record.mode==='manual')){
         if(latestSceneConfiguration(state,task.scene)){
           const frozen=task.executionSnapshot;if(!frozen)fail('新任务必须保存完整场景配置快照。');
-          try{const basis=sceneBasisForTask(state,catalog,task.scene,task.basisSnapshot.capturedAt);if(!equal(basis,task.basisSnapshot)||!equal(freezeSceneExecution(state,task.scene,{basis,overrides:frozen.overrides,overrideReason:frozen.overrideReason}),frozen))fail('新任务完整快照必须匹配场景发布版本。');}catch(error){fail(error.message);}
+          try{const basis=sceneBasisForTask(state,catalog,task.scene,task.basisSnapshot.capturedAt);if(!equal(basis,task.basisSnapshot)||!equal(freezeSceneExecution(state,task.scene,{basis,overrides:frozen.overrides,overrideReason:frozen.overrideReason,ecReportMetadata:task.ecReportMetadata}),frozen))fail('新任务完整快照必须匹配场景发布版本。');}catch(error){fail(error.message);}
         }else authenticateSnapshot(task.basisSnapshot,catalog);
         try{assertTaskCatalogScene({state,catalog,scene:task.scene,basisSnapshot:task.basisSnapshot});}catch(error){fail(error.message);}
       }

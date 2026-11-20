@@ -72,7 +72,7 @@ export function collectReportTranslationFields(snapshot,enrichment={}){
   if(custom){add(['scenario','name'],scenario.name);add(['scenario','report','title'],scenario.report?.title);add(['scenario','report','groupLabel'],scenario.report?.groupLabel);for(const field of customFields)add(['scenario','field',field.id,'label'],field.label);}
  }else{
   for(const key of ['phaseLabel','timeModeLabel'])add(['basis',key],basis[key]);
-  for(const key of ['samplingPeriods','regionGroups','regions','countries'])array(basis[key]).forEach((text,index)=>add(['basis',key,index],text));
+  for(const key of ['samplingPeriods','regionGroups','regions','countries','reportRegions'])array(basis[key]).forEach((text,index)=>add(['basis',key,index],text));
  }
  for(const record of array(snapshot?.records)){
   const prefix=['record',record.id];
