@@ -18,6 +18,7 @@ import {createTranslationJobs} from './server/translation-jobs.mjs';
 import {findScenario,isSceneKey} from './public/scenarios.mjs';
 import {loadBundledCatalogSeed} from './server/catalog-seed.mjs';
 import {loadBundledSceneSeed} from './server/scene-seed.mjs';
+import {installEcommercePolicyUpgrade} from './server/builtin-scene-upgrade.mjs';
 import {createImportDraftStore} from './server/import-drafts.mjs';
 import {createRawStructureJobs} from './server/raw-structure-jobs.mjs';
 import {createWorkspaceUsageReader} from './server/workspace-usage.mjs';
@@ -156,13 +157,17 @@ export async function createWorkbenchServer({dataDir=process.env.DEMO_DATA_DIR||
           await fs.writeFile(backupPath,bytes,{flag:'wx',mode:0o600});
           return await json(res,200,{...await store.migrateScenes({actor:input.actor||'本机迁移',reason:input.reason||'启用场景版本配置'}),token,aiRuntime:ai.runtime(),backupPath});
         }
-        if(input.action==='install-builtin'){
-          if(!input.actor?.trim()||!input.reason?.trim()||input.confirmed!==true)throw new WorkspaceError('请确认装载并填写维护人与原因。');
+        if(input.action==='install-builtin'||input.action==='install-ec-policy'){
+          if(typeof input.actor!=='string'||!input.actor.trim()||typeof input.reason!=='string'||!input.reason.trim()||input.confirmed!==true)throw new WorkspaceError('请确认装载并填写维护人与原因。');
           const bundledCatalog=typeof catalogSeed==='function'?await catalogSeed():catalogSeed,bundledScenes=typeof sceneSeed==='function'?await sceneSeed():sceneSeed;
           if(!bundledCatalog||!bundledScenes)throw new WorkspaceError('本安装包未包含完整内置场景；请使用内部完整包。');
           if(inflight>1||busy())throw new WorkspaceError('请暂停任务并等待在途调用完成后装载。',409);
-          maintenance=true;ownsMaintenance=true;await store.validateIntegrity();const {bytes}=await encodeWorkspaceArchive(resolvedData),backupPath=`${resolvedData}.before-builtin-${new Date().toISOString().replace(/[:.]/g,'-')}-${randomBytes(4).toString('hex')}.sqwb`;await fs.writeFile(backupPath,bytes,{flag:'wx',mode:0o600});
-          return await json(res,200,{...await store.installBuiltinScenes({catalogSeed:bundledCatalog,sceneSeed:bundledScenes,actor:input.actor,reason:input.reason,operationId:input.operationId}),token,aiRuntime:ai.runtime(),backupPath});
+          const upgrade={catalogSeed:bundledCatalog,sceneSeed:bundledScenes,actor:input.actor,reason:input.reason,operationId:input.operationId,...(input.action==='install-ec-policy'?{expectedVersion:input.expectedVersion}:{})};
+          maintenance=true;ownsMaintenance=true;await store.validateIntegrity();
+          if(input.action==='install-ec-policy')installEcommercePolicyUpgrade(await store.read(),upgrade);
+          const {bytes}=await encodeWorkspaceArchive(resolvedData),backupPath=`${resolvedData}.${input.action==='install-ec-policy'?'before-ec-policy':'before-builtin'}-${new Date().toISOString().replace(/[:.]/g,'-')}-${randomBytes(4).toString('hex')}.sqwb`;await fs.writeFile(backupPath,bytes,{flag:'wx',mode:0o600});
+          const upgraded=await(input.action==='install-ec-policy'?store.installEcommercePolicy(upgrade):store.installBuiltinScenes(upgrade));
+          return await json(res,200,{...upgraded,token,aiRuntime:ai.runtime(),backupPath});
         }
         return await json(res,200,{...await store.configureScene(input),token,aiRuntime:ai.runtime()});
       }

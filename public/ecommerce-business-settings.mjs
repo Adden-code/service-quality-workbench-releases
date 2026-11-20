@@ -1,8 +1,19 @@
 import {e} from './ui.mjs';
 import {isBusinessEcommerceBasis,EC_TYPES} from './ecommerce-business-profile.mjs';
+import {EC_SEMANTIC_POLICY_VERSION} from './ecommerce-semantic-policy.mjs';
 const base='configuration.basis.businessProfile';
 const input=(path,label,value,type='text',attrs='')=>`<label class="field-group"><span class="field-label">${e(label)}</span><input class="field" data-scfg-path="${e(path)}" type="${type}" value="${e(value??'')}" ${attrs}></label>`;
+function semanticSettings(p){
+ if(!p.semanticPolicy)return '<details open><summary>电商检核口径</summary><p>当前配置沿用旧冻结口径。打开、编辑或发布本草稿不会自动启用需求21口径；请使用“更新电商检核口径”入口创建新版本。旧任务保持原快照。</p></details>';
+ if(p.semanticPolicy.version!==EC_SEMANTIC_POLICY_VERSION)return '<p class="soft-note warning">电商检核口径版本不受支持，请核对配置。</p>';
+ const count=p.semanticPolicy.text.minimumSignificantErrors;
+ return `<details open><summary>电商检核口径 · 人工判断校准</summary><label class="field-group"><span class="field-label">文本质量不通过阈值</span><select class="field" data-scfg-path="${base}.semanticPolicy.text.minimumSignificantErrors" data-scfg-number="true"><option value="1" ${count===1?'selected':''}>1 处显著错误（默认）</option><option value="2" ${count===2?'selected':''}>2 处显著错误（管理员选用）</option></select></label><p>仅显著影响理解、造成实质歧义或明显损害专业形象的错误计数。选择 2 处后，单处显著错误只作建议；轻微拼写、重音符号、语言变体和沿用客户拼写等非实质问题不计数，在判断理由中提示。</p><p>好评正向/负向的固定段落组成仅作建议；至少 3 步操作仍须编号，须对评价作实质回应。仅用客户名字作礼貌称呼且无其他个人信息时允许。发布后对新任务生效，旧任务与旧标定范围保持冻结。</p></details>`;
+}
 export function ecommerceBusinessSettings(c){
+ if(!isBusinessEcommerceBasis(c.basis))return'';
+ return semanticSettings(c.basis.businessProfile)+existingBusinessSettings(c);
+}
+function existingBusinessSettings(c){
  if(!isBusinessEcommerceBasis(c.basis))return'';const p=c.basis.businessProfile,t=p.timing;
  if(t.mode==='elapsed')return `<details open><summary>电商自然时间口径</summary><p>按评论至首次回复时间戳差值自动判定；夜间、周末、节假日全额计入，无需业务日历。未回复累计至冻结质检截止点。站点/类型专用阈值优先，否则采用明确的业务默认阈值。旧任务口径不变。</p><div class="scenario-form-grid">${input(`${base}.timing.defaultHours`,'业务默认阈值（自然小时）',t.defaultHours,'number','min="0.001" step="0.01"')}${input(`${base}.timing.defaultSource`,'默认阈值依据',t.defaultSource)}${input(`${base}.timing.siteField`,'原表站点字段名',t.siteField)}${['zh','en'].map(l=>input(`${base}.structure.closingWaiver.${l}`,`${l}结束语豁免字符阈值`,p.structure.closingWaiver[l],'number','min="1" step="1"')).join('')}</div><p>相似度：本批次不同来源行归一化 Dice ≥85%；至少2条。掩码个人信息同样禁止。</p>${t.sites.map((s,i)=>`<fieldset><legend>站点 ${i+1}</legend>${input(`${base}.timing.sites.${i}.id`,'站点键',s.id)}${input(`${base}.timing.sites.${i}.label`,'站点名称',s.label)}${input(`${base}.timing.sites.${i}.aliases`,'别名（逗号分隔）',s.aliases.join(','),'text','data-scfg-array="true"')}<button class="btn" data-act="scfg-ec-remove-site" data-index="${i}">移除站点</button></fieldset>`).join('')}<button class="btn" data-act="scfg-ec-add-site">新增站点</button><button class="btn" data-act="scfg-ec-create-standards">按站点生成阈值表</button>${t.standards.map((r,i)=>`<div class="scenario-form-grid"><span>${e(r.siteId)} · ${e(r.evaluationType)}</span>${input(`${base}.timing.standards.${i}.hours`,'自然小时阈值',r.hours,'number','min="0.001" step="0.01"')}${input(`${base}.timing.standards.${i}.source`,'手工依据',r.source)}</div>`).join('')}</details>`;
  return `<details open><summary>电商内置口径 · ${e(c.basis.executionProfile)}</summary><p class="hint">相似度由程序按归一化字符二元组 Dice 系数计算；本批次任意两个不同来源行达到85%即形成配对证据。步骤编号和评价回复结构分别检查；掩码个人信息同样禁止出现在公开回复中。</p><div class="scenario-form-grid">${['zh','en'].map(l=>input(`${base}.structure.closingWaiver.${l}`,`${l==='zh'?'中文':'英文'}结束语豁免阈值（严格超过；含空格标点，表情按一个字符）`,p.structure.closingWaiver[l],'number','min="1" step="1"')).join('')}</div></details>

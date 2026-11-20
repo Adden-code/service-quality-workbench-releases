@@ -1,4 +1,5 @@
 import {validateCalendar,timeDurationMs} from './working-time.mjs';
+import {validateEcommerceSemanticPolicy} from './ecommerce-semantic-policy.mjs';
 export const EC_BUSINESS_PROFILE='ec-business-v1';
 export const isBusinessEcommerceBasis=b=>b?.executionProfile===EC_BUSINESS_PROFILE;
 export const EC_TYPES=['好评正向','好评负向','中评','差评'];
@@ -10,6 +11,7 @@ export function validateBusinessEcommerceBasis(b){
  if(!isBusinessEcommerceBasis(b)||b.ruleSetSnapshot||!Array.isArray(b.rules)||b.rules.length!==5||new Set(b.rules.map(r=>r.id)).size!==5||!IDS.every(id=>b.rules.some(r=>r.id===id)))fail('内置电商版本必须包含独立五项规则。');
  const p=b.businessProfile;
  if(!object(p)||p.schemaVersion!==1||p.similarity?.method!=='normalized-bigram-dice-v1'||p.similarity.threshold!==0.85||p.similarity.minimumRecords!==2||p.similarity.scope!=='batch')fail('电商相似度执行配置不受支持。');
+ if(Object.hasOwn(p,'semanticPolicy'))validateEcommerceSemanticPolicy(p.semanticPolicy);
  if(p.structure?.minimumSteps!==3||p.structure.counting!=='grapheme-with-spaces-v1'||!['zh','en'].every(l=>Number.isSafeInteger(p.structure.closingWaiver[l])&&p.structure.closingWaiver[l]>0)||p.privacy?.maskedAllowed!==false)fail('电商结构或隐私配置无效。');
  const t=p.timing;if(!object(t)||!['pending','ready'].includes(t.status)||!text(t.siteField)||!Array.isArray(t.sites)||t.sites.length>100||!Array.isArray(t.standards)||t.standards.length>400)fail('电商站点时效配置无效。');
  if(t.mode!==undefined&&!['elapsed','workingHours'].includes(t.mode))fail('电商计时模式无效。');if(t.mode==='elapsed'&&(!Number.isFinite(t.defaultHours)||t.defaultHours<=0||t.defaultHours>87600||!text(t.defaultSource)))fail('自然时间默认阈值及依据必填。');
