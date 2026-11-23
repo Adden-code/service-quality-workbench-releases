@@ -78,12 +78,13 @@ test('failed retesting of the same configuration prevents automatic dispatch of 
   await f.certify();await f.ai.resumeQueue();await f.ai.waitForIdle();assert.equal(f.calls.length,2);
 });
 
-test('pausing an active task pauses the task queue and waitForIdle returns after in-flight work settles',async t=>{
-  const gate=deferred(),entered=deferred();const f=await fixture(t,{counts:[2,1],cleanup:gate.resolve,inspect:async(request,n)=>{if(n===1){entered.resolve();await gate.promise;}return result(request);}});
+test('01120 pausing one task allows a queued task and a newly added task to dispatch',async t=>{
+  const gate=deferred(),entered=deferred();const f=await fixture(t,{counts:[2,1,1],cleanup:gate.resolve,inspect:async(request,n)=>{if(n===1){entered.resolve();await gate.promise;}return result(request);}});
   // Keep one row pending so this test isolates pause/resume, independent of new-task defaults.
-  const [a,b]=f.taskIds;await f.ai.start(a,'pause-A',{concurrency:1});await entered.promise;await f.ai.start(b,'pause-B');await f.ai.pause(a);gate.resolve();await f.ai.waitForIdle();
-  assert.equal(f.calls.length,1);assert.equal(f.ai.runtime().queueStatus,'paused');assert.deepEqual(f.ai.runtime().queue.map(item=>item.status),['paused','queued']);
-  await f.ai.resume(a);await f.ai.waitForIdle();assert.deepEqual(f.calls.map(call=>call.sessionId),['SYNTH-1-1','SYNTH-1-2','SYNTH-2-1']);
+  const [a,b,c]=f.taskIds;await f.ai.start(a,'pause-A',{concurrency:1});await entered.promise;await f.ai.start(b,'pause-B');await f.ai.pause(a);gate.resolve();await f.ai.waitForIdle();
+  assert.equal(f.calls.length,2);assert.equal(f.ai.runtime().queueStatus,'ready');assert.deepEqual(f.ai.runtime().queue.map(item=>item.status),['paused']);
+  await f.ai.start(c,'pause-C');await f.ai.waitForIdle();assert.equal(f.calls.length,3);assert.equal(f.ai.isBusy(),false);
+  await f.ai.resume(a);await f.ai.waitForIdle();assert.deepEqual(f.calls.map(call=>call.sessionId),['SYNTH-1-1','SYNTH-2-1','SYNTH-3-1','SYNTH-1-2']);
 });
 
 test('restart retains queued order and cancellation while requiring an explicit queue resume',async t=>{

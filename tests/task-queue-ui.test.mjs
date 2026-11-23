@@ -44,7 +44,7 @@ test('queued task detail offers cancellation without another start or an unstart
 
 test('queued and settled paused entries can be cancelled while cancelled tasks can be restarted',async()=>{
   const {taskQueueControls}=await import('../public/task-queue-ui.mjs'),state=fixture();
-  assert.doesNotMatch(taskQueueControls(state,taskFor(state,'ACTIVE'),{eligible:true}),/cancel-queued-ai/);
+  assert.match(taskQueueControls(state,taskFor(state,'ACTIVE'),{eligible:true}),/cancel-queued-ai/);
   assert.match(taskQueueControls(state,taskFor(state,'PAUSED'),{eligible:true}),/cancel-queued-ai/);
   const html=taskQueueControls(state,taskFor(state,'CANCELLED'),{eligible:true});assert.match(html,/data-act="run-ai"/);assert.doesNotMatch(html,/disabled/);
 });

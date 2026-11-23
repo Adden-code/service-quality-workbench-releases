@@ -3,10 +3,16 @@ import {samplingDescription} from './rule-calibration-policy.mjs';
 import {html as uiHtml,uiLiteral,t as uiT,getLocale} from './i18n.mjs';
 import {e,badge,dateTime} from './ui.mjs';
 import {hasSuccessfulAI} from './model-ui.mjs';
+import {isReviewWorkComplete} from './ai-triage.mjs';
 import {estimateTaskEta,etaDisplayRange} from './task-eta.mjs';
 
 const pendingStatuses=new Set(['queued','running','paused']);
 const statusLabels={queued:'AI排队中',running:'AI运行中',paused:'AI已暂停',completed:'AI已完成',partial:'AI未完成',failed:'AI未完成',interrupted:'AI已中断',cancelled:'AI已取消',not_run:'AI未开始',not_started:'AI未开始'};
+export function taskPendingProcessing(state,task){
+ const rows=(state.sessions||[]).filter(row=>row.taskId===task.id),queueRows=new Map((task.aiQueue?.rows||[]).map(row=>[row.sessionId,row]));
+ const pending=rows.filter(row=>!isReviewWorkComplete(row)&&(!hasSuccessfulAI(row)||['failed','blocked'].includes(queueRows.get(row.id)?.status)||row.aiResults?.some(result=>result.comparisonAssessment?.status==='incomplete'))).length;
+ return {pending,partial:pending>0&&pending<rows.length&&!['not_run','not_started','queued','running','paused'].includes(task.aiStatus)};
+}
 
 export function taskQueueInfo(state,task){
   const entries=state.aiTaskQueue?.entries||[],pending=entries.filter(entry=>pendingStatuses.has(entry.status)).sort((a,b)=>a.sequence-b.sequence);
@@ -16,14 +22,15 @@ export function taskQueueInfo(state,task){
   const previousIds=new Set(entries.filter(item=>item.sequence<(entry?.sequence??Infinity)&&item.taskId!==task.id&&['partial','failed'].includes(item.status)).map(item=>item.taskId));
   const unfinished=(state.sessions||[]).filter(session=>previousIds.has(session.taskId)&&session.aiExecution?.status!=='completed'&&session.review?.status!=='已确认');
   const queueStatus=state.aiTaskQueue?.status||'ready',pauseReason=state.aiTaskQueue?.pauseReason||null;
-  return {status,hasEntry:Boolean(entry),position:index<0?null:index+1,pendingCount:pending.length,queueStatus,pauseReason,blockedReason:entry?.blockedReason||task.aiQueue?.stopReason||pauseReason,
-    canCancel:['queued','paused','interrupted'].includes(status)&&!(state.sessions||[]).some(session=>session.taskId===task.id&&session.aiExecution?.status==='running'),canResumeQueue:(queueStatus==='paused'&&pending.length>0)||status==='paused'||status==='interrupted',
+  return {status,hasEntry:Boolean(entry),position:index<0?null:index+1,pendingCount:pending.length,queueStatus,pauseReason,blockedReason:queueStatus==='paused'?pauseReason:entry?.blockedReason||task.aiQueue?.stopReason||null,
+    canCancel:['queued','running','paused','interrupted'].includes(status),canResumeQueue:queueStatus==='paused'&&pending.length>0,
     previousIncompleteSessions:unfinished.length,previousIncompleteTasks:new Set(unfinished.map(session=>session.taskId)).size};
 }
 
 export function taskQueueBadge(state,task){
   const info=taskQueueInfo(state,task),kind=info.status==='queued'?'blue':info.status==='running'?'blue':['paused','partial','failed','interrupted'].includes(info.status)?'warning':info.status==='completed'?'success':'muted';
-  return uiHtml`<span class="task-queue-status" data-task-queue-status="${e(info.status)}">${badge(statusLabels[info.status]||info.status,kind)}${info.position?uiHtml`<span class="task-queue-position" data-task-queue-position="${info.position}" title="队列位置包含正在运行的任务">${uiT('队列第{0}位',{0:info.position})}</span>`:''}${info.position&&info.previousIncompleteSessions?uiHtml`<span class="task-queue-incomplete">${uiT('前序仍有 {0} 条会话未完成',{0:info.previousIncompleteSessions})}</span>`:''}</span>`;
+  const progress=taskPendingProcessing(state,task),label=progress.partial?uiT('部分完成（{0}条待处理）',{0:progress.pending}):statusLabels[info.status]||info.status;
+  return uiHtml`<span class="task-queue-status" data-task-queue-status="${e(info.status)}">${badge(label,progress.partial?'warning':kind)}${info.position?uiHtml`<span class="task-queue-position" data-task-queue-position="${info.position}" title="队列位置包含正在运行的任务">${uiT('队列第{0}位',{0:info.position})}</span>`:''}${info.position&&info.previousIncompleteSessions?uiHtml`<span class="task-queue-incomplete">${uiT('前序仍有 {0} 条会话未完成',{0:info.previousIncompleteSessions})}</span>`:''}</span>`;
 }
 
 export function taskQueueControls(state,task,{eligible,complete=0,failed=0}={}){
@@ -32,8 +39,8 @@ export function taskQueueControls(state,task,{eligible,complete=0,failed=0}={}){
   if(['partial','failed'].includes(info.status)&&task.aiQueue?.comparison?.status==='failed')return uiHtml`<button class="btn primary" data-act="resume-ai" data-id="${e(task.id)}">${getLocale()==='en'?'Retry unfinished comparison blocks':'重跑未完成相似块'}</button><button class="btn" data-act="task-review" data-id="${e(task.id)}">${getLocale()==='en'?'View saved results':'查看已保留结果'}</button>`;
   const resume=uiLiteral('<button class="btn primary" data-act="resume-ai-queue">继续任务队列</button>');
   if(info.status==='queued')return uiHtml`${info.canResumeQueue?resume:''}<button class="btn" data-act="cancel-queued-ai" data-id="${e(task.id)}">取消排队</button>`;
-  if(info.status==='running')return uiHtml`<button class="btn" data-act="pause-ai" data-id="${e(task.id)}">暂停任务队列</button>`;
-  if(info.status==='paused'||info.status==='interrupted')return uiHtml`${info.hasEntry?resume:uiHtml`<button class="btn primary" data-act="resume-ai" data-id="${e(task.id)}">继续AI质检</button>`}<button class="btn" data-act="cancel-queued-ai" data-id="${e(task.id)}" ${info.canCancel?'':'disabled'}>${uiT('取消本次运行')}</button>${info.canCancel?'':uiHtml`<span class="hint">${uiT('等待当前请求结束后可取消本次运行。')}</span>`}`;
+  if(info.status==='running')return uiHtml`<button class="btn" data-act="pause-ai" data-id="${e(task.id)}">暂停本任务</button><button class="btn" data-act="cancel-queued-ai" data-id="${e(task.id)}">取消本次运行</button>${info.queueStatus==='ready'?uiLiteral('<button class="btn" data-act="pause-ai-queue">暂停全部任务</button>'):''}`;
+  if(info.status==='paused'||info.status==='interrupted')return uiHtml`${info.canResumeQueue?resume:uiHtml`<button class="btn primary" data-act="resume-ai" data-id="${e(task.id)}">继续AI质检</button>`}<button class="btn" data-act="cancel-queued-ai" data-id="${e(task.id)}" ${info.canCancel?'':'disabled'}>${uiT('取消本次运行')}</button>${info.canCancel?'':uiHtml`<span class="hint">${uiT('等待当前请求结束后可取消本次运行。')}</span>`}`;
   return uiHtml`<button class="btn primary" data-act="run-ai" data-id="${e(task.id)}" ${eligible?'':'disabled'}>${uiT(info.status==='cancelled'?'重新加入任务队列':failed?'重试失败项':complete?'处理未完成项':'开始AI质检')}</button>`;
 }
 
@@ -54,9 +61,9 @@ export function taskQueueNotice(state,task,options={}){
   if(!relevant)return eta;
   // Restart pauses the scheduler, but does not resolve a recorded capability failure.
   const reason=info.blockedReason==='interrupted'&&Object.values(task.capabilityMonitor||{}).some(m=>m.paused)?'capability_failure_rate':info.blockedReason;
-  const explanation=reason==='capability_failure_rate'?(getLocale()==='en'?`${capabilityPauseSummary(task)}. Paused because technical failures exceeded the limit. Ask the local administrator to check model settings or send the problem summary to development. Saved results remain reviewable. Resume after the cause is fixed.`:`${capabilityPauseSummary(task)}。辅助能力技术失败率超过冻结上限，已暂停。请联系本机管理员检查模型设置；仍失败时复制问题摘要反馈开发。其余已完成结果可正常审核，原因修复后再继续任务队列。`):reason==='capability_unavailable'?(getLocale()==='en'?'An auxiliary executor or model service is unavailable. Fix the reported configuration or authentication failure before resuming.':'辅助执行器或模型服务整体不可用，已暂停。请先修复配置、鉴权或执行器问题。'):reason==='config_changed'?'当前模型配置与任务冻结配置不同。请在模型设置恢复任务原配置并测试连接，再点击“继续任务队列”。':reason==='connection_required'?'当前模型配置尚未通过连接测试。请在模型设置保存并测试连接，再点击“继续任务队列”。':reason==='interrupted'||info.status==='interrupted'?'服务重启或执行中断后，任务队列保持暂停。已保存的结果与顺序保留；核对后点击“继续任务队列”。':reason==='storage_error'?'保存调度状态时出现错误，任务队列已暂停。请先恢复工作区保存，再点击“继续任务队列”。':reason==='user'||info.queueStatus==='paused'?'任务队列已暂停，后续任务不会启动。当前请求结束后保留结果；点击“继续任务队列”恢复整个队列。':'任务按加入顺序逐个执行，同一时间只执行一个任务。';
+  const explanation=reason==='capability_failure_rate'?(getLocale()==='en'?`${capabilityPauseSummary(task)}. Paused because technical failures exceeded the limit. Ask the local administrator to check model settings or send the problem summary to development. Saved results remain reviewable. Resume after the cause is fixed.`:`${capabilityPauseSummary(task)}。辅助能力技术失败率超过冻结上限，已暂停。请联系本机管理员检查模型设置；仍失败时复制问题摘要反馈开发。其余已完成结果可正常审核，原因修复后再继续本任务；其他任务可继续。`):reason==='capability_unavailable'?(info.queueStatus==='paused'?(getLocale()==='en'?'Shared model authentication failed. The task queue is on a protective hold. Fix authentication before resuming.':'共享模型鉴权失败，任务队列处于保护性暂停。请先修复鉴权，再继续任务队列。'):(getLocale()==='en'?'This task’s auxiliary executor or capability is unavailable. This task is paused; other tasks may continue. Fix the reported issue before resuming this task.':'本任务辅助执行器或能力不可用，已暂停本任务；其他任务可继续。修复所报问题后再继续本任务。')):reason==='config_changed'?'模型或参数已变化，请新建批次重检，原批次结果保留。恢复原配置并测试连接后，也可继续任务队列。':reason==='connection_required'?'当前模型配置尚未通过连接测试。请在模型设置保存并测试连接，再点击“继续任务队列”。':reason==='interrupted'||info.status==='interrupted'?'服务重启或执行中断后，任务队列保持暂停。已保存的结果与顺序保留；核对后点击“继续任务队列”。':reason==='storage_error'?'保存调度状态时出现错误，任务队列已暂停。请先恢复工作区保存，再点击“继续任务队列”。':reason==='user_task'&&info.queueStatus!=='paused'?'本任务已暂停，其他任务仍可继续。当前请求结束后保留结果，可继续AI质检或取消本次运行。':reason==='user'||info.queueStatus==='paused'?'任务队列已暂停，后续任务不会启动。当前请求结束后保留结果；点击“继续任务队列”恢复整个队列。':'任务按加入顺序逐个执行，同一时间只执行一个任务。';
   const configBlocked=['config_changed','connection_required'].includes(reason);
-  return uiHtml`<div class="task-queue-notice ${info.queueStatus==='paused'?'is-paused':''}" role="status"><p>${e(uiT(explanation))}</p>${explanation!=='任务按加入顺序逐个执行，同一时间只执行一个任务。'?uiLiteral('<p>任务按加入顺序逐个执行，同一时间只执行一个任务。</p>'):''}${info.previousIncompleteSessions?uiHtml`<p>${uiT('前序仍有 {0} 条会话未完成；不含已完成AI执行或已人工确认的会话。',{0:info.previousIncompleteSessions})}</p>`:''}${['capability_failure_rate','capability_unavailable'].includes(reason)?capabilityHelpActions(task):''}${configBlocked?uiLiteral('<button class="btn small" data-act="model-settings">打开模型设置</button>'):''}${eta}</div>`;
+  return uiHtml`<div class="task-queue-notice ${info.queueStatus==='paused'?'is-paused':''}" role="status">${info.queueStatus==='paused'&&info.status==='queued'?uiHtml`<p><strong>${uiT('本任务已入队，但全局队列已暂停，不会自动启动。')}</strong></p>`:''}<p>${e(uiT(explanation))}</p>${info.canResumeQueue?uiLiteral('<button class="btn small primary" data-act="resume-ai-queue">继续任务队列</button>'):''}${explanation!=='任务按加入顺序逐个执行，同一时间只执行一个任务。'?uiLiteral('<p>任务按加入顺序逐个执行，同一时间只执行一个任务。</p>'):''}${info.previousIncompleteSessions?uiHtml`<p>${uiT('前序仍有 {0} 条会话未完成；不含已完成AI执行或已人工确认的会话。',{0:info.previousIncompleteSessions})}</p>`:''}${['capability_failure_rate','capability_unavailable'].includes(reason)?capabilityHelpActions(task):''}${configBlocked?uiLiteral('<button class="btn small" data-act="model-settings">打开模型设置</button>'):''}${eta}</div>`;
 }
 
 export function cleaningReportSummary(task){

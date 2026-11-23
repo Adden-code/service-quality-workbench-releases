@@ -75,7 +75,7 @@ test('backup busy probe includes queued controls and paused in-flight AI until c
  const f=await setup(t,{inspect:async()=>{enter();await gate;return{results:[{ruleId:'R004',verdict:'符合',reason:'合成判断',evidence:[2],referenceIds:[]}],modelId:'glm-5.3-flash',promptVersion:'qa-ark-v1'};}});
  try{
   assert.equal(f.ai.isBusy(),false);const starting=f.ai.start(f.taskId,'backup-busy');assert.equal(f.ai.isBusy(),true,'control is busy before its first await');await starting;await entered;
-  await f.ai.pause(f.taskId);assert.equal(f.ai.runtime().queueStatus,'paused');assert.equal(f.ai.isBusy(),true,'paused UI still has an in-flight request');
+  await f.ai.pause(f.taskId);assert.equal(f.ai.runtime().queueStatus,'ready');assert.equal(f.ai.isBusy(),true,'paused UI still has an in-flight request');
   release();await f.ai.waitForIdle();assert.equal(f.ai.isBusy(),false,'stable paused queue does not dispatch itself');assert.ok(f.ai.runtime().queue.length);
   const resuming=f.ai.resume(f.taskId);assert.equal(f.ai.isBusy(),true);await resuming;await f.ai.waitForIdle();assert.equal(f.ai.isBusy(),false);
  }finally{release();}

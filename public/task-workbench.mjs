@@ -16,7 +16,7 @@ import {ruleSetSummary} from './rule-set-ui.mjs';
 import {listScenarios,findScenario,sceneLabel} from './scenarios.mjs';
 import {isProcessedUnknown} from './pending-resolution.mjs';
 import {isAIFinal,isFinalSession,isReviewWorkComplete,requiresHumanReview} from './ai-triage.mjs';
-import {taskQueueInfo,taskQueueBadge,taskQueueControls,taskQueueNotice,cleaningReportSummary,taskReviewPolicySummary} from './task-queue-ui.mjs';
+import {taskQueueInfo,taskQueueBadge,taskQueueControls,taskQueueNotice,taskPendingProcessing,cleaningReportSummary,taskReviewPolicySummary} from './task-queue-ui.mjs';
 
 export function handleTaskReportAction(action,id,{ui,navigate,state}){
   if(!['task-detail-export','task-detail-report','completion-export','completion-report'].includes(action))return false;
@@ -64,7 +64,8 @@ export function taskExecution(state,task){
   const status=taskQueueInfo(state,task).status;
   const eligible=sessions.some(row=>row.review.status==='待审核'&&!Object.keys(row.review.drafts||{}).length&&!hasSuccessfulAI(row));
   const humanConfirmed=sessions.filter(session=>session.review.status==='已确认').length,aiFinal=sessions.filter(isAIFinal).length,finalized=sessions.filter(isFinalSession).length,pendingHuman=isInactiveTask(task)?0:sessions.filter(requiresHumanReview).length,processedUnknown=sessions.filter(isProcessedUnknown).length,workCompleted=sessions.filter(isReviewWorkComplete).length;
-  return {eligible,total:sessions.length,complete,failed,unprocessed:Math.max(0,sessions.length-complete-failed),confirmed:humanConfirmed,humanConfirmed,aiFinal,finalized,pendingHuman,processedUnknown,workCompleted,semantic,status,queue};
+  const processing=taskPendingProcessing(state,task);
+  return {eligible,total:sessions.length,complete,failed,pendingProcessing:processing.pending,partialCompletion:processing.partial,unprocessed:Math.max(0,sessions.length-complete-failed),confirmed:humanConfirmed,humanConfirmed,aiFinal,finalized,pendingHuman,processedUnknown,workCompleted,semantic,status,queue};
 }
 export function taskMatchesStatus(state,task,status){
   const c=taskExecution(state,task);

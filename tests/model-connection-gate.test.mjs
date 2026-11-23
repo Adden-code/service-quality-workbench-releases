@@ -59,7 +59,7 @@ test('resume cannot borrow a successful test of model B to execute frozen model 
   const client={inspect:async({basis})=>{if(++calls===1)throw Object.assign(new Error('synthetic timeout'),{code:'timeout'});return {results:basis.rules.map(rule=>({ruleId:rule.id,verdict:'符合',reason:'Synthetic fixture',evidence:[1],referenceIds:[]})),modelId:'model-A',promptVersion:'synthetic'};}};
   ai=await createAiService({store,modelConfig:config,client,maxAttempts:1});const taskId=state.tasks[0].id;await ai.start(taskId,'frozen-A');await ai.waitForIdle();assert.equal(calls,1);
   await config.update({model:'model-B'});run=await config.beginConnectionTest();await config.finishConnectionTest(run.token,true);
-  await assert.rejects(ai.resume(taskId),/冻结|恢复|设置/);assert.equal(calls,1);
+  await assert.rejects(ai.resume(taskId),/模型或参数已变化，请新建批次重检，原批次结果保留/);assert.equal(calls,1);
   await config.update(original);await assert.rejects(ai.resume(taskId),/测试/);run=await config.beginConnectionTest();await config.finishConnectionTest(run.token,true);
   await ai.resume(taskId);await ai.waitForIdle();assert.equal(calls,2);assert.equal((await store.read()).state.tasks[0].aiStatus,'completed');
  }finally{await ai?.close();await store.close();}

@@ -1,3 +1,4 @@
+import {createDiagnosticBundle} from './server/diagnostics.mjs';
 import {createWorkspaceTransport} from './server/workspace-transport.mjs';
 import {prepareTaskDeletion,filterTaskFiles} from './server/task-deletion.mjs';
 import {productVersion as PRODUCT_VERSION} from './packaging/version.mjs';
@@ -98,6 +99,13 @@ export async function createWorkbenchServer({dataDir=process.env.DEMO_DATA_DIR||
         const offset=Number(url.searchParams.get('offset')||0),limit=Number(url.searchParams.get('limit')||25);
         if(!Number.isSafeInteger(offset)||offset<0||!Number.isSafeInteger(limit)||limit<1||limit>50)throw new WorkspaceError('执行明细分页无效。');
         const rows=task.aiQueue?.rows||[];return await json(res,200,{revision:snapshot.revision,taskId:task.id,offset,total:rows.length,rows:rows.slice(offset,offset+limit).map(row=>{const session=snapshot.state.sessions.find(s=>s.id===row.sessionId),dependency=dependencyStaleness(session,task);return{...Object.fromEntries(['id','sessionId','sourceRow','status','attempts','durationMs','error'].filter(key=>row[key]!==undefined).map(key=>[key,row[key]])),batchIndex:task.aiQueue.batches?.find(b=>b.id===row.batchId)?.index??1,businessId:session?.externalId||row.sessionId,dependency:{stale:dependency.stale,canRetry:dependency.canRetry,protected:dependency.protected,count:dependency.ruleIds.length}};})});
+      }
+      if(pathname==='/api/diagnostics/export'){
+        if(req.method!=='POST')throw new WorkspaceError('Method not allowed',405);
+        requireMutation('application/json');const input=await parseJson(1024);
+        if(!input||Array.isArray(input)||typeof input!=='object'||Object.keys(input).some(k=>k!=='includeTraces')||input.includeTraces!==undefined&&typeof input.includeTraces!=='boolean')throw new WorkspaceError('诊断导出参数无效；诊断包不允许包含业务资料。');
+        const result=await createDiagnosticBundle({dataDir:resolvedData,document:store.transportSnapshot(),build:buildInfo,modelConfig:config.getPrivate(),includeTraces:input.includeTraces===true});
+        res.writeHead(200,{...safeHeaders,'Content-Type':'application/zip','Content-Length':result.bytes.length,'Content-Disposition':`attachment; filename="${result.name}"`,'X-Diagnostic-Path':encodeURIComponent(result.savedPath),'X-Diagnostic-Traces-Skipped':String(result.traceFilesSkipped)});res.end(result.bytes);return;
       }
       if(pathname==='/api/build-info'&&req.method==='GET'){await json(res,200,buildInfo);return;}
       if(pathname.startsWith('/api/workspace-backup/')){
@@ -338,6 +346,10 @@ export async function createWorkbenchServer({dataDir=process.env.DEMO_DATA_DIR||
         try{await json(res,200,await client.prepareConversationCleaning({config:privateConfig,input:value.input,signal:controller.signal}));}
         finally{connectionTests.delete(controller);res.off('close',cancel);}return;
       }
+      if(pathname==='/api/ai/queue/pause'){
+        if(req.method!=='POST')throw new WorkspaceError('Method not allowed',405);requireMutation('application/json');await parseJson(1024);
+        await json(res,200,{...await ai.pauseQueue(),token,aiRuntime:ai.runtime()});return;
+      }
       if(pathname==='/api/ai/queue/resume'){
         if(req.method!=='POST')throw new WorkspaceError('Method not allowed',405);requireMutation('application/json');const input=await parseJson(1024);if(!input||Array.isArray(input)||Object.keys(input).length)throw new WorkspaceError('继续队列请求字段无效。');
         await json(res,200,{...await ai.resumeQueue(),token,aiRuntime:ai.runtime()});return;
@@ -359,10 +371,11 @@ export async function createWorkbenchServer({dataDir=process.env.DEMO_DATA_DIR||
       if(pathname==='/api/task-lifecycle'){
         if(req.method!=='POST')throw new WorkspaceError('Method not allowed',405);
         requireMutation('application/json');const input=await parseJson(20000);
-        if(!input||Array.isArray(input)||Object.keys(input).some(key=>!['taskIds','action','reason','actor','deliveryId','kind','administratorConfirmed'].includes(key))||!['archive','restore','void','deliverable'].includes(input.action)||!Array.isArray(input.taskIds)||!input.taskIds.length||input.taskIds.some(id=>typeof id!=='string'))throw new WorkspaceError('任务操作参数无效。');
+        if(!input||Array.isArray(input)||Object.keys(input).some(key=>!['taskIds','action','reason','actor','deliveryId','kind','administratorConfirmed','cancelAI'].includes(key))||!['archive','restore','void','deliverable'].includes(input.action)||!Array.isArray(input.taskIds)||!input.taskIds.length||input.taskIds.some(id=>typeof id!=='string'))throw new WorkspaceError('任务操作参数无效。');
         if(input.action!=='deliverable'&&input.taskIds.length!==1)throw new WorkspaceError('请逐个核对并操作任务。');
-        if(input.action==='void'){if(input.administratorConfirmed!==true||typeof input.actor!=='string'||!input.actor.trim())throw new WorkspaceError('请确认本机管理员操作并填写操作人。');if(busy())throw new WorkspaceError('请先结束正在运行的任务与交付任务，再作废。',409);}
-        const {taskIds,action,...options}=input;await json(res,200,{...await store.updateTaskLifecycle(taskIds,action,options),token,aiRuntime:ai.runtime()});return;
+        if(input.cancelAI!==undefined&&(input.action!=='void'||typeof input.cancelAI!=='boolean'))throw new WorkspaceError('取消运行选项仅用于作废任务。');
+        if(input.action==='void'){if(input.administratorConfirmed!==true||typeof input.actor!=='string'||!input.actor.trim())throw new WorkspaceError('请确认本机管理员操作并填写操作人。');if([reportJobs,translationJobs,rawStructureJobs].some(service=>service.isBusy()))throw new WorkspaceError('请先结束正在生成的交付或文件解析任务，再作废。',409);}
+        const {taskIds,action,...options}=input;await json(res,200,{...await(action==='void'?ai.voidTask(taskIds[0],options):store.updateTaskLifecycle(taskIds,action,options)),token,aiRuntime:ai.runtime()});return;
       }
       const aiTaskRoute=pathname.match(/^\/api\/tasks\/([^/]+)\/ai(?:\/(pause|resume|cancel|retry-dependencies))?$/);
       if(pathname.startsWith('/api/ai/tasks/')||aiTaskRoute){

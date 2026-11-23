@@ -1,4 +1,13 @@
 export const TASK0104_EN={
+ '暂停本任务':'Pause this task','暂停全部任务':'Pause all tasks',
+ '部分完成（{0}条待处理）':'Partly complete ({0} records pending)',
+ '同时取消本任务AI运行':'Also cancel this task’s AI run',
+ '先停止本任务派发，等待在途请求保存后再作废。其他任务继续；已完成AI结果、人工记录与原文保留。':'Stop dispatching this task, save in-flight results, then void it. Other tasks continue; completed AI results, human records and sources remain.',
+ '本任务已入队，但全局队列已暂停，不会自动启动。':'This task is queued, but the whole queue is paused and will not start automatically.',
+ '本任务已暂停，其他任务仍可继续。当前请求结束后保留结果，可继续AI质检或取消本次运行。':'This task is paused; other tasks may continue. In-flight results will be saved. Resume this task or cancel this run.',
+ '模型或参数已变化，请新建批次重检，原批次结果保留。':'The model or parameters have changed. Create a new batch for reinspection; original batch results are retained.',
+ '模型或参数已变化，请新建批次重检，原批次结果保留。恢复原配置并测试连接后，也可继续任务队列。':'The model or parameters have changed. Create a new batch for reinspection; original batch results are retained. You may also restore the original settings, test the connection, and resume the task queue.',
+ '请勾选“同时取消本任务AI运行”，或先结束本任务AI队列，再作废。':'Select “Also cancel this task’s AI run”, or finish this task’s AI queue before voiding.',
  '删除任务':'Delete task','操作原因（必填）':'Reason (required)','二次确认：输入上方完整任务编号':'Second confirmation: enter the complete task ID above',
  '我以本机管理员身份确认此操作':'I confirm this action as the local administrator',
  '本机管理员确认是操作留痕，不代表登录身份验证。原有审核与交付记录在作废后只读。':'Local administrator confirmation is an audit label, not an authenticated identity. Existing reviews and deliveries remain read-only after voiding.',

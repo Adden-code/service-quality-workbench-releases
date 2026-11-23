@@ -1,5 +1,5 @@
 export const AI_TASK_QUEUE_STATUSES=Object.freeze(['queued','running','paused','completed','partial','failed','cancelled']);
-export const AI_TASK_QUEUE_PAUSE_REASONS=Object.freeze(['user','interrupted','config_changed','connection_required','storage_error','capability_failure_rate','capability_unavailable']);
+export const AI_TASK_QUEUE_PAUSE_REASONS=Object.freeze(['user','user_task','interrupted','config_changed','connection_required','storage_error','capability_failure_rate','capability_unavailable']);
 const terminal=new Set(['completed','partial','failed','cancelled']);
 
 export const isTaskQueueTerminal=status=>terminal.has(status);

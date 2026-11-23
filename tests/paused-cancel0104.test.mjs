@@ -27,17 +27,17 @@ async function fixture(t){
 
 test('paused cancellation waits for in-flight work, preserves saved results and enables void',async t=>{
  const f=await fixture(t);await f.ai.start(f.taskId,'paused-cancel',{concurrency:1});await f.entered.promise;await f.ai.pause(f.taskId);
- let doc=await f.store.read(),task=doc.state.tasks[0];assert.equal(taskQueueInfo(doc.state,task).canCancel,false);
- assert.match(taskQueueControls(doc.state,task),/data-act="cancel-queued-ai"[^>]*disabled/);
- await assert.rejects(f.ai.cancel(f.taskId),/当前请求结束/);assert.equal(f.calls,2);
+ let doc=await f.store.read(),task=doc.state.tasks[0];assert.equal(taskQueueInfo(doc.state,task).canCancel,true);
+ assert.doesNotMatch(taskQueueControls(doc.state,task),/data-act="cancel-queued-ai"[^>]*disabled/);
+ assert.equal(f.calls,2);
  f.gate.resolve();await f.ai.waitForIdle();doc=await f.store.read();task=doc.state.tasks[0];
  const sessions=JSON.stringify(doc.state.sessions),rows=JSON.stringify(task.aiQueue.rows),snapshot=JSON.stringify(task.basisSnapshot);
- assert.equal(taskQueueInfo(doc.state,task).canCancel,true);assert.match(taskQueueControls(doc.state,task),/继续任务队列/);assert.match(taskQueueControls(doc.state,task),/取消本次运行/);
+ assert.equal(taskQueueInfo(doc.state,task).canCancel,true);assert.match(taskQueueControls(doc.state,task),/继续AI质检/);assert.match(taskQueueControls(doc.state,task),/取消本次运行/);
  assert.ok(taskVoidBlockers(doc.state,task).length);
  await f.ai.cancel(f.taskId);await f.ai.waitForIdle();doc=await f.store.read();task=doc.state.tasks[0];
  assert.equal(task.aiStatus,'cancelled');assert.equal(task.aiRun.status,'cancelled');assert.ok(task.aiRun.completedAt);
  assert.equal(JSON.stringify(doc.state.sessions),sessions);assert.equal(JSON.stringify(task.aiQueue.rows),rows);assert.equal(JSON.stringify(task.basisSnapshot),snapshot);assert.equal(f.calls,2);
- assert.equal(doc.state.aiTaskQueue.entries[0].status,'cancelled');assert.equal(doc.state.aiTaskQueue.status,'paused');assert.deepEqual(f.ai.runtime().queue,[]);
+ assert.equal(doc.state.aiTaskQueue.entries[0].status,'cancelled');assert.equal(doc.state.aiTaskQueue.status,'ready');assert.deepEqual(f.ai.runtime().queue,[]);
  assert.deepEqual(taskVoidBlockers(doc.state,task),[]);assert.ok(applyTaskLifecycle(doc.state,f.taskId,'void',{reason:'合成测试批次'}).tasks[0].lifecycle.voidedAt);
  const revision=doc.revision;await f.ai.cancel(f.taskId);assert.equal((await f.store.read()).revision,revision);
  await f.restart();await f.ai.waitForIdle();assert.equal(f.calls,2);assert.equal((await f.store.read()).state.tasks[0].aiStatus,'cancelled');

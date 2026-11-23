@@ -16,7 +16,7 @@ export function reviewSessionLabel(session,task){
 }
 export function reviewFilterControls(sessions,ui){
  const states=sessions.map(s=>getReviewPresentation(s));
- const filters=[['待确认','待确认','Awaiting confirmation',p=>p.needsReview],['AI初判待确认','AI初判待确认','AI initial · awaiting confirmation',p=>p.initialPending],['AI终判免审','AI终判免审','AI final · exempt',p=>p.aiFinal],['已确认','人工已确认','Human confirmed',p=>p.human],['已处理待补充','已处理待补充','Processed · undetermined',p=>p.processedUnknown],['全部','全部','All',()=>true]];
+ const filters=[['AI失败','AI失败','AI failed',p=>p.execution==='failed'],['待确认','待确认','Awaiting confirmation',p=>p.needsReview],['AI初判待确认','AI初判待确认','AI initial · awaiting confirmation',p=>p.initialPending],['AI终判免审','AI终判免审','AI final · exempt',p=>p.aiFinal],['已确认','人工已确认','Human confirmed',p=>p.human],['已处理待补充','已处理待补充','Processed · undetermined',p=>p.processedUnknown],['全部','全部','All',()=>true]];
  return filters.map(([id,zh,en,predicate])=>`<button class="text-btn ${ui.reviewStatus===id?'active':''}" aria-pressed="${ui.reviewStatus===id}" data-act="review-status" data-value="${id}">${e(L(zh,en))} <span class="filter-count">${states.filter(predicate).length}</span></button>`).join('');
 }
 export function reviewWaitingView(sessions,ui){

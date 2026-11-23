@@ -1,5 +1,6 @@
-import {assertTaskWritable,isInactiveTask} from '../public/task-lifecycle.mjs';
+import {assertTaskWritable,isInactiveTask,taskHasPendingAI} from '../public/task-lifecycle.mjs';
 import {isBusinessEcommerceBasis} from '../public/ecommerce-business-profile.mjs';
+import {isFixed24EcommerceBasis} from '../public/ecommerce-timing-policy.mjs';
 import {createHash} from 'node:crypto';
 import {setTimeout as delay} from 'node:timers/promises';
 import {WorkspaceError,canonical} from './workspace-validation.mjs';
@@ -39,7 +40,7 @@ function resumeConfig(current,run){
  // A pre-snapshot run was created under the fixed Ark contract. Never borrow a
  // newly configured gateway's key or options when recovering such a run.
  const frozen=run.modelConfig??modelConfigSnapshot({model:run.modelId}),selected=modelConfigSnapshot(current);
- if(modelConfigFingerprint(selected)!==modelConfigFingerprint(frozen))throw new WorkspaceError('当前模型设置与本次运行冻结配置不同。请恢复本次运行的模型设置并成功测试连接后继续，或使用当前设置开启新运行。',409);
+ if(modelConfigFingerprint(selected)!==modelConfigFingerprint(frozen))throw new WorkspaceError('模型或参数已变化，请新建批次重检，原批次结果保留。',409);
  return requestConfig(current,frozen);
 }
 export function queueSettings(value={}){
@@ -97,11 +98,13 @@ export async function createAiService(options={}){
  const {store,modelConfig,client,traceStore,maxAttempts=2,comparisonMaxAttempts=options.maxAttempts??3,retryDelayMs=500,onError=()=>{}}=options;
  if(!Number.isSafeInteger(maxAttempts)||maxAttempts<1||maxAttempts>3)throw new TypeError('Invalid maximum attempts.');
  if(!Number.isSafeInteger(comparisonMaxAttempts)||comparisonMaxAttempts<1||comparisonMaxAttempts>3)throw new TypeError('Invalid comparison maximum attempts.');
- let closing=false,startQueue=Promise.resolve(),writeError='',cachedState=null,pendingOperations=0;const active=new Map();
+ let closing=false,startQueue=Promise.resolve(),writeError='',cachedState=null,pendingOperations=0;const active=new Map(),cancellations=new Map(),voidOperations=new Map();
  const serialized=operation=>{pendingOperations++;const next=startQueue.then(operation).finally(()=>{pendingOperations--;});startQueue=next.catch(()=>{});return next;};
  const read=async()=>{const doc=await store.read();cachedState=doc.state;return doc;};
  const eligibleEntry=e=>!isInactiveTask(cachedState?.tasks.find(t=>t.id===e.taskId));
  const pendingTaskEntries=q=>allPendingTaskEntries(q).filter(eligibleEntry);
+ const isTaskPause=entry=>entry.status==='paused'&&(['user_task','capability_failure_rate'].includes(entry.blockedReason)||entry.blockedReason==='capability_unavailable'&&!['authentication','permission'].includes(cachedState?.tasks.find(task=>task.id===entry.taskId)?.aiQueue?.stopReason));
+ const dispatchableEntries=q=>pendingTaskEntries(q).filter(entry=>entry.status==='queued'&&!cancellations.has(entry.taskId)&&!voidOperations.has(entry.taskId));
  const taskQueueRuntime=q=>allTaskQueueRuntime(q?{...q,entries:q.entries.filter(eligibleEntry)}:q);
  const writable=(state,task)=>{try{assertTaskWritable(state,task);}catch(error){throw new WorkspaceError(error.message,409);}};
  async function updateState(change){const saved=await store.updateAI(({state,catalog})=>{change(state);syncTaskEntries(state);return{state,catalog};});cachedState=saved.state;return saved;}
@@ -136,7 +139,7 @@ export async function createAiService(options={}){
      // supersession instead records both inputs in its append-only audit below.
      const oldFrozen=priorCapabilities?.judgmentClassificationSnapshot;
      const classificationChanged=canonical(priorCapabilities?.outputs?.ecommerceClassification??null)!==canonical(repaired.outputs?.ecommerceClassification??null);
-     const frozen=oldFrozen||(classificationChanged&&s.ecommerce&&s.aiResults.some(v=>v.ruleId==='EC-TIME'&&v.timeFacts)?{runId:s.aiExecution.runId,output:copy(priorCapabilities?.outputs?.ecommerceClassification??null)}:null);
+     const frozen=oldFrozen||(!isFixed24EcommerceBasis(t.basisSnapshot)&&classificationChanged&&s.ecommerce&&s.aiResults.some(v=>v.ruleId==='EC-TIME'&&v.timeFacts)?{runId:s.aiExecution.runId,output:copy(priorCapabilities?.outputs?.ecommerceClassification??null)}:null);
      s.sceneCapabilities={...copy(repaired),...(priorCapabilities?.dependencyRecoveryHistory?{dependencyRecoveryHistory:copy(priorCapabilities.dependencyRecoveryHistory)}:{}),...(frozen?{judgmentClassificationSnapshot:frozen}:{})};
      const changes=candidateResults.filter(result=>canonical(result)!==canonical(s.aiResults.find(old=>old.ruleId===result.ruleId)));
      if(changes.length&&s.aiExecution?.status==='completed'){
@@ -167,7 +170,7 @@ export async function createAiService(options={}){
    else{const cases=state.sessions.filter(s=>s.taskId===task.id);task.aiStatus=cases.some(s=>s.aiExecution?.status==='completed')?'partial':'failed';task.aiRun={...task.aiRun,status:task.aiStatus,completedAt:now()};}
    for(const s of state.sessions.filter(s=>s.taskId===task.id&&s.aiExecution?.status==='running'))s.aiExecution={...s.aiExecution,status:'failed',completedAt:now(),...safeFailure(null,true)};
   }
-  for(const entry of pendingTaskEntries(scheduler))entry.blockedReason='interrupted';
+  for(const entry of pendingTaskEntries(scheduler))if(!isTaskPause(entry))entry.blockedReason='interrupted';
  });
  function resetForResume(task,state){writable(state,task);
   if(task.executionSnapshot?.configuration.executionMode==='configured'){
@@ -187,7 +190,7 @@ export async function createAiService(options={}){
   if(closing||writeError||active.size)return;
   try{
   const doc=await read(),scheduler=doc.state?.aiTaskQueue;if(!scheduler||scheduler.status!=='ready')return;
-  const head=pendingTaskEntries(scheduler)[0];if(!head)return;
+  const head=dispatchableEntries(scheduler)[0];if(!head)return;
   const task=doc.state.tasks.find(task=>task.id===head.taskId);
   const blockedReason=configurationFailure(task);
   if(blockedReason){await updateState(state=>{const queue=state.aiTaskQueue;queue.status='paused';queue.pauseReason=blockedReason;taskQueueEntry(queue,head.taskId,head.runId).blockedReason=blockedReason;});return;}
@@ -295,7 +298,7 @@ export async function createAiService(options={}){
     await step('merge',{comparisonFingerprint:q.comparison.fingerprint,groupCount:q.comparison.groups.length},async()=>{await update(taskId,(state,t)=>publishEcommerceCheckpoints(state,t));return{persisted:q.rows.filter(r=>r.semanticResult).length,comparisonStatus:q.comparison.status};});
    }
     // Apply any run-wide post-processing before this single terminal checkpoint.
-    await update(taskId,(state,t)=>{const q=t.aiQueue,unfinished=q.rows.some(r=>!['completed','protected'].includes(r.status))||(q.comparison&&q.comparison.status!=='completed');if(job.paused||closing){q.status='paused';t.aiStatus='paused';t.aiRun.completedAt=null;if(closing)q.stopReason='interrupted';if(!closing&&t.executionSnapshot?.configuration.executionMode==='configured'&&(q.stopReason==='capability_failure_rate'||job.stopped)){const reason=q.stopReason==='capability_failure_rate'?'capability_failure_rate':'capability_unavailable';state.aiTaskQueue.status='paused';state.aiTaskQueue.pauseReason=reason;const entry=taskQueueEntry(state.aiTaskQueue,taskId,job.id);if(entry)entry.blockedReason=reason;}}else{const success=state.sessions.some(s=>s.taskId===taskId&&s.aiExecution?.status==='completed');q.status=unfinished?(success?'partial':'failed'):'completed';t.aiStatus=q.status;t.aiRun.completedAt=now();if(!unfinished)q.phase='completed';applyAIDecisions(state,t,t.aiRun.completedAt);}t.aiRun.status=t.aiStatus;refresh(t,state);});
+    await update(taskId,(state,t)=>{const q=t.aiQueue,unfinished=q.rows.some(r=>!['completed','protected'].includes(r.status))||(q.comparison&&q.comparison.status!=='completed');if(job.paused||closing){q.status='paused';t.aiStatus='paused';t.aiRun.completedAt=null;if(closing)q.stopReason='interrupted';if(!closing&&t.executionSnapshot?.configuration.executionMode==='configured'&&(q.stopReason==='capability_failure_rate'||job.stopped)){const reason=q.stopReason==='capability_failure_rate'?'capability_failure_rate':'capability_unavailable';if(['authentication','permission'].includes(q.stopReason)){state.aiTaskQueue.status='paused';state.aiTaskQueue.pauseReason=reason;}const entry=taskQueueEntry(state.aiTaskQueue,taskId,job.id);if(entry)entry.blockedReason=reason;}}else{const success=state.sessions.some(s=>s.taskId===taskId&&s.aiExecution?.status==='completed');q.status=unfinished?(success?'partial':'failed'):'completed';t.aiStatus=q.status;t.aiRun.completedAt=now();if(!unfinished)q.phase='completed';applyAIDecisions(state,t,t.aiRun.completedAt);}t.aiRun.status=t.aiStatus;refresh(t,state);});
    if(traceStarted){const final=(await store.read()).state.tasks.find(t=>t.id===taskId),r=final.aiRun;for(const traceId of traceParts)await traceStore.finish(traceId,{status:final.aiStatus==='paused'?'interrupted':ecommerce&&final.aiStatus==='partial'?'partial':r.failed?(r.done?'partial':'failed'):r.done===r.total?'completed':r.done?'partial':'failed',summary:{done:r.done,failed:r.failed,total:r.total,queueStatus:final.aiQueue.status,phase:final.aiQueue.phase}});}
    }catch(error){onError(error);writeError='AI任务或运行记录未能完整保存，请检查本机存储后重新启动工具；原有记录保留。';job.stopped=true;try{await update(taskId,(state,t)=>{t.aiQueue.status='paused';t.aiQueue.stopReason='storage_error';t.aiStatus='paused';t.aiRun.status='paused';t.aiRun.completedAt=null;const queue=state.aiTaskQueue;if(queue){queue.status='paused';queue.pauseReason='storage_error';const entry=taskQueueEntry(queue,taskId,job.id);if(entry)entry.blockedReason='storage_error';}for(const r of t.aiQueue.rows)if(r.status==='running')r.status='pending';for(const s of state.sessions.filter(s=>s.taskId===taskId&&s.aiExecution?.status==='running'))s.aiExecution={...s.aiExecution,status:'failed',completedAt:now(),...safeFailure(null,true)};refresh(t,state);});}catch{}if(traceStarted)for(const traceId of traceParts)await traceStore.finish(traceId,{status:'interrupted',summary:{traceIncomplete:true},error:{code:'trace_storage'}}).catch(()=>{});
    }finally{active.delete(taskId);await serialized(dispatchNext);}
@@ -304,9 +307,9 @@ export async function createAiService(options={}){
   function ensureOpen(){if(closing)throw new WorkspaceError('服务正在关闭，无法启动AI质检。',503);if(writeError)throw new WorkspaceError(writeError,503);}
   async function resumeQueueNow(){
    ensureOpen();if(active.size)throw new WorkspaceError('正在等待在途请求结束，请稍后继续。',409);
-   const doc=await read(),head=pendingTaskEntries(doc.state?.aiTaskQueue)[0];
+   const doc=await read(),head=pendingTaskEntries(doc.state?.aiTaskQueue).find(entry=>!isTaskPause(entry)&&!cancellations.has(entry.taskId)&&!voidOperations.has(entry.taskId));
    if(head){const task=doc.state.tasks.find(task=>task.id===head.taskId);writable(doc.state,task);resumeConfig(modelConfig.getPrivate(),task.aiRun);}
-   await updateState(state=>{const queue=state.aiTaskQueue??=createTaskQueue();queue.status='ready';queue.pauseReason=null;for(const entry of pendingTaskEntries(queue)){entry.blockedReason=null;if(entry.status==='paused'){const task=state.tasks.find(task=>task.id===entry.taskId);resetForResume(task,state);}}});
+   await updateState(state=>{const queue=state.aiTaskQueue??=createTaskQueue();queue.status='ready';queue.pauseReason=null;for(const entry of pendingTaskEntries(queue)){if(isTaskPause(entry)||cancellations.has(entry.taskId)||voidOperations.has(entry.taskId))continue;entry.blockedReason=null;if(entry.status==='paused'){const task=state.tasks.find(task=>task.id===entry.taskId);resetForResume(task,state);}}});
    await dispatchNext();return read();
   }
   const api={
@@ -328,6 +331,7 @@ export async function createAiService(options={}){
    });},
    start(taskId,runId,settings){return serialized(async()=>{
     ensureOpen();if(typeof runId!=='string'||!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,100}$/.test(runId))throw new WorkspaceError('AI运行标识无效。');
+    if(cancellations.has(taskId)||voidOperations.has(taskId))throw new WorkspaceError('本任务正在取消或作废，请等待当前操作完成。',409);
     const doc=await read();if(!doc.initialized)throw new WorkspaceError('请先初始化工作区。');const task=doc.state.tasks.find(t=>t.id===taskId);if(!task||task.mode!=='manual')throw new WorkspaceError('请选择文件工作区中的任务。');
     writable(doc.state,task);
       if([task.aiRun,...(task.aiRunHistory||[])].some(r=>r?.id===runId))return{...doc,replayed:true};
@@ -335,7 +339,7 @@ export async function createAiService(options={}){
     const config=requestConfig(modelConfig.getPrivate()),snapshot=modelConfigSnapshot(config),fingerprint=modelConfigFingerprint(snapshot),sessions=doc.state.sessions.filter(s=>s.taskId===taskId),targets=sessions.filter(eligible);
     if(!targets.length)throw new WorkspaceError('没有可运行的会话：已完成AI或已开始人工审核的会话不会重跑。');
     const selected=taskQueueSettings(task,settings),startedAt=now();
-    if(sessions.some(s=>s.aiExecution?.status==='completed'&&comparisonPending(s))){const proposed=createQueue(sessions,task.basisSnapshot,selected,task.aiQueue,runId,true,fingerprint,isStageATimeBasis(task.basisSnapshot)||isBusinessEcommerceBasis(task.basisSnapshot)?startedAt:undefined,task.rawImportOptions,task.executionSnapshot);if(proposed.fingerprint!==task.aiQueue.fingerprint)throw new WorkspaceError('已有已保存的逐行判定，请继续原运行以重跑未完成相似块；更换模型、执行参数或检核截止点请新建重检任务。',409);}
+    if(sessions.some(s=>s.aiExecution?.status==='completed'&&comparisonPending(s))){const proposed=createQueue(sessions,task.basisSnapshot,selected,task.aiQueue,runId,true,fingerprint,isStageATimeBasis(task.basisSnapshot)||isBusinessEcommerceBasis(task.basisSnapshot)?startedAt:undefined,task.rawImportOptions,task.executionSnapshot);if(proposed.fingerprint!==task.aiQueue.fingerprint)throw new WorkspaceError('模型或参数已变化，请新建批次重检，原批次结果保留。',409);}
     await update(taskId,(state,t)=>{const all=state.sessions.filter(s=>s.taskId===taskId),scheduler=state.aiTaskQueue??=createTaskQueue();if(!pendingTaskEntries(scheduler).length&&scheduler.status==='ready')scheduler.entries=[];
      const raw=t.inputMode===RAW_INPUT_MODE;if(t.aiRun)t.aiRunHistory=[...(t.aiRunHistory||[]),copy(t.aiRun)];t.aiQueue=createQueue(all,t.basisSnapshot,selected,t.aiQueue,runId,all.some(s=>s.ecommerce),fingerprint,raw||isStageATimeBasis(t.basisSnapshot)||isBusinessEcommerceBasis(t.basisSnapshot)?startedAt:undefined,t.rawImportOptions,t.executionSnapshot);t.aiQueue.status='queued';t.aiStatus='queued';
      t.aiRun={id:runId,modelId:config.model,modelConfig:snapshot,modelConfigFingerprint:fingerprint,status:'queued',total:targets.length,done:0,failed:0,startedAt,...(raw||isStageATimeBasis(t.basisSnapshot)||isBusinessEcommerceBasis(t.basisSnapshot)?{inspectionAt:startedAt}:{}),completedAt:null};refresh(t,state);appendTaskEntry(scheduler,t,startedAt);
@@ -343,38 +347,72 @@ export async function createAiService(options={}){
    });},
    pause(taskId){return serialized(async()=>{
     ensureOpen();const doc=await read(),selected=doc.state.tasks.find(task=>task.id===taskId);if(!selected?.aiQueue)throw new WorkspaceError('任务没有可暂停的AI队列。',409);if(['completed','cancelled'].includes(selected.aiQueue.status))return doc;
+    writable(doc.state,selected);if(selected.aiQueue.status==='paused'&&selected.aiQueue.stopReason==='user_task')return doc;
+    const job=active.get(taskId);if(job)job.paused=true;
+    await update(taskId,(state,task)=>{const scheduler=state.aiTaskQueue??=createTaskQueue();task.aiQueue.status='paused';task.aiQueue.stopReason='user_task';task.aiStatus='paused';task.aiRun.status='paused';task.aiRun.completedAt=null;refresh(task,state);const entry=taskQueueEntry(scheduler,task.id,task.aiRun.id)||appendTaskEntry(scheduler,task,now());entry.blockedReason='user_task';});
+    await dispatchNext();return read();
+   });},
+   pauseQueue(){return serialized(async()=>{
+    ensureOpen();const doc=await read();if(doc.state.aiTaskQueue?.status==='paused')return doc;
     for(const job of active.values())job.paused=true;
-    return updateState(state=>{const scheduler=state.aiTaskQueue??=createTaskQueue();scheduler.status='paused';scheduler.pauseReason='user';
-     for(const task of state.tasks.filter(task=>active.has(task.id))){task.aiQueue.status='paused';task.aiStatus='paused';task.aiRun.status='paused';task.aiRun.completedAt=null;refresh(task,state);const entry=taskQueueEntry(scheduler,task.id,task.aiRun.id);if(entry)entry.blockedReason='user';}
-     if(!pendingTaskEntries(scheduler).length){const task=state.tasks.find(task=>task.id===taskId);task.aiQueue.status='paused';task.aiStatus='paused';task.aiRun.status='paused';task.aiRun.completedAt=null;refresh(task,state);appendTaskEntry(scheduler,task,now()).blockedReason='user';}
-    });
+    return updateState(state=>{const scheduler=state.aiTaskQueue??=createTaskQueue();scheduler.status='paused';scheduler.pauseReason='user';for(const task of state.tasks.filter(task=>active.has(task.id))){if(task.aiQueue.stopReason==='user_task')continue;task.aiQueue.status='paused';task.aiQueue.stopReason='user';task.aiStatus='paused';task.aiRun.status='paused';task.aiRun.completedAt=null;refresh(task,state);const entry=taskQueueEntry(scheduler,task.id,task.aiRun.id);if(entry)entry.blockedReason='user';}});
    });},
    resume(taskId){return serialized(async()=>{
-    ensureOpen();const doc=await read(),task=doc.state.tasks.find(task=>task.id===taskId);if(!task?.aiQueue||['completed','cancelled'].includes(task.aiQueue.status))throw new WorkspaceError('没有可继续的AI队列。',409);
+    ensureOpen();if(cancellations.has(taskId)||voidOperations.has(taskId))throw new WorkspaceError('本任务正在取消或作废，请等待当前操作完成。',409);
+    const doc=await read(),task=doc.state.tasks.find(task=>task.id===taskId);if(!task?.aiQueue||['completed','cancelled'].includes(task.aiQueue.status))throw new WorkspaceError('没有可继续的AI队列。',409);
     if(active.has(taskId)||active.size&&doc.state.aiTaskQueue?.status==='paused')throw new WorkspaceError('正在等待在途请求结束，请稍后继续。',409);
     writable(doc.state,task);resumeConfig(modelConfig.getPrivate(),task.aiRun);
-    const existingHead=pendingTaskEntries(doc.state.aiTaskQueue)[0];if(!active.size&&existingHead)resumeConfig(modelConfig.getPrivate(),doc.state.tasks.find(t=>t.id===existingHead.taskId).aiRun);
-    if(!pendingTaskEntries(doc.state.aiTaskQueue).some(entry=>entry.taskId===taskId))await update(taskId,(state,t)=>{const scheduler=state.aiTaskQueue??=createTaskQueue();if(!pendingTaskEntries(scheduler).length&&scheduler.status==='ready')scheduler.entries=[];resetForResume(t,state);appendTaskEntry(scheduler,t,now());});
-    if(active.size){await dispatchNext();return read();}
-    return resumeQueueNow();
+    const globallyPaused=doc.state.aiTaskQueue?.status==='paused';
+    if(globallyPaused&&doc.state.aiTaskQueue.pauseReason!=='user'){const head=pendingTaskEntries(doc.state.aiTaskQueue).find(entry=>entry.taskId===taskId||!isTaskPause(entry));if(head&&head.taskId!==taskId)resumeConfig(modelConfig.getPrivate(),doc.state.tasks.find(task=>task.id===head.taskId).aiRun);}
+    await update(taskId,(state,t)=>{const scheduler=state.aiTaskQueue??=createTaskQueue();resetForResume(t,state);const entry=taskQueueEntry(scheduler,taskId,t.aiRun.id)||appendTaskEntry(scheduler,t,now());entry.blockedReason=null;});
+    // A task resume does not release a separate, deliberate pause-all hold.
+    if(globallyPaused&&doc.state.aiTaskQueue.pauseReason!=='user')return resumeQueueNow();
+    await dispatchNext();return read();
    });},
    resumeQueue(){return serialized(resumeQueueNow);},
-   cancel(taskId){return serialized(async()=>{
-    ensureOpen();const doc=await read(),task=doc.state.tasks.find(task=>task.id===taskId),entry=task&&taskQueueEntry(doc.state.aiTaskQueue,taskId,task.aiRun?.id);
-    if(entry?.status==='cancelled'||task?.aiQueue?.status==='cancelled')return doc;
-    if(active.has(taskId)||doc.state.sessions.some(session=>session.taskId===taskId&&session.aiExecution?.status==='running'))throw new WorkspaceError('等待当前请求结束后可取消本次运行。',409);
-    if(!task?.aiQueue||!task.aiRun||!['queued','paused','interrupted'].includes(entry?.status||task.aiQueue.status))throw new WorkspaceError('只能取消排队、已暂停或已中断的AI任务。',409);
-    await update(taskId,(state,t)=>{t.aiQueue.status='cancelled';t.aiStatus='cancelled';t.aiRun.status='cancelled';t.aiRun.completedAt=now();refresh(t,state);
-     // Older paused runs may predate the task scheduler. Retain a terminal entry
-     // so cancellation is traceable without changing their rows or saved results.
-     const scheduler=state.aiTaskQueue??=createTaskQueue();if(!taskQueueEntry(scheduler,taskId,t.aiRun.id))appendTaskEntry(scheduler,t,t.aiRun.startedAt);
-    });await dispatchNext();return read();
-   });},
-   isBusy(){return pendingOperations>0||active.size>0||cachedState?.aiTaskQueue?.status==='ready'&&pendingTaskEntries(cachedState.aiTaskQueue).length>0;},
-   async waitForIdle(){for(;;){await startQueue;await Promise.all([...active.values()].map(job=>job.promise));await startQueue;if(active.size)continue;const queue=cachedState?.aiTaskQueue;if(closing||writeError||queue?.status!=='ready'||!pendingTaskEntries(queue).length)return;await serialized(dispatchNext);}},
+   cancel(taskId){
+    if(cancellations.has(taskId))return cancellations.get(taskId);
+    const operation=(async()=>{
+     const job=await serialized(async()=>{
+      ensureOpen();const doc=await read(),task=doc.state.tasks.find(task=>task.id===taskId),entry=task&&taskQueueEntry(doc.state.aiTaskQueue,taskId,task.aiRun?.id);
+      if(entry?.status==='cancelled'||task?.aiQueue?.status==='cancelled')return null;
+      if(!task?.aiQueue||!task.aiRun||!['queued','running','paused','interrupted'].includes(entry?.status||task.aiQueue.status))throw new WorkspaceError('只能取消排队、运行、已暂停或已中断的AI任务。',409);
+      writable(doc.state,task);const current=active.get(taskId);
+      if(current){current.paused=true;await update(taskId,(state,t)=>{t.aiQueue.status='paused';t.aiQueue.stopReason='user_task';t.aiStatus='paused';t.aiRun.status='paused';t.aiRun.completedAt=null;refresh(t,state);const entry=taskQueueEntry(state.aiTaskQueue,taskId,t.aiRun.id);if(entry)entry.blockedReason='user_task';});}
+      return current;
+     });
+     // Never await an executing job inside the scheduler mutex: its final
+     // checkpoint and dispatch also take that mutex. Drain only this task.
+     if(job)await job.promise;
+     return serialized(async()=>{
+      ensureOpen();const doc=await read(),task=doc.state.tasks.find(task=>task.id===taskId);if(task?.aiQueue?.status==='cancelled')return doc;
+      if(doc.state.sessions.some(s=>s.taskId===taskId&&s.aiExecution?.status==='running'))throw new WorkspaceError('本任务仍有在途请求，取消结果尚未确认。',409);
+      await update(taskId,(state,t)=>{t.aiQueue.status='cancelled';t.aiStatus='cancelled';t.aiRun.status='cancelled';t.aiRun.completedAt=now();delete t.aiQueue.stopReason;refresh(t,state);const scheduler=state.aiTaskQueue??=createTaskQueue();if(!taskQueueEntry(scheduler,taskId,t.aiRun.id))appendTaskEntry(scheduler,t,t.aiRun.startedAt);});
+      await dispatchNext();return read();
+     });
+    })();
+    cancellations.set(taskId,operation);operation.finally(()=>cancellations.delete(taskId)).catch(()=>{});return operation;
+   },
+   voidTask(taskId,options={}){
+    const key=canonical(options);if(voidOperations.has(taskId)){const prior=voidOperations.get(taskId);return prior.key===key?prior.promise:Promise.reject(new WorkspaceError('本任务正在按另一份确认信息作废，请等待操作完成后核对审计。',409));}
+    const operation=(async()=>{
+     const selected=await serialized(async()=>{
+      ensureOpen();if(options.administratorConfirmed!==true||typeof options.actor!=='string'||!options.actor.trim()||options.actor.trim().length>80)throw new WorkspaceError('请确认本机管理员操作并填写操作人（最多80字）。',409);
+      if(typeof options.reason!=='string'||!options.reason.trim()||options.reason.trim().length>2000)throw new WorkspaceError('请填写作废原因（最多2000字）。',409);
+      const doc=await read(),task=doc.state.tasks.find(task=>task.id===taskId);if(!task)throw new WorkspaceError('任务不存在。',404);
+      return {task,pending:taskHasPendingAI(doc.state,task)};
+     });
+     if(selected.pending&&options.cancelAI!==true)throw new WorkspaceError('请勾选“同时取消本任务AI运行”，或先结束本任务AI队列，再作废。',409);
+     if(selected.pending)await api.cancel(taskId);
+     return serialized(async()=>{const {cancelAI,...audit}=options;audit.actor=audit.actor.trim();audit.reason=audit.reason.trim();const saved=await store.updateTaskLifecycle([taskId],'void',{...audit,...(selected.pending?{cancelledRunId:selected.task.aiRun.id}:{})});cachedState=saved.state;return saved;});
+    })();
+    voidOperations.set(taskId,{promise:operation,key});operation.finally(()=>voidOperations.delete(taskId)).catch(()=>{});return operation;
+   },
+   isBusy(){return pendingOperations>0||active.size>0||cancellations.size>0||voidOperations.size>0||cachedState?.aiTaskQueue?.status==='ready'&&dispatchableEntries(cachedState.aiTaskQueue).length>0;},
+   async waitForIdle(){for(;;){await startQueue;await Promise.all([...active.values()].map(job=>job.promise));await startQueue;if(active.size)continue;const queue=cachedState?.aiTaskQueue;if(closing||writeError||queue?.status!=='ready'||!dispatchableEntries(queue).length)return;await serialized(dispatchNext);}},
    runtime(){const queue=taskQueueRuntime(cachedState?.aiTaskQueue);return{activeTasks:[...active.keys()],error:writeError,...queue,...(writeError?{queueStatus:'paused',queuePauseReason:'storage_error'}:{})};},
    async close(){if(closing){await startQueue;await Promise.all([...active.values()].map(job=>job.promise));return;}closing=true;await startQueue;
-    if(cachedState&&pendingTaskEntries(cachedState.aiTaskQueue).length)try{await updateState(state=>{state.aiTaskQueue.status='paused';state.aiTaskQueue.pauseReason='interrupted';for(const entry of pendingTaskEntries(state.aiTaskQueue))entry.blockedReason='interrupted';});}catch(error){onError(error);}
+    if(cachedState&&pendingTaskEntries(cachedState.aiTaskQueue).length)try{await updateState(state=>{state.aiTaskQueue.status='paused';state.aiTaskQueue.pauseReason='interrupted';for(const entry of pendingTaskEntries(state.aiTaskQueue))if(!isTaskPause(entry))entry.blockedReason='interrupted';});}catch(error){onError(error);}
     for(const job of active.values()){job.paused=true;job.controller.abort();}await Promise.all([...active.values()].map(job=>job.promise));
    },
   };return api;

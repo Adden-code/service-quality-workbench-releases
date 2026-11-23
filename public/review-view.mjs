@@ -29,7 +29,7 @@ export const resolvePolicy=id=>policies.find(p=>p.id===id||p.sections?.some(s=>s
 export function availableSessions(state){return state.sessions.filter(s=>{const t=state.tasks.find(t=>t.id===s.taskId);return !t||!isInactiveTask(t)&&(!['待质检','质检中'].includes(t.status)||t.mode==='manual'&&getReviewPresentation(s).ready);});}
 export function reviewQueue(state,ui){
   const history=ui.reviewTaskId&&isInactiveTask(state.tasks.find(t=>t.id===ui.reviewTaskId)),available=history?state.sessions.filter(s=>s.taskId===ui.reviewTaskId):availableSessions(state),query=(ui.reviewQuery||'').toLowerCase();
-  return available.filter(s=>(!ui.reviewTaskId||s.taskId===ui.reviewTaskId)&&(!ui.reviewSceneFilter||s.scene===ui.reviewSceneFilter)&&(history||ui.reviewStatus==='全部'||(ui.reviewStatus==='待确认'?requiresHumanReview(s):ui.reviewStatus==='AI初判待确认'?getReviewPresentation(s).initialPending:['AI终判免审','AI已判定'].includes(ui.reviewStatus)?isAIFinal(s):ui.reviewStatus==='已处理待补充'?isProcessedUnknown(s):s.review.status==='已确认'))&&`${s.externalId}${s.topic}${s.product}`.toLowerCase().includes(query));
+  return available.filter(s=>(!ui.reviewTaskId||s.taskId===ui.reviewTaskId)&&(!ui.reviewSceneFilter||s.scene===ui.reviewSceneFilter)&&(history||ui.reviewStatus==='全部'||(ui.reviewStatus==='待确认'?requiresHumanReview(s):ui.reviewStatus==='AI失败'?s.aiExecution?.status==='failed':ui.reviewStatus==='AI初判待确认'?getReviewPresentation(s).initialPending:['AI终判免审','AI已判定'].includes(ui.reviewStatus)?isAIFinal(s):ui.reviewStatus==='已处理待补充'?isProcessedUnknown(s):s.review.status==='已确认'))&&`${s.externalId}${s.topic}${s.product}`.toLowerCase().includes(query));
 }
 
 export function reviewHeader(state,ui){

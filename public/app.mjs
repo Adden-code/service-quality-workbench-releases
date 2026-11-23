@@ -44,6 +44,7 @@ import {normalizeExecutionSettings} from './execution-settings.mjs';
 import {eligibleSceneRules,assertTaskCatalogScene} from './catalog-scenes.mjs';
 import {submitModelSettings} from './model-settings.mjs';
 import {workspaceUsageDialog} from './workspace-usage-ui.mjs';
+import {createDiagnosticManager} from './diagnostics-ui.mjs';
 import {createWorkspaceBackupManager,workspaceBackupText} from './workspace-backup-ui.mjs';
 import {triageDiagnosticsDialog} from './triage-diagnostics.mjs';
 import {printableReport} from './report-print.mjs';
@@ -90,6 +91,7 @@ catch(error){storageWarning=`工作区未加载：${error.message} 当前工作�
 try{const response=await fetch('/api/build-info',{cache:'no-store'});if(response.ok)ui.buildInfo=await response.json();}catch{}
 const reviewRoutingController=createReviewRoutingController({getState:()=>scoped(),getUI:()=>ui,getDialog:()=>dialog,getRoot:()=>document.getElementById('overlay-root'),openDialog,closeDialog,commit,render,renderDialog,navigate:()=>go('review'),selectSession,now:reviewNow});
 const qualityInsightsManager=createQualityInsightsManager({getState:()=>state,getDialog:()=>dialog,openDialog,renderDialog,download,beforeAuditDownload:async({taskIds})=>{const ids=taskIds.filter(id=>!isVoidedTask(state.tasks.find(task=>task.id===id)));await registerAuditDelivery(ids,'review-audit');}});
+const diagnosticManager=createDiagnosticManager({getToken:()=>workspace.token,getDialog:()=>dialog,openDialog,renderDialog,download});
 const workspaceBackupManager=createWorkspaceBackupManager({getToken:()=>workspace.token,getDialog:()=>dialog,openDialog,renderDialog,download,reload:()=>location.reload(),getStatus:()=>({saving,hasPending:workspace.hasPending,conflicted:workspace.conflicted,readOnly:persistenceBlocked,revision:workspace.revision,editing:Boolean(dialog&&!['workspace-backup','workspace-usage','shortcuts-help','help'].includes(dialog.type)),suspendedDraft:Boolean(suspendedTaskDraft),composing:Boolean(composingInput),timerPending:rawReviewTimer.pendingCount>0}),onReloadRequired:()=>{clearTimeout(pollTimer);persistenceBlocked=true;contentTranslations.stop();workflowManager.stop();rawWorkbenchManager.stop();businessExportManager.setActive(false);}});
 const pendingResolutionManager=createPendingResolutionManager({getState:()=>scoped(),getUI:()=>ui,getDialog:()=>dialog,openDialog,closeDialog,renderDialog,render,commit,selectSession,now:reviewNow});
 const cleaningManager=createConversationCleaningManager({configureModel:origin=>openModelSettings({returnDialog:origin}),getState:()=>state,getDialog:()=>dialog,getModelConfig:()=>ui.modelConfig,openDialog,closeDialog:()=>closeDialog({force:true}),renderDialog,toast,
@@ -276,6 +278,16 @@ function redrawLocalized(){
   render();renderDialog();
   for(const saved of inputs){const target=saved.id?document.getElementById(saved.id):[...document.querySelectorAll('#overlay-root input')].find(el=>el.name===saved.name&&el.value===saved.value);if(!target)continue;target.value=saved.value;if(['checkbox','radio'].includes(saved.type))target.checked=saved.checked;if(typeof saved.selectionStart==='number')try{target.setSelectionRange(saved.selectionStart,saved.selectionEnd);}catch{}}
 }
+function refreshImportDraftNotice(){
+ const root=document.getElementById('overlay-root'),existing=root.querySelector('[data-import-draft-notice]');existing?.remove();
+ if(!['task-scene','new-task','ecommerce-import'].includes(dialog?.type)||!ui.importDraftCount)return;
+ const message=getLocale()==='en'?`${ui.importDraftCount} unfinished drafts. Continue in Inspection tasks → Import drafts.`:`有 ${ui.importDraftCount} 份未完成草稿，可在质检任务→导入草稿中继续`;
+ root.querySelector('.modal-body')?.insertAdjacentHTML('afterbegin',`<div class="soft-note" data-import-draft-notice role="status">${e(message)}</div>`);
+}
+function loadImportDraftNotice(owner){
+ if(!['task-scene','new-task','ecommerce-import'].includes(owner?.type))return;
+ workspace.importDraftRequest('/api/import-drafts').then(value=>{ui.importDraftCount=(value.drafts||[]).filter(d=>d.status==='draft').length;if(dialog===owner)refreshImportDraftNotice();}).catch(()=>{});
+}
 function renderDialog(force=true){
   const root=document.getElementById('overlay-root');
   importDraftManager.schedule();
@@ -291,7 +303,8 @@ function renderDialog(force=true){
   const workflowScroll=dialog.type==='workflow'?[...root.querySelectorAll('.workflow-body,.workflow-json')].map(el=>({className:el.className,top:el.scrollTop,left:el.scrollLeft})):[];
   const workflowFocus=['workflow','scenario-edit'].includes(dialog.type)?focusIdentity(document.activeElement):null;
   const scenarioScroll=dialog.type==='scenario-edit'?root.querySelector('.modal-body')?.scrollTop||0:0;
-  root.innerHTML=(dialog.type==='shortcuts-help'?uiHtml`<div class="modal-backdrop" data-backdrop="true"><section class="modal" role="dialog" aria-modal="true" aria-labelledby="dialog-title" tabindex="-1"><header class="modal-head"><h2 id="dialog-title">审核快捷键</h2><button class="icon-btn" data-act="close-modal" aria-label="关闭弹窗">${icon('close',18)}</button></header><div class="modal-body"><p>J / K：下一条 / 上一条；E：编辑首个可处理项；Ctrl+Enter：按当前流程确认。</p><p class="hint">输入、弹窗、保存或未保存修改期间，快捷键不生效。普通 Enter 不会触发确认。</p></div><footer class="modal-footer"><button class="btn" data-act="workspace-usage">工作区用量</button><button class="btn primary" data-act="close-modal">关闭</button></footer></section></div>`:'')||workspaceBackupManager.dialog(dialog)||pendingResolutionManager.dialog(dialog)||qualityInsightsManager.dialog(dialog)||workspaceUsageDialog(dialog)||triageDiagnosticsDialog(dialog,state)||taskLifecycleDialog(dialog,state)||rawWorkbenchManager.dialog(dialog)||ecommerceConversionManager.dialog(dialog)||importDraftManager.dialog(dialog)||importFlowExtraDialog(dialog)||cleaningManager.dialog(dialog)||(dialog.type==='workflow'?workflowManager.render():'')||sceneConfigurationManager.dialog(dialog)||scenarioManager.dialog(dialog)||ruleSetManager.dialog(dialog)||ecommerceManager.dialog(dialog)||importManager.dialog(dialog)||ruleCalibrationManager.dialog(dialog)||catalogManager.dialog(dialog)||dialogView(dialog,state,ui);
+  root.innerHTML=(dialog.type==='shortcuts-help'?uiHtml`<div class="modal-backdrop" data-backdrop="true"><section class="modal" role="dialog" aria-modal="true" aria-labelledby="dialog-title" tabindex="-1"><header class="modal-head"><h2 id="dialog-title">审核快捷键</h2><button class="icon-btn" data-act="close-modal" aria-label="关闭弹窗">${icon('close',18)}</button></header><div class="modal-body"><p>J / K：下一条 / 上一条；E：编辑首个可处理项；Ctrl+Enter：按当前流程确认。</p><p class="hint">输入、弹窗、保存或未保存修改期间，快捷键不生效。普通 Enter 不会触发确认。</p></div><footer class="modal-footer"><button class="btn" data-act="workspace-usage">工作区用量</button><button class="btn primary" data-act="close-modal">关闭</button></footer></section></div>`:'')||diagnosticManager.dialog(dialog)||workspaceBackupManager.dialog(dialog)||pendingResolutionManager.dialog(dialog)||qualityInsightsManager.dialog(dialog)||workspaceUsageDialog(dialog)||triageDiagnosticsDialog(dialog,state)||taskLifecycleDialog(dialog,state)||rawWorkbenchManager.dialog(dialog)||ecommerceConversionManager.dialog(dialog)||importDraftManager.dialog(dialog)||importFlowExtraDialog(dialog)||cleaningManager.dialog(dialog)||(dialog.type==='workflow'?workflowManager.render():'')||sceneConfigurationManager.dialog(dialog)||scenarioManager.dialog(dialog)||ruleSetManager.dialog(dialog)||ecommerceManager.dialog(dialog)||importManager.dialog(dialog)||ruleCalibrationManager.dialog(dialog)||catalogManager.dialog(dialog)||dialogView(dialog,state,ui);
+  refreshImportDraftNotice();
   for(const key of modalDisclosures){const node=root.querySelector(`details[data-dialog-disclosure="${CSS.escape(key)}"]`);if(node)node.open=true;}
   for(const key of workflowDisclosures){const node=root.querySelector(`details[data-workflow-snapshot="${CSS.escape(key)}"]`);if(node)node.open=true;}
   const workflowElements=[...root.querySelectorAll('.workflow-body,.workflow-json')];
@@ -322,7 +335,7 @@ function openDialog(value){
   if(!dialog)previousFocus=focusIdentity(document.activeElement)||previousFocus;
   const root=document.getElementById('overlay-root');
   for(const element of root.querySelectorAll('.modal,.modal-backdrop'))cancelMotion(element);
-  const epoch=++overlayEpoch;closingOverlay=false;finishOverlayClose=null;dialog=value;renderDialog();
+  const epoch=++overlayEpoch;closingOverlay=false;finishOverlayClose=null;dialog=value;renderDialog();loadImportDraftNotice(value);
   const modal=root.querySelector('.modal');
   animateAppearance(root.firstElementChild,'backdrop',{keyboard:keyboardInput});
   animateAppearance(modal,modal.classList.contains('drawer')?'drawer':'dialog',{keyboard:keyboardInput});
@@ -333,7 +346,7 @@ function openDialog(value){
 }
 function closeDialog({immediate=false,force=false}={}){
   if(!force&&dialog?.type==='scfg-edit'&&(dialog.dirty||dialog.loading)){dialog.error=dialog.loading?'当前操作正在进行，请等待保存结果。':'有未保存修改。请先保存草稿，或点击放弃本地修改。';renderDialog();return;}
-  if(workspaceBackupManager.blocksNavigation)return;
+  if(workspaceBackupManager.blocksNavigation||diagnosticManager.busy)return;
   if(dialog?.type==='raw-structure')rawWorkbenchManager.stop();
   if(dialog?.type==='conversation-cleaning')cleaningManager.cancel();
   if(!immediate&&!force&&importDraftManager.eligible(dialog)){const owner=dialog;void importDraftManager.closeAndSave(owner,()=>closeDialog({force:true}));return;}
@@ -533,14 +546,16 @@ document.addEventListener('click',async event=>{
   try{
     if(dialog?.type==='raw-edit')rawWorkbenchManager.captureEdit();
     if(['raw-confirm-next','raw-save-result','accept-ai','do-confirm-review','save-pending','save-draft','select-session','review-status','nav','task-review','task-list','raw-golden-open','raw-structure-open','raw-reinspect','pending-resolve-one','pending-resolve-task','pending-reopen','pending-resolution-save','workspace-backup-open','workspace-backup-tab-export','workspace-backup-tab-restore','workspace-backup-export','workspace-backup-preview','workspace-backup-restore'].includes(action)){releaseRawTiming=rawReviewTimer.suspend();await rawReviewTimer.flush();}
+    if(await diagnosticManager.action(action))return;
     if(await workspaceBackupManager.action(action))return;
     if(await rawWorkbenchManager.click(action,button))return;
     if(['task-archive','task-restore','task-void','task-delete'].includes(action)){openDialog({type:'task-lifecycle',taskId:id,action:action.slice(5),error:''});return;}
     if(action==='task-lifecycle-save'){
       dialog.actor=document.getElementById('lifecycle-actor').value.trim();dialog.reason=document.getElementById('lifecycle-reason')?.value.trim()||'';
+      dialog.cancelAI=document.getElementById('lifecycle-cancel-ai')?.checked===true;
       const administratorConfirmed=document.getElementById('lifecycle-administrator')?.checked===true;dialog.confirmTaskId=document.getElementById('lifecycle-confirm-id')?.value.trim()||'';
       if(['void','delete'].includes(dialog.action)&&!administratorConfirmed)throw new Error('请确认本机管理员操作。');
-      lockSaving(true);try{adoptWorkspace(dialog.action==='delete'?await workspace.deleteTask({taskId:dialog.taskId,confirmTaskId:dialog.confirmTaskId,actor:dialog.actor,reason:dialog.reason,administratorConfirmed}):await workspace.taskLifecycle([dialog.taskId],dialog.action,{actor:dialog.actor,reason:dialog.reason,administratorConfirmed}));}finally{lockSaving(false);}
+      lockSaving(true);try{adoptWorkspace(dialog.action==='delete'?await workspace.deleteTask({taskId:dialog.taskId,confirmTaskId:dialog.confirmTaskId,actor:dialog.actor,reason:dialog.reason,administratorConfirmed}):await workspace.taskLifecycle([dialog.taskId],dialog.action,{actor:dialog.actor,reason:dialog.reason,administratorConfirmed,...(dialog.action==='void'?{cancelAI:dialog.cancelAI}:{})}));}finally{lockSaving(false);}
       const deleted=dialog.action==='delete';closeDialog({force:true});render();toast(deleted?'任务已删除，完整备份位置可在任务页删除审计查看':'任务状态已保存，原文与结果完整保留');return;
     }
     if(action==='reload-build'){location.reload();return;}
@@ -566,7 +581,8 @@ document.addEventListener('click',async event=>{
     if(action==='model-save'||action==='model-test'){await modelAction(action);return;}
     if(action==='run-ai'){await runAiTask(id);return;}
     if(action==='retry-scene-dependencies'){const session=state.sessions.find(s=>s.id===id);if(!session)throw new Error('会话不存在。');lockSaving(true);toast('正在重试本行依赖项，已保存的人工记录会保留。');try{adoptWorkspace(await workspace.retryDependencies(session.taskId,session.id));}finally{lockSaving(false);}render();toast('本行依赖重试已保存；如有人工记录，请查看候选判断后自行核对并重新确认。');return;}
-    if(action==='pause-ai'||action==='resume-ai'){lockSaving(true);try{adoptWorkspace(await workspace[action==='pause-ai'?'pauseAI':'resumeAI'](id));}finally{lockSaving(false);}render();toast(action==='pause-ai'?'已请求暂停，正在执行的请求完成后保留结果':'已继续AI质检');return;}
+    if(action==='pause-ai-queue'){lockSaving(true);try{adoptWorkspace(await workspace.pauseAIQueue());}finally{lockSaving(false);}render();toast('已暂停全部AI派发，正在处理的结果会保存');return;}
+    if(action==='pause-ai'||action==='resume-ai'){lockSaving(true);try{adoptWorkspace(await workspace[action==='pause-ai'?'pauseAI':'resumeAI'](id));}finally{lockSaving(false);}render();toast(action==='pause-ai'?'已暂停本任务派发，当前请求完成后保存；其他任务可继续':'已继续AI质检');return;}
     if(action==='cancel-queued-ai'||action==='resume-ai-queue'){lockSaving(true);try{adoptWorkspace(await (action==='cancel-queued-ai'?workspace.cancelQueuedAI(id):workspace.resumeAIQueue()));}finally{lockSaving(false);}render();toast(action==='cancel-queued-ai'?'已取消本次AI运行，已保存结果保留':'已继续串行任务队列');return;}
     if(action==='workspace-retry'||action==='workspace-reload'){
       const editingDialog=dialog,inputDraft=captureDialogInputs(document.getElementById('overlay-root'));
@@ -729,6 +745,10 @@ document.addEventListener('compositionstart',event=>{if(searchKeys[event.target.
 document.addEventListener('compositionend',event=>{if(composingInput===event.target)composingInput=null;updateSearch(event);});
 document.addEventListener('change',async event=>{
   if(saving)return;
+  if(dialog?.type==='task-lifecycle'&&event.target.id==='lifecycle-cancel-ai'){
+    dialog.cancelAI=event.target.checked;dialog.actor=document.getElementById('lifecycle-actor')?.value||'';dialog.reason=document.getElementById('lifecycle-reason')?.value||'';dialog.administratorConfirmed=document.getElementById('lifecycle-administrator')?.checked===true;renderDialog();return;
+  }
+  if(diagnosticManager.change(event))return;
   if(workspaceBackupManager.change(event))return;
   if(workspaceBackupManager.blocksNavigation)return;
   // Capture draft fields before asynchronous handlers can open another dialog.

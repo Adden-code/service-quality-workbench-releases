@@ -55,7 +55,7 @@ test('MaaS resume requires the frozen public parameters while accepting a rotate
  const f=await setup(t,async(r,n)=>{if(n===1){entered();await gate;}return semantic(r.session);},3,false,{config:original});
  await f.ai.start(f.taskId,'maas-frozen');await called;await f.ai.pause(f.taskId);release();await f.ai.waitForIdle();
  f.changeConfig({model:'changed-model',timeoutMs:1000,reasoningEffort:'low',maxTokens:16,apiKey:'rotated-fixture-key'});
- await f.restart();await assert.rejects(f.ai.resume(f.taskId),/冻结配置/);assert.equal(f.calls.length,1);f.changeConfig({...original,apiKey:'rotated-fixture-key'});await f.ai.resume(f.taskId);await f.ai.waitForIdle();const task=(await f.store.read()).state.tasks[0];
+ await f.restart();await assert.rejects(f.ai.resume(f.taskId),/模型或参数已变化，请新建批次重检，原批次结果保留/);assert.equal(f.calls.length,1);f.changeConfig({...original,apiKey:'rotated-fixture-key'});await f.ai.resume(f.taskId);await f.ai.waitForIdle();const task=(await f.store.read()).state.tasks[0];
  assert.equal(task.aiStatus,'completed');assert.deepEqual(task.aiRun.modelConfig,original);
  assert.equal(f.calls.length,3);for(const request of f.calls.slice(1))assert.deepEqual(request.config,{...original,apiKey:'rotated-fixture-key'});
  assert.doesNotMatch(JSON.stringify(task),/rotated-fixture-key|fixture-never-network/);
@@ -64,7 +64,7 @@ test('MaaS none-auth resumes without forwarding a stale key and keeps its frozen
  let release,entered;const gate=new Promise(r=>release=r),called=new Promise(r=>entered=r);
  const f=await setup(t,async(r,n)=>{if(n===1){entered();await gate;}return semantic(r.session);},3,false,{config:{...maasSettings,apiKey:null}});
  await f.ai.start(f.taskId,'maas-none-resume');await called;await f.ai.pause(f.taskId);release();await f.ai.waitForIdle();
- f.changeConfig({apiKey:'stale-fixture-key',model:'changed-model',timeoutMs:1000});await assert.rejects(f.ai.resume(f.taskId),/冻结配置/);assert.equal(f.calls.length,1);f.changeConfig({...maasSettings,apiKey:'stale-fixture-key'});await f.ai.resume(f.taskId);await f.ai.waitForIdle();
+ f.changeConfig({apiKey:'stale-fixture-key',model:'changed-model',timeoutMs:1000});await assert.rejects(f.ai.resume(f.taskId),/模型或参数已变化，请新建批次重检，原批次结果保留/);assert.equal(f.calls.length,1);f.changeConfig({...maasSettings,apiKey:'stale-fixture-key'});await f.ai.resume(f.taskId);await f.ai.waitForIdle();
  assert.equal((await f.store.read()).state.tasks[0].aiStatus,'completed');for(const request of f.calls)assert.deepEqual(request.config,{...maasSettings,apiKey:null});
 });
 test('MaaS Unicode model names honor the 160 codepoint contract in persisted runs',async t=>{
@@ -75,7 +75,7 @@ test('MaaS Unicode model names honor the 160 codepoint contract in persisted run
 for(const changes of [{baseUrl:'http://another-fixture.invalid/v1'},{authMode:'none',apiKey:null}])test(`MaaS resume blocks changed credential destination ${Object.keys(changes)[0]}`,async t=>{
  const f=await setup(t,()=>{throw Object.assign(new Error('fixture'),{code:'AUTHENTICATION'});},3,false,{config:{...maasSettings,authMode:'bearer'}});
  await f.ai.start(f.taskId,'maas-guard');await f.ai.waitForIdle();const before=(await f.store.read()).state.tasks[0];f.changeConfig(changes);
- await assert.rejects(f.ai.resume(f.taskId),/地址|认证|恢复原|新运行/);assert.equal(f.calls.length,1);assert.deepEqual((await f.store.read()).state.tasks[0],before);
+ await assert.rejects(f.ai.resume(f.taskId),/模型或参数已变化，请新建批次重检，原批次结果保留/);assert.equal(f.calls.length,1);assert.deepEqual((await f.store.read()).state.tasks[0],before);
 });
 for(const changes of [{baseUrl:'http://another-fixture.invalid/v1'},{model:'another-model'},{authMode:'none',apiKey:null},{timeoutMs:120001},{reasoningEffort:'low'},{maxTokens:64000}])test(`MaaS preserves published partial results and requires reinspection after ${Object.keys(changes)[0]} changes`,async t=>{
  const f=await setup(t,undefined,3,true,{config:{...maasSettings,authMode:'bearer'}});let comparisons=0;
@@ -111,9 +111,9 @@ test('MaaS configuration changes preserve completed records and human drafts whi
 test('legacy no-snapshot resume stays on old Ark defaults and rejects a newly configured custom gateway',async t=>{
  const f=await setup(t,()=>{throw Object.assign(new Error('fixture'),{code:'AUTHENTICATION'});});
  await f.ai.start(f.taskId,'legacy-run');await f.ai.waitForIdle();await f.store.updateAI(({state,catalog})=>{const task=state.tasks[0];delete task.aiRun.modelConfig;delete task.aiRun.modelConfigFingerprint;delete task.aiQueue.modelConfigFingerprint;return{state,catalog};});
- f.changeConfig({baseUrl:'http://new-fixture.invalid/v1'});await assert.rejects(f.ai.resume(f.taskId),/地址|恢复原|新运行/);assert.equal(f.calls.length,1);
+ f.changeConfig({baseUrl:'http://new-fixture.invalid/v1'});await assert.rejects(f.ai.resume(f.taskId),/模型或参数已变化，请新建批次重检，原批次结果保留/);assert.equal(f.calls.length,1);
  f.changeConfig({baseUrl:legacyBaseUrl,timeoutMs:290000,reasoningEffort:'max',maxTokens:65536});f.client.inspectEcommerceRow=async request=>{f.calls.push(request);return semantic(request.session);};
- await assert.rejects(f.ai.resume(f.taskId),/冻结配置/);assert.equal(f.calls.length,1);f.changeConfig({timeoutMs:120000,reasoningEffort:null,maxTokens:null});
+ await assert.rejects(f.ai.resume(f.taskId),/模型或参数已变化，请新建批次重检，原批次结果保留/);assert.equal(f.calls.length,1);f.changeConfig({timeoutMs:120000,reasoningEffort:null,maxTokens:null});
  await f.ai.resume(f.taskId);await f.ai.waitForIdle();for(const request of f.calls.slice(1))assert.deepEqual(request.config,{baseUrl:legacyBaseUrl,model:'fixture',authMode:'bearer',timeoutMs:120000,reasoningEffort:null,maxTokens:null,apiKey:'fixture-never-network'});
  assert.equal((await f.store.read()).state.tasks[0].aiStatus,'completed');
 });
