@@ -11,7 +11,7 @@ payloadFiles.push('server/catalog-seed.mjs','server/ai-task-scheduler.mjs','serv
 payloadFiles.push('server/raw-inspection.mjs','server/raw-source.mjs','server/raw-structure-jobs.mjs');
 payloadFiles.push('server/workspace-usage.mjs','server/workspace-archive.mjs','server/workspace-restore.mjs','server/task-deletion.mjs','server/rule-calibration.mjs');
 payloadFiles.push('server/workspace-transport.mjs','server/bounded-job-scheduler.mjs');
-payloadFiles.push('server/builtin-scene-upgrade.mjs','server/scene-configuration-service.mjs','server/scene-package-preparation.mjs','server/scene-capabilities.mjs','server/scene-seed.mjs','server/scene-capability-schema.mjs','server/unicode-source-quote.mjs');
+payloadFiles.push('server/builtin-scene-upgrade.mjs','server/scene-configuration-service.mjs','server/scene-package-preparation.mjs','server/scene-capabilities.mjs','server/scene-seed.mjs','server/scene-capability-schema.mjs','server/unicode-source-quote.mjs','server/diagnostics.mjs');
 export const packageLimit=49_000_000;
 const run=(exe,args)=>{const result=spawnSync(exe,args,{stdio:'inherit',windowsHide:true});if(result.error)throw result.error;if(result.status!==0)throw new Error(`${path.basename(exe)} failed (${result.status})`);};
 const hash=async file=>createHash('sha256').update(await readFile(file)).digest('hex');
