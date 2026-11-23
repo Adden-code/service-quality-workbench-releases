@@ -67,9 +67,11 @@ test('R17 simultaneous rate limits back off and retry at one concurrent request 
 });
 
 test('R17 a 60-second cooldown in one task does not throttle another task and closing interrupts cooldown waits',async t=>{
+ // Observe real overlap instead of relying on a 25 ms scheduling window.
+ let releaseB;const bothBStarted=new Promise(resolve=>{releaseB=resolve;});t.after(()=>releaseB());
  let retrying=false,limited=0,bActive=0,bPeak=0;const f=await translationFixture(t,{rows:32,hook:async({input})=>{
   if(input.items[0].text.includes(' A ')&&!retrying){limited++;throw Object.assign(new Error('synthetic 429'),{code:'RATE_LIMIT',retryAfterMs:60000});}
-  if(input.items[0].text.includes(' B ')){bActive++;bPeak=Math.max(bPeak,bActive);await delay(25);bActive--;}
+  if(input.items[0].text.includes(' B ')){bActive++;bPeak=Math.max(bPeak,bActive);if(bActive===2)releaseB();await bothBStarted;bActive--;}
   return answer(input);
  }});
  await f.service.create({jobId:'cooling-a',source:source('A'),targetLang:'en'});await until(()=>limited>0);
