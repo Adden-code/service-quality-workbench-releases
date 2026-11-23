@@ -94,7 +94,7 @@ try{
  const downloadEvent=page.waitForEvent('download');await page.locator('[data-act="diagnostic-export"]').click();const downloaded=await downloadEvent;
  const zipPath=path.join(out,'diagnostic.zip');await downloaded.saveAs(zipPath);
  await page.locator('#diagnostic-path').waitFor();const savedPath=await page.locator('#diagnostic-path').inputValue();assert.match(savedPath,/diagnostics-/);assert.deepEqual(await fs.readFile(savedPath),await fs.readFile(zipPath));
- const zip=await globalThis.JSZip.loadAsync(await fs.readFile(zipPath));let diagnosticText='';for(const f of Object.values(zip.files))if(!f.dir)diagnosticText+=await f.async('string');
+ const zipModule=await load('public/vendor/jszip.min.js'),Zip=zipModule.default||globalThis.JSZip,zip=await Zip.loadAsync(await fs.readFile(zipPath));let diagnosticText='';for(const f of Object.values(zip.files))if(!f.dir)diagnosticText+=await f.async('string');
  assert.doesNotMatch(diagnosticText,/Synthetic product review|Synthetic response|PRIVATE-SENTIMENT-ONLY|Synthetic 23-column batch/);assert.ok((await fs.stat(zipPath)).size<10*1024*1024);
  await page.screenshot({path:path.join(out,'diagnostic-saved.png')});await page.locator('[data-act="close-modal"]').first().click();
  // Create a persisted unfinished draft, then open the wizard through its normal entry point.
