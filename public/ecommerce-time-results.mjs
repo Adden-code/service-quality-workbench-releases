@@ -1,13 +1,14 @@
 import {isBusinessEcommerceBasis,computeBusinessTimeFacts} from './ecommerce-business-profile.mjs';
 import {ecommerceTimeValues} from './ecommerce-schema.mjs';
 import {resolveTimeThreshold,timeDurationMs} from './working-time.mjs';
+import {isFixed24EcommerceBasis,EC_FIXED24_TIMING_POLICY_VERSION} from './ecommerce-timing-policy.mjs';
 
 export const TIME_EXECUTOR_VERSION='ec-stage-a-time-v1';
 export const isStageATimeBasis=basis=>basis?.ruleSetSnapshot?.executionProfile==='v21-time-v1-content';
 
 /** Local deterministic dependencies; these must never be projected into a model request. */
 export function ecommerceTimeDependencies(session,basis,inspectionAt){
- if(isBusinessEcommerceBasis(basis))return {executorVersion:'ec-business-v1',inspectionAt:inspectionAt??null,businessProfile:basis.businessProfile,source:session.ecommerce};
+ if(isBusinessEcommerceBasis(basis))return {executorVersion:isFixed24EcommerceBasis(basis)?EC_FIXED24_TIMING_POLICY_VERSION:'ec-business-v1',inspectionAt:inspectionAt??null,businessProfile:basis.businessProfile,source:session.ecommerce};
  if(!isStageATimeBasis(basis))return null;
  const r=session.ecommerce;
  return{executorVersion:TIME_EXECUTOR_VERSION,inspectionAt,ruleSet:basis.ruleSetSnapshot,source:{reply:r.raw[9],commentTime:r.raw[12],replyTime:r.raw[13],evaluationType:r.raw[14],dateSystem:r.dateSystem??null}};

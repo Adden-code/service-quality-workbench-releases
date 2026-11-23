@@ -1,5 +1,6 @@
 import {validateCalendar,timeDurationMs} from './working-time.mjs';
 import {validateEcommerceSemanticPolicy} from './ecommerce-semantic-policy.mjs';
+import {isFixed24EcommerceBasis,validateEcommerceTimingPolicy,EC_FIXED24_TIMING_POLICY_VERSION} from './ecommerce-timing-policy.mjs';
 export const EC_BUSINESS_PROFILE='ec-business-v1';
 export const isBusinessEcommerceBasis=b=>b?.executionProfile===EC_BUSINESS_PROFILE;
 export const EC_TYPES=['好评正向','好评负向','中评','差评'];
@@ -14,6 +15,7 @@ export function validateBusinessEcommerceBasis(b){
  if(Object.hasOwn(p,'semanticPolicy'))validateEcommerceSemanticPolicy(p.semanticPolicy);
  if(p.structure?.minimumSteps!==3||p.structure.counting!=='grapheme-with-spaces-v1'||!['zh','en'].every(l=>Number.isSafeInteger(p.structure.closingWaiver[l])&&p.structure.closingWaiver[l]>0)||p.privacy?.maskedAllowed!==false)fail('电商结构或隐私配置无效。');
  const t=p.timing;if(!object(t)||!['pending','ready'].includes(t.status)||!text(t.siteField)||!Array.isArray(t.sites)||t.sites.length>100||!Array.isArray(t.standards)||t.standards.length>400)fail('电商站点时效配置无效。');
+ if(Object.hasOwn(t,'policyVersion'))validateEcommerceTimingPolicy(t);
  if(t.mode!==undefined&&!['elapsed','workingHours'].includes(t.mode))fail('电商计时模式无效。');if(t.mode==='elapsed'&&(!Number.isFinite(t.defaultHours)||t.defaultHours<=0||t.defaultHours>87600||!text(t.defaultSource)))fail('自然时间默认阈值及依据必填。');
  const sites=new Set(),aliases=new Set();for(const s of t.sites){if(!text(s.id)||!text(s.label)||sites.has(s.id)||!Array.isArray(s.aliases)||t.mode!=='elapsed'&&typeof s.calendarConfirmed!=='boolean')fail('电商站点字典无效。');sites.add(s.id);for(const a of new Set([s.id,s.label,...s.aliases])){if(!text(a)||aliases.has(a))fail('站点名称/别名须唯一。');aliases.add(a);}if(t.mode!=='elapsed')validateCalendar(s.calendar);}
  const keys=new Set();for(const r of t.standards){const key=JSON.stringify([r.siteId,r.evaluationType]);if(!sites.has(r.siteId)||!EC_TYPES.includes(r.evaluationType)||keys.has(key)||typeof r.hours!=='number'||!Number.isFinite(r.hours)||r.hours<=0||r.hours>87600||r.authoring!=='manual'||!text(r.source))fail('时效阈值必须按站点/评价类型手工录入并注明依据。');keys.add(key);}
@@ -42,6 +44,7 @@ export function businessEvaluationType(session){const c=session.sceneCapabilitie
 // values using the explicitly maintained site offset; explicit source offsets win.
 export function businessTimestamp(raw,normalized,timezone){if(!normalized)return null;if(/(?:Z|[+-]\d\d:\d\d)$/i.test(String(raw).trim()))return normalized;const date=new Date(Date.parse(normalized)+8*3600000);return Number.isFinite(+date)?date.toISOString().slice(0,-1)+timezone.slice(3):null;}
 export function computeBusinessTimeFacts(session,basis,{inspectionAt,normalizedTimes,runtime}={}){
+ if(isFixed24EcommerceBasis(basis))return computeFixed24TimeFacts(session,basis,{inspectionAt,normalizedTimes});
  const p={...basis.businessProfile.timing,standards:runtime?.timingStandards??basis.businessProfile.timing.standards},r=session.ecommerce,hasReply=Boolean(r.raw[9].trim()),hasTime=Boolean(r.raw[13].trim()),replyStatus=!hasReply&&!hasTime?'unreplied':hasReply&&!hasTime?'missing-time':!hasReply&&hasTime?'conflict':'replied';
  const evaluationType=businessEvaluationType(session),facts={schemaVersion:2,executionProfile:EC_BUSINESS_PROFILE,replyStatus,evaluationType,outcome:'undetermined',inspectionAt:inspectionAt??null,siteId:null,thresholdHours:null,elapsedMs:null,startAt:null,endAt:null,reason:''};
  const unknown=reason=>({...facts,reason});if(evaluationType==='好评正向'&&replyStatus==='unreplied')return{...facts,outcome:'na',reason:'好评正向且未回复，不在时效考核范围。'};
@@ -61,4 +64,15 @@ export function computeBusinessTimeFacts(session,basis,{inspectionAt,normalizedT
  if(!site.calendarConfirmed)return unknown('工作日历和节假日未确认。');const standard=p.standards.find(s=>s.siteId===site.id&&s.evaluationType===evaluationType);if(!standard)return unknown('该站点/评价类型缺少手工阈值。');facts.thresholdHours=standard.hours;facts.standard=structuredClone(standard);
  if(!['replied','unreplied'].includes(replyStatus))return unknown('回复内容与时间字段缺失或冲突，待核对。');facts.startAt=businessTimestamp(r.raw[12],normalizedTimes?.commentTime,site.calendar.timezone);facts.endAt=replyStatus==='unreplied'?inspectionAt:businessTimestamp(r.raw[13],normalizedTimes?.replyTime,site.calendar.timezone);
  try{facts.elapsedMs=timeDurationMs(facts.startAt,facts.endAt,{mode:'workingHours',calendar:site.calendar});}catch{return unknown('时间缺失、无效或反向，未计算时长。');}facts.outcome=facts.elapsedMs>standard.hours*3600000?'fail':'pass';facts.reason=`站点 ${site.label}；${evaluationType}；${replyStatus==='unreplied'?'未回复，累计至冻结质检时间':'累计至首次回复'}；工作时长 ${facts.elapsedMs/3600000} 小时，手工阈值 ${standard.hours} 小时；按冻结工作日历排除非工作时段及已维护假期。`;return facts;
+}
+function computeFixed24TimeFacts(session,basis,{inspectionAt,normalizedTimes}){
+ validateEcommerceTimingPolicy(basis.businessProfile.timing);
+ const raw=session.ecommerce.raw,hasReply=Boolean(raw[9].trim()),hasTime=Boolean(raw[13].trim());
+ const replyStatus=!hasReply&&!hasTime?'unreplied':hasReply&&!hasTime?'missing-time':!hasReply&&hasTime?'conflict':'replied';
+ const facts={schemaVersion:2,executionProfile:EC_BUSINESS_PROFILE,timingPolicyVersion:EC_FIXED24_TIMING_POLICY_VERSION,mode:'elapsed',replyStatus,evaluationType:null,outcome:'undetermined',inspectionAt:inspectionAt??null,siteId:null,thresholdHours:24,thresholdSource:'fixed-policy',elapsedMs:null,startAt:normalizedTimes?.commentTime??null,endAt:replyStatus==='unreplied'?(inspectionAt??null):(normalizedTimes?.replyTime??null),endTimeSource:replyStatus==='unreplied'?'frozen-inspection-time':'firstReplyTime',reason:''};
+ if(!['replied','unreplied'].includes(replyStatus))return{...facts,reason:'回复内容与首次回复时间缺失或冲突，待核对；不使用最新回复时间或末次回复时间补足。'};
+ try{facts.elapsedMs=timeDurationMs(facts.startAt,facts.endAt,{mode:'continuous'});}catch{return{...facts,reason:'评论时间、首次回复时间或冻结质检截止点缺失、无效或反向，未计算时长。'};}
+ facts.outcome=facts.elapsedMs>24*3600000?'fail':'pass';
+ facts.reason=`${replyStatus==='unreplied'?'未回复，累计至冻结质检时间（不是首次回复时间）':'评论时间至首次回复时间'}；自然耗时 ${facts.elapsedMs/3600000} 小时，统一阈值 24 小时；严格超过才不符合，夜间、周末、节假日全额计入；不依赖评价分类或站点。`;
+ return facts;
 }

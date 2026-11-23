@@ -1,5 +1,6 @@
 // A technical classification gap is different from missing business evidence.
 // Only these two explicitly identified outcomes may be superseded after recovery.
+import {EC_FIXED24_TIMING_POLICY_VERSION} from './ecommerce-timing-policy.mjs';
 export const CLASSIFICATION_DEPENDENT_RULE_IDS=Object.freeze(['EC-TIME','EC-STEPS']);
 const same=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
 const classification=capabilities=>capabilities?.outputs?.ecommerceClassification;
@@ -10,7 +11,7 @@ export function classificationBlockedRuleIds(session){
  if(!session?.ecommerce)return [];
  return(session.aiResults||[]).filter(result=>{
   if(result.verdict!=='无法判定')return false;
-  if(result.ruleId==='EC-TIME')return result.timeFacts?.executionProfile==='ec-business-v1'&&result.timeFacts.evaluationType===null&&result.timeFacts.reason==='评价分类尚未确定，未选择时效阈值。';
+  if(result.ruleId==='EC-TIME')return result.timeFacts?.timingPolicyVersion!==EC_FIXED24_TIMING_POLICY_VERSION&&result.timeFacts?.executionProfile==='ec-business-v1'&&result.timeFacts.evaluationType===null&&result.timeFacts.reason==='评价分类尚未确定，未选择时效阈值。';
   if(result.ruleId!=='EC-STEPS')return false;
   const dependency=result.sceneDependencies?.find(d=>d.capability==='ecommerceClassification');
   if(!result.sceneProgramDecision||!dependency||dependency.status==='completed')return false;

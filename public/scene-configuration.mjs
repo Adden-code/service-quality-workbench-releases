@@ -1,3 +1,4 @@
+import {isFixed24EcommerceBasis} from './ecommerce-timing-policy.mjs';
 import {validateEcReportMetadata} from './ec-report-metadata.mjs';
 import {isBusinessEcommerceBasis,validateBusinessEcommerceBasis} from './ecommerce-business-profile.mjs';
 // Shared, deterministic scene package contracts. No network, credentials or UI.
@@ -81,7 +82,7 @@ export function resolveSceneRuntime(config,overrides={},reason=''){
   if(f.type==='enum'&&!f.options.includes(v)||f.type==='multi-enum'&&(!Array.isArray(v)||new Set(v).size!==v.length||v.some(x=>!f.options.includes(x))))fail(`${f.label}选项无效。`);
  }
  const timingStandards=clone(overrides.timingStandards??config.basis?.businessProfile?.timing.standards??config.timingPolicy.standards);
- if(overrides.timingStandards!==undefined){if(!config.timingPolicy.allowBatchOverride)fail('场景不允许本批覆盖站点标准。');text(reason,'覆盖标准原因',2000);if(config.basis?.businessProfile)validateBusinessEcommerceBasis({...config.basis,businessProfile:{...config.basis.businessProfile,timing:{...config.basis.businessProfile.timing,standards:timingStandards}}});else validateTimingPolicy({...config.timingPolicy,standards:timingStandards});}
+ if(overrides.timingStandards!==undefined){if(isFixed24EcommerceBasis(config.basis))fail('统一 24 小时时效不允许本批覆盖标准。');if(!config.timingPolicy.allowBatchOverride)fail('场景不允许本批覆盖站点标准。');text(reason,'覆盖标准原因',2000);if(config.basis?.businessProfile)validateBusinessEcommerceBasis({...config.basis,businessProfile:{...config.basis.businessProfile,timing:{...config.basis.businessProfile.timing,standards:timingStandards}}});else validateTimingPolicy({...config.timingPolicy,standards:timingStandards});}
  if(values.defaultSite&&!(config.basis?.businessProfile?.timing.sites||config.timingPolicy.sites).some(s=>s.id===values.defaultSite))fail('本批兜底站点必须来自场景站点字典。');
  return{values,sources,timingStandards,overrideReason:overrides.timingStandards!==undefined?reason.trim():''};
 }
@@ -139,6 +140,7 @@ export function validateSceneConfiguration(c){
  if(c.aggregatePolicy!==undefined&&(!c.aggregateRuleId||c.aggregatePolicy!=='fail-only.v2'))fail('整体派生版本无效。');
  if(c.aggregateRuleId&&(c.ruleDependencies[c.aggregateRuleId]?.length||c.timingRuleMetrics?.[c.aggregateRuleId]))fail('整体派生规则不独立请求前置能力或时效判定。');
  if(!c.basis||!Array.isArray(c.basis.rules)||!Array.isArray(c.basis.policies)||c.basis.rules.length!==c.ruleBindings.length||c.ruleBindings.some(r=>!c.basis.rules.some(x=>x.id===r.ruleId&&x.version===r.ruleVersion&&isSessionCheckRule(x))))fail('场景冻结规则内容与绑定不一致。');
+ if(isFixed24EcommerceBasis(c.basis)){validateBusinessEcommerceBasis(c.basis);if(c.timingPolicy?.allowBatchOverride||c.ruleDependencies?.['EC-TIME']?.length)fail('统一 24 小时时效不接受站点/类型覆盖或前置分类依赖。');}
  list(c.capabilities,'辅助能力',SCENE_CAPABILITIES.length);unique(c.capabilities.map(x=>x.key),'能力');
  for(const a of c.capabilities){keys(a,['key','phase','executorVersion','dependsOn'],'能力');if(!SCENE_CAPABILITIES.includes(a.key)||!['pre','post'].includes(a.phase)||a.executorVersion!=='scene-capability.v1')fail('能力、阶段或执行器版本不受支持。');list(a.dependsOn,'能力依赖',10);if(a.key==='salesStage'&&!a.dependsOn.includes('intent'))fail('销售环节必须从意图父级派生。');}
  const visit=(key,seen=new Set())=>{if(seen.has(key))fail('能力依赖不能循环。');const a=c.capabilities.find(a=>a.key===key);if(!a)fail(`缺少依赖能力：${key}。`);for(const d of a.dependsOn)visit(d,new Set([...seen,key]));};c.capabilities.forEach(a=>visit(a.key));
