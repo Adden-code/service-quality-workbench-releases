@@ -1,5 +1,17 @@
 # 会话质检工作台
 
+## 0.11.20 诊断、任务队列与报告优化 · 完整内置候选版
+
+**[免登录下载完整安装包（17条规则＋两场景）](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.20-full/QualityWorkbench-0.11.20-Full-Setup-Windows-x64.exe)**
+
+[发布与验收说明](https://github.com/Adden-code/service-quality-workbench-releases/releases/tag/v0.11.20-full) · [升级指引](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.20-full/Hotfix-Guide-zh.txt) · [SHA256](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.20-full/SHA256.txt) · [源码提交](https://github.com/Adden-code/service-quality-workbench-releases/commit/54bc2d7ab9a0a86a9426774c9dbe1844f8f5e780)
+
+需求26安全诊断ZIP；27任务级暂停与取消后作废；28审核失败筛选、部分完成及操作提示；29新电商首次回复统一24h且解绑归类；30新报告分层聚类与合并留痕。
+
+历史任务与报告不回溯。存量工作区通过场景管理的“更新电商检核口径”发布后新建任务，启用固定24h。升级前备份停服覆盖安装并刷新页面。实际安装、合成批次与浏览器完整路径已核验；不以模拟结果代替内网真实模型效果。
+
+安装器97774299字节；SHA256：`5c197564b7ea2b3f4fc3f61b32375c0dedb053a8cf0f9ee647882ea10c17bdcc`。7附件匿名完整下载核验；源码分支`source-v0.11.20`。含获准公开规则示例，不含客户批次或凭据。
+
 ## 0.11.19 批次信息、并发记忆与紧凑审核 · 完整内置候选版
 
 **[免登录下载完整安装包（17条规则＋两场景）](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.19-full/QualityWorkbench-0.11.19-Full-Setup-Windows-x64.exe)**
