@@ -5,8 +5,33 @@ import path from 'node:path';
 import {publishedFixture,sourceRow,cutoff} from './v21-runtime-fixtures.mjs';
 import {ecommerceSourceProjection,EC_RULE_IDS} from '../public/ecommerce-schema.mjs';
 import {timeJudgment} from '../server/ecommerce-engine.mjs';
+import {createHash} from 'node:crypto';
+import {REPORT_CLUSTER_POLICY} from '../public/report-issue-clusters.mjs';
+import {buildBusinessReportHtml} from '../public/business-report.mjs';
 
 const base='D:/Codex project/outputs/service-business-delivery-20261104/jobs-tests';
+test('01120 new reports freeze the cluster version, preserve raw labels and union members across restart',async t=>{
+ const f=await fixture(t,{hook:({kind,input})=>kind==='issueClusters'?{clusters:input.records.map((r,i)=>({label:i%2?'单词拼写错误':'拼写错误',summary:`原始概括${i}`,memberIds:[r.id],action:`原始动作${i}`}))}:answer(kind,input)}),state=inputState();
+ state.sessions[1].aiResults.find(r=>r.ruleId==='EC-TEXT').verdict='不符合';f.setState(state);
+ await f.service.create({jobId:'cluster-policy-new',taskId:f.taskId});await f.service.waitForIdle();const result=await f.service.getResult('cluster-policy-new');
+ assert.equal(result.snapshot.reportClusterPolicy,REPORT_CLUSTER_POLICY);assert.equal(result.job.reportClusterPolicy,REPORT_CLUSTER_POLICY);assert.equal(result.enrichment.issueClustersRaw.length,2);assert.equal(result.enrichment.issueClusters.length,1);assert.equal(result.enrichment.issueClusters[0].memberIds.length,2);assert.deepEqual(result.enrichment.issueClusters[0].originalLabels,['拼写错误','单词拼写错误']);assert.ok(result.enrichment.issueClustersRaw.every(c=>c.sourceUnitId));
+ await f.restart();assert.deepEqual(await f.service.getResult('cluster-policy-new'),result);
+});
+
+test('01120 old saved completed reports retain legacy labels and unchanged job/snapshot/output bytes when read or new reports are created',async t=>{
+ const f=await fixture(t,{hook:({kind,input})=>kind==='issueClusters'?{clusters:input.records.map((r,i)=>({label:i%2?'单词拼写错误':'拼写错误',summary:'合成原始概括',memberIds:[r.id],action:'合成原始动作'}))}:answer(kind,input)}),state=inputState();
+ state.sessions[1].aiResults.find(r=>r.ruleId==='EC-TEXT').verdict='不符合';f.setState(state);
+ const id='cluster-legacy-saved';await f.service.create({jobId:id,taskId:f.taskId});await f.service.waitForIdle();await f.service.close();
+ // Construct a pre-upgrade fixture only inside this test's isolated temp store.
+ const dir=path.join(f.dir,'report-jobs',id),snapshotPath=path.join(dir,'snapshot.json'),jobPath=path.join(dir,'job.json'),savedSnapshot=JSON.parse(await fs.readFile(snapshotPath,'utf8')),savedJob=JSON.parse(await fs.readFile(jobPath,'utf8'));
+ delete savedSnapshot.reportClusterPolicy;delete savedJob.reportClusterPolicy;const fingerprint=structuredClone(savedSnapshot);delete fingerprint.createdAt;
+ const canonical=value=>Array.isArray(value)?'['+value.map(canonical).join(',')+']':value&&typeof value==='object'?'{'+Object.keys(value).sort().map(key=>JSON.stringify(key)+':'+canonical(value[key])).join(',')+'}':JSON.stringify(value);
+ savedJob.snapshotFingerprint=createHash('sha256').update(canonical(fingerprint)).digest('hex');await fs.writeFile(snapshotPath,JSON.stringify(savedSnapshot));await fs.writeFile(jobPath,JSON.stringify(savedJob));
+ const files=await fs.readdir(dir),before=new Map(await Promise.all(files.map(async name=>[name,await fs.readFile(path.join(dir,name),'utf8')])));
+ await f.restart();const old=await f.service.getResult(id),oldHtml=buildBusinessReportHtml(old.snapshot,old.enrichment,{job:old.job});assert.equal(old.snapshot.reportClusterPolicy,undefined);assert.equal(old.enrichment.issueClustersRaw,undefined);assert.equal(old.enrichment.issueClusters.length,2);assert.doesNotMatch(oldHtml,/data-cluster-policy=/);
+ const next=await f.service.create({jobId:'cluster-after-upgrade',taskId:f.taskId});assert.equal(next.reused,undefined);await f.service.waitForIdle();const current=await f.service.getResult(next.id);assert.equal(current.enrichment.issueClusters.length,1);
+ assert.deepEqual(await f.service.getResult(id),old);assert.equal(buildBusinessReportHtml(old.snapshot,old.enrichment,{job:old.job}),oldHtml);for(const [name,bytes]of before)assert.equal(await fs.readFile(path.join(dir,name),'utf8'),bytes,name);
+});
 function inputState(){
  const rows=[3,4,5].map((row,index)=>{
   const s=sourceRow({row,reply:'Thank you for sharing your experience.',type:index===2?'好评正向':'好评负向'});

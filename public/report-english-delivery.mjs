@@ -1,3 +1,4 @@
+import {hasReportClusterPolicy,reportClusterTextParts} from './report-issue-clusters.mjs';
 import {appendEvidenceSheets} from './evidence-audit.mjs';
 import {workbook} from './io.mjs';
 import {ecommerceDeliverySource,ecommerceSourceMappingRows} from './ecommerce-delivery-source.mjs';
@@ -74,7 +75,7 @@ function excelEnglishSheets(sheets){
 }
 function analysisRows(snapshot,enrichment,locale,config){
  const rows=[];
- visibleReportClusters(snapshot,enrichment).forEach(({item,index})=>{for(const key of ['label','summary','action'])if(item[key])rows.push(['Issue cluster',index+1,key,locale.display(item[key]),item[key]]);});
+ visibleReportClusters(snapshot,enrichment).forEach(({item,index})=>{for(const key of ['label','summary','action'])if(item[key])rows.push(['Issue cluster',index+1,key,hasReportClusterPolicy(snapshot)&&key!=='label'?reportClusterTextParts(item,key).map(part=>locale.display(part)).join('; '):locale.display(item[key]),item[key]]);});
  array(enrichment.excellentCases).forEach(item=>{const record=snapshot.records.find(record=>record.id===item.id);if(!record)return;if(item.commentary)rows.push(['Excellent case',item.id,'Commentary',locale.display(item.commentary),item.commentary]);if(item.quote&&record.raw22?.[9]?.includes(item.quote))rows.push(['Excellent case',item.id,'Evidence quote',locale.quote(item.quote),item.quote]);});
  array(enrichment.vocItems).forEach(item=>{const record=snapshot.records.find(record=>record.id===item.id);if(!record)return;for(const key of ['scene','painPoint','reason','evidenceQuote'])if(item[key]&&(!unverifiedRoleEvidence(snapshot)||key!=='evidenceQuote'||groundedReportQuote(record,item[key],undefined,snapshot.roleEvidenceMode)))rows.push([unverifiedRoleEvidence(snapshot)?'Conversation concern lead — Roles unverified':'VOC',item.id,key,key==='evidenceQuote'?locale.quote(item[key]):locale.display(item[key]),item[key]]);});
  if(config?.report.sections.includes('voc'))for(const record of snapshot.records){const analysis=enrichment.consultationAnalysis?.[record.id];if(analysis?.status!=='completed'||!['negative','neutral'].includes(reportSentiment(analysis.sentiment)))continue;for(const key of ['scene','painPoint','reason','evidenceQuote'])if(analysis.voc?.[key]&&(key!=='evidenceQuote'||groundedReportQuote(record,analysis.voc[key],undefined,snapshot.roleEvidenceMode)))rows.push([unverifiedRoleEvidence(snapshot)?'Conversation concern lead — Roles unverified':'VOC',record.id,key,key==='evidenceQuote'?locale.quote(analysis.voc[key]):locale.display(analysis.voc[key]),analysis.voc[key]]);}

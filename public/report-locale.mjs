@@ -1,3 +1,4 @@
+import {hasReportClusterPolicy,reportClusterView,reportClusterTextParts} from './report-issue-clusters.mjs';
 import {selectConsultationCaseExcerpts} from './consultation-excerpts.mjs';
 import {CONVERSATION_UNVERIFIED,groundedConversationQuote} from './role-evidence.mjs';
 import {reusableEnglishBaseTranslation} from './translation-language.mjs';
@@ -35,6 +36,7 @@ export function reportEnglishBaseTranslations(snapshot,enrichment={}){
 
 export function visibleReportClusters(snapshot,enrichment={}){
  const consultation=snapshot?.deliveryType==='consultation-v1';
+ if(hasReportClusterPolicy(snapshot))return consultation&&snapshot.scenarioSnapshot&&!snapshot.scenarioSnapshot.builtin&&!array(snapshot.scenarioSnapshot.report?.sections).includes('improvements')?[]:reportClusterView(snapshot,enrichment).issueClusters.map((item,index)=>({item,index}));
  return array(enrichment.issueClusters).map((item,index)=>({item,index})).filter(({item})=>{
   const key=consultation?(item.category||array(snapshot.basis?.rules).find(rule=>rule.id===item.ruleId)?.category||array(snapshot.basis?.dimensions).find(dimension=>dimension.key===item.ruleId)?.key):item.ruleId;
   return (!consultation||!snapshot.scenarioSnapshot||snapshot.scenarioSnapshot.builtin||array(snapshot.scenarioSnapshot.report?.sections).includes('improvements'))&&array(item.memberIds).some(id=>array(snapshot.records).some(record=>record.id===id&&record.replyStatus!=='unreplied'&&array(record.final).some(result=>['Fail','不通过'].includes(result.verdict)&&(consultation?result.category===key:(result.ruleId||result.id)===key))));
@@ -105,7 +107,7 @@ export function collectReportTranslationFields(snapshot,enrichment={}){
   array(enrichment.excellentCases).forEach((item,index)=>{const record=array(snapshot?.records).find(record=>record.id===item.id);if(!record)return;add(['excellent',index,'commentary'],item.commentary);if(readable(item.quote)&&record.raw22?.[9]?.includes(item.quote))add(['excellent',index,'quote'],item.quote);});
   array(enrichment.vocItems).forEach((item,index)=>{if(!array(snapshot?.records).some(record=>record.id===item.id))return;for(const key of ['scene','painPoint','reason','evidenceQuote'])add(['voc',index,key],item[key]);});
  }
- if(!consultation||sections.includes('improvements'))visibleReportClusters(snapshot,enrichment).forEach(({item,index})=>{for(const key of ['label','summary','action'])add(['cluster',index,key],item[key]);});
+ if(!consultation||sections.includes('improvements'))visibleReportClusters(snapshot,enrichment).forEach(({item,index})=>{for(const key of ['label','summary','action'])add(['cluster',index,key],item[key]);if(hasReportClusterPolicy(snapshot)){add(['cluster',index,'primaryLabel'],item.primaryLabel);for(const key of ['summary','action'])reportClusterTextParts(item,key).forEach((part,partIndex)=>add(['cluster',index,key,'part',partIndex],part));}});
  return fields;
 }
 

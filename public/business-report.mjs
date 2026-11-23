@@ -1,3 +1,4 @@
+import {hasReportClusterPolicy,reportIssueHierarchyHtml} from './report-issue-clusters.mjs';
 import {ecReportMetadataAuditRows} from './ec-report-metadata.mjs';
 import {systemDeliveryView} from './ecommerce-system-delivery.mjs';
 import {evidenceAuditHtml} from './evidence-audit.mjs';
@@ -91,7 +92,7 @@ function issuesHtml(snapshot,enrichment){
   const groups=reasonClusters(snapshot,enrichment),failedRules=BUSINESS_RULES.map(rule=>({rule,ids:snapshot.records.filter(record=>record.replyStatus!=='unreplied'&&itemFor(record,rule.id)?.verdict==='不通过').map(record=>record.id)})).filter(row=>row.ids.length).sort((a,b)=>b.ids.length-a.ids.length||BUSINESS_RULES.indexOf(a.rule)-BUSINESS_RULES.indexOf(b.rule));
   if(!failedRules.length)return note('当前所选口径暂无已判不通过记录；待判定及未回复仍单列，不据此宣称全部通过。');
   const byId=new Map(snapshot.records.map(record=>[record.id,record]));
-  const clusterHtml=groups.length?table(['检核项','涉及条数','典型原因 / 痛点与建议（模型辅助）'],groups.map(group=>[group.rule.label,group.ids.length,clusterReasonCell(group.label,group.ids.map(id=>byId.get(id).sourceRow).join('、'),[group.summary,...group.actions].filter(Boolean).join('；'))])):note('原因聚类尚未完成，先展示本地计数与固定维度建议。','warning');
+  const clusterHtml=hasReportClusterPolicy(snapshot)?reportIssueHierarchyHtml(snapshot,enrichment):groups.length?table(['检核项','涉及条数','典型原因 / 痛点与建议（模型辅助）'],groups.map(group=>[group.rule.label,group.ids.length,clusterReasonCell(group.label,group.ids.map(id=>byId.get(id).sourceRow).join('、'),[group.summary,...group.actions].filter(Boolean).join('；'))])):note('原因聚类尚未完成，先展示本地计数与固定维度建议。','warning');
   const top=failedRules.slice(0,3).map((row,index)=>{
     const group=groups.find(group=>group.rule.id===row.rule.id),action=group?.actions[0]||row.rule.improvement;
     return `<li><h4>${index+1}. ${e(row.rule.label)} · 涉及${row.ids.length}条</h4><p>${e(action)}</p><small>${group?.actions.length?'模型辅助建议，需业务复核':'固定维度建议'}</small></li>`;

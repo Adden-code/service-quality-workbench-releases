@@ -99,7 +99,7 @@ test('analysis prompt encodes exact scene values and the sentiment/VOC decision 
   const prepared=prepareReportEnrichment('consultationAnalysis',{...clone(directInput),...(roleEvidenceMode?{roleEvidenceMode}:{})}),system=prepared.messages[0].content;
   assert.ok(system.includes(JSON.stringify(scenes)));assert.ok(system.includes('{"scene":"售后/退换货"}'));assert.match(system,/编码示例/);assert.match(system,/正向.*待判定.*negativeVoices/);assert.match(system,/重审/);assert.match(prepared.promptVersion,/:voc-retry-v1$/);
  }
- const issues=prepareReportEnrichment('consultationIssues',{category:'合成类别',records:[{id:'synthetic-issue',reason:'合成原因。',conversation:'合成原文。'}]});assert.equal(issues.promptVersion,'consultation-report-enrichment-v2-taxonomy:consultationIssues');
+ const issues=prepareReportEnrichment('consultationIssues',{category:'合成类别',records:[{id:'synthetic-issue',reason:'合成原因。',conversation:'合成原文。'}]});assert.equal(issues.promptVersion,'consultation-report-enrichment-v2-taxonomy:consultationIssues:granularity-v2');
  assert.equal(prepareReportEnrichment('translation',{targetLang:'zh',items:[{id:'t1',text:'Synthetic only.'}]}).promptVersion,'business-report-translation-v2-target-language');
 });
 

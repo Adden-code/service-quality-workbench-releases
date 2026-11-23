@@ -1,3 +1,4 @@
+import {hasReportClusterPolicy,reportIssueHierarchyHtml} from './report-issue-clusters.mjs';
 import {evidenceAuditHtml} from './evidence-audit.mjs';
 import {configuredDelivery,buildSceneReportHtml} from './scene-delivery.mjs';
 import {hasReviewPolicy,triageReportNotice} from './triage-export.mjs';
@@ -78,7 +79,7 @@ function issuesHtml(snapshot,enrichment,groups){
   const byId=new Map(snapshot.records.map(record=>[record.id,record]));
   const counts=dimensions(snapshot).map(dimension=>({dimension,ids:snapshot.records.filter(record=>isDimensionFailure(snapshot,record,dimension.key)).map(record=>record.id)})).filter(row=>row.ids.length).sort((a,b)=>b.ids.length-a.ids.length);
   if(!counts.length)return note('当前实际维度暂无已判不通过记录；NA、待判定及整体原则项保留各自状态，不据此宣称全部合格。');
-  const groupTable=groups.length?table(['维度','涉及条数','典型原因 / 痛点概括 / 改进动作'],groups.map(group=>[group.category,group.ids.length,clusterReasonCell(group.label,group.ids.map(id=>rowsOf(byId.get(id))).join('；'),[group.summary,group.action].filter(Boolean).join('；'))])):note('原因聚类尚未完成；以下仅展示本地不通过计数，改进方向尚未生成。',true);
+  const groupTable=hasReportClusterPolicy(snapshot)?reportIssueHierarchyHtml(snapshot,enrichment):groups.length?table(['维度','涉及条数','典型原因 / 痛点概括 / 改进动作'],groups.map(group=>[group.category,group.ids.length,clusterReasonCell(group.label,group.ids.map(id=>rowsOf(byId.get(id))).join('；'),[group.summary,group.action].filter(Boolean).join('；'))])):note('原因聚类尚未完成；以下仅展示本地不通过计数，改进方向尚未生成。',true);
   const actions=counts.slice(0,3).map((row,index)=>{
     const choices=unique(groups.filter(group=>group.category===row.dimension.key&&group.action.trim()).map(group=>group.action));
     return`<li><h4>${index+1}. ${e(row.dimension.label||row.dimension.key)} · 涉及${row.ids.length}条</h4><p>${choices.length?e(choices.join('；')):'改进方向尚未生成，请结合冻结规则及原文人工复核。'}</p></li>`;

@@ -1,3 +1,4 @@
+import {ISSUE_CLUSTER_FEWSHOTS} from '../public/report-issue-clusters.mjs';
 import {CONVERSATION_UNVERIFIED,normalizeRoleEvidenceMode} from '../public/role-evidence.mjs';
 import {validateCatalogSceneIds} from '../public/catalog-scenes.mjs';
 import {rawQuoteMatches} from '../public/raw-report-evidence.mjs';
@@ -114,7 +115,7 @@ export function prepareConsultationEnrichment(kind,input,retryFeedback){
  const normalized=normalizeInput(kind,input);
  const dynamic=kind==='consultationAnalysis'&&normalized.analysisFields!==undefined;
  const feedback=kind==='consultationAnalysis'&&allowed(retryFeedback,retryFields)&&retryFeedback.knownRecordId===normalized.record.id&&retryFeedback.guidance===retryGuidance&&Array.isArray(retryFeedback.allowedVocScenes)&&retryFeedback.allowedVocScenes.length===CONSULTATION_VOC_SCENES.length&&retryFeedback.allowedVocScenes.every((scene,index)=>scene===CONSULTATION_VOC_SCENES[index])?consultationRetryFeedback(retryFeedback,normalized):undefined;
- return{kind,input:normalized,promptVersion:`${CONSULTATION_ENRICHMENT_PROMPT_VERSION}:${kind}${dynamic?':selected-v1':''}${normalized.record?.inputMode==='raw-transcript-v1'?':raw-row-quote-v1':''}${normalized.roleEvidenceMode===CONVERSATION_UNVERIFIED?':conversation-unverified-v1':''}${kind==='consultationAnalysis'?':voc-retry-v1':''}`,maxTokens:32768,messages:[{role:'system',content:shared+(kind==='consultationAnalysis'?selectedPrompt(normalized):prompts[kind])},{role:'user',content:JSON.stringify({kind,input:normalized,...(feedback?{validationFeedback:feedback}:{})})}]};
+ return{kind,input:normalized,promptVersion:`${CONSULTATION_ENRICHMENT_PROMPT_VERSION}:${kind}${dynamic?':selected-v1':''}${normalized.record?.inputMode==='raw-transcript-v1'?':raw-row-quote-v1':''}${normalized.roleEvidenceMode===CONVERSATION_UNVERIFIED?':conversation-unverified-v1':''}${kind==='consultationAnalysis'?':voc-retry-v1':':granularity-v2'}`,maxTokens:32768,messages:[{role:'system',content:shared+(kind==='consultationAnalysis'?selectedPrompt(normalized):prompts[kind]+ISSUE_CLUSTER_FEWSHOTS)},{role:'user',content:JSON.stringify({kind,input:normalized,...(feedback?{validationFeedback:feedback}:{})})}]};
 }
 function selectedPrompt(input){
  if(input.record?.inputMode==='raw-transcript-v1')return rawSelectedPrompt(input);
