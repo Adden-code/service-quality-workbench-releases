@@ -1,7 +1,10 @@
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import {createHash,randomUUID} from 'node:crypto';
-import '../public/vendor/jszip.min.js';
+import * as bundledZip from '../public/vendor/jszip.min.js';
+// Source checkout treats .js as ESM; the standalone installed payload uses CJS.
+// JSZip exposes its constructor differently in those two module environments.
+const Zip=bundledZip.default||globalThis.JSZip;
 
 export const MAX_DIAGNOSTIC_BYTES=10*1024*1024;
 const READ_BUDGET=64*1024*1024,TRACE_LIMIT=32*1024*1024;
@@ -43,7 +46,7 @@ async function readBounded(file,limit){
 }
 /** Only allowlisted metadata enters the archive. Never serialize the source object. */
 export async function createDiagnosticBundle({dataDir,document,build,modelConfig,includeTraces=false}){
- await safeDirectory(dataDir);const zip=new globalThis.JSZip(),notes=[],meta=diagnosticMetadata(document,build);let used=0;
+ await safeDirectory(dataDir);const zip=new Zip(),notes=[],meta=diagnosticMetadata(document,build);let used=0;
  const add=(name,value)=>{const bytes=Buffer.from(JSON.stringify(value,null,2));if(used+bytes.length>8*1024*1024)return false;zip.file(name,bytes);used+=bytes.length;return true;};
  add('metadata.json',meta);add('model-configuration.json',safeModelConfiguration(modelConfig));
  try{const log=await readBounded(path.join(dataDir,'logs','portable-startup.log'),1024*1024);add('logs/portable-startup.events.json',projectStartupLog(log.toString('utf8')));}catch{notes.push('startup_log_missing_large_or_unsafe');}

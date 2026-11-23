@@ -4,6 +4,8 @@ import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import {once} from 'node:events';
 import {randomUUID} from 'node:crypto';
+import {execFile} from 'node:child_process';
+import {promisify} from 'node:util';
 import {createWorkbenchServer} from '../server.mjs';
 import {createDiagnosticBundle,projectDiagnosticTrace,safeModelConfiguration,projectStartupLog,MAX_DIAGNOSTIC_BYTES} from '../server/diagnostics.mjs';
 
@@ -44,4 +46,10 @@ test('diagnostic route requires current origin and token, rejects business-conte
  response=await fetch(origin+'/api/diagnostics/export',{method:'POST',headers,body:'{"includeTraces":true}'});assert.equal(response.status,200);assert.equal(response.headers.get('content-type'),'application/zip');
  const bytes=Buffer.from(await response.arrayBuffer()),saved=decodeURIComponent(response.headers.get('x-diagnostic-path'));assert.ok(saved.startsWith(path.join(dir,'diagnostics')+path.sep));assert.deepEqual(await fs.readFile(saved),bytes);const files=await unpack(bytes);assert.ok(files['metadata.json']);assert.ok(files['README.txt']);
  assert.equal((await(await fetch(origin+'/api/workspace')).json()).revision,doc.revision);
+});
+test('standalone installed module layout loads ZIP without checkout ESM globals',async t=>{
+ const dir=await directory(t);await fs.mkdir(path.join(dir,'server'));await fs.mkdir(path.join(dir,'public/vendor'),{recursive:true});await fs.mkdir(path.join(dir,'data'));
+ await fs.writeFile(path.join(dir,'package.json'),'{}');await fs.copyFile(new URL('../server/diagnostics.mjs',import.meta.url),path.join(dir,'server/diagnostics.mjs'));await fs.copyFile(new URL('../public/vendor/jszip.min.js',import.meta.url),path.join(dir,'public/vendor/jszip.min.js'));
+ await fs.writeFile(path.join(dir,'check.mjs'),`import {createDiagnosticBundle} from './server/diagnostics.mjs';const result=await createDiagnosticBundle({dataDir:new URL('./data',import.meta.url).pathname.replace(/^\\/(\\w:)/,'$1'),document:{},modelConfig:{},build:{}});console.log(result.bytes.length);`.replace("new URL('./data',import.meta.url).pathname.replace(/^\\/(\\w:)/,'$1')",JSON.stringify(path.join(dir,'data'))));
+ const result=await promisify(execFile)(process.execPath,[path.join(dir,'check.mjs')],{windowsHide:true});assert.ok(Number(result.stdout.trim())>0);
 });
