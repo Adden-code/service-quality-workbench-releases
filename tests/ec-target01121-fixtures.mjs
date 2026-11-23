@@ -1,0 +1,22 @@
+import {createCatalog} from '../public/catalog.mjs';
+import {createBusinessState} from '../public/domain.mjs';
+import {createBasisSnapshot} from '../public/task-basis.mjs';
+import {defaultScenePackage} from '../public/scene-configuration.mjs';
+import {upgradeEcommerceSemanticBasis} from '../public/ecommerce-semantic-policy.mjs';
+import {upgradeEcommerceTimingBasis} from '../public/ecommerce-timing-policy.mjs';
+import {installSceneSeed} from '../server/scene-seed.mjs';
+import {EC_HEADERS,EC_RULE_IDS} from '../public/ecommerce-schema.mjs';
+export const now='2026-11-23T00:00:00Z',sceneId='电商评论回复';
+export function basis(){return upgradeEcommerceSemanticBasis({executionProfile:'ec-business-v1',capturedAt:now,effectiveDate:'2026-11-23',rules:EC_RULE_IDS.map(id=>({id,title:`Synthetic ${id}`,name:`Synthetic ${id}`,version:'V3.1',category:'Synthetic',scope:'Synthetic',policyIds:['EC-BUSINESS-POLICY'],passCriteria:'Synthetic old pass',failCriteria:'Synthetic old fail',exceptionCriteria:'Synthetic old unknown'})),policies:[{id:'EC-BUSINESS-POLICY',title:'Synthetic EC policy',name:'Synthetic EC policy',version:'V3.1',sections:EC_RULE_IDS.map(id=>({id:`${id}-BUSINESS-1`,title:id,text:'Synthetic original policy'}))}],businessProfile:{schemaVersion:1,similarity:{method:'normalized-bigram-dice-v1',threshold:.85,minimumRecords:2,scope:'batch'},structure:{minimumSteps:3,counting:'grapheme-with-spaces-v1',closingWaiver:{zh:240,en:280}},privacy:{maskedAllowed:false},timing:{mode:'elapsed',status:'ready',siteField:'国家',defaultHours:36,defaultSource:'Synthetic manual default',sites:[{id:'s',label:'Synthetic site',aliases:['SYNTH']}],standards:[{siteId:'s',evaluationType:'差评',hours:48,source:'Synthetic manual standard',authoring:'manual'}]}}},{minimumSignificantErrors:2});}
+export function row({replyAt='2026-11-22 10:00:00',commentAt='2026-11-21 10:00:00',reply='Synthetic helpful reply',rating='5',status='failed'}={}){
+ const raw=Array(22).fill('');Object.assign(raw,{3:'Synthetic site',8:'Synthetic failed battery',9:reply,10:rating,12:commentAt,13:replyAt});
+ return{id:'synthetic-1',scene:sceneId,turns:[{id:1,role:'客户',text:raw[8]},{id:2,role:'客服',text:reply}],contextFields:[],ecommerce:{schemaVersion:1,sheet:'Sheet4',row:3,fileSha256:'a'.repeat(64),headers:[...EC_HEADERS],standards:Array(22).fill('Synthetic'),raw,thresholdHours:24},sceneCapabilities:{outputs:{ecommerceClassification:{status,value:null,reason:'Synthetic classification failed'}}},aiExecution:{status:'completed',runId:'synthetic-run'},review:{status:'待审核',reviewer:'Synthetic reviewer',drafts:{},history:[]}};
+}
+export function fixture(){
+ const catalog=createCatalog(),base=catalog.rules[0];catalog.rules=Array.from({length:17},(_,i)=>({...structuredClone(base),id:`NP-R${String(i+1).padStart(2,'0')}`,title:`Synthetic NP ${i}`,category:i===0?'整体判定':i<12?'服务礼仪':i<14?'探需':'导购'}));
+ const np=defaultScenePackage({id:'新品产品咨询',name:'Synthetic NP',engine:'conversation'},createBasisSnapshot(catalog,{ruleIds:catalog.rules.map(r=>r.id),effectiveDate:'2026-11-23',now})),ec=defaultScenePackage({id:sceneId,name:'Synthetic EC',engine:'ecommerce'},basis());
+ ec.configuration.capabilities=[{key:'ecommerceClassification',phase:'pre',dependsOn:[],executorVersion:'scene-capability.v1'}];ec.configuration.ruleDependencies={'EC-TIME':['ecommerceClassification'],'EC-STEPS':['ecommerceClassification']};ec.configuration.timingPolicy.allowBatchOverride=true;ec.template.groupBy='site';ec.template.title='Synthetic locally maintained report';
+ for(const p of [np,ec]){p.configuration.status='published';p.configuration.executionMode='configured';p.template.renderMode='configured';}
+ const oldSeed={schemaVersion:1,id:'synthetic-01118',packages:[np,ec]},newSeed=structuredClone(oldSeed);newSeed.id='synthetic-01120';const c=newSeed.packages[1].configuration;c.basis=upgradeEcommerceTimingBasis(c.basis);c.basis.businessProfile.semanticPolicy.text.minimumSignificantErrors=1;c.ruleDependencies['EC-TIME']=[];c.timingPolicy.allowBatchOverride=false;c.ruleBindings=c.basis.rules.map(r=>({ruleId:r.id,ruleVersion:r.version}));for(const col of newSeed.packages[1].template.columns)if(col.ruleId)col.ruleVersion=c.ruleBindings.find(r=>r.ruleId===col.ruleId).ruleVersion;
+ return{catalog,oldSeed,newSeed,document:{catalog,state:installSceneSeed(createBusinessState(),catalog,oldSeed,{now})},input:{catalogSeed:catalog,sceneSeed:newSeed,actor:'Synthetic maintainer',reason:'Synthetic requirement 29 upgrade',operationId:'synthetic-time-upgrade',expectedVersion:1,now}};
+}

@@ -1,5 +1,5 @@
 import {validateCalendar,timeDurationMs} from './working-time.mjs';
-import {validateEcommerceSemanticPolicy} from './ecommerce-semantic-policy.mjs';
+import {validateEcommerceSemanticPolicy,validateEcommerceTargetPolicy} from './ecommerce-semantic-policy.mjs';
 import {isFixed24EcommerceBasis,validateEcommerceTimingPolicy,EC_FIXED24_TIMING_POLICY_VERSION} from './ecommerce-timing-policy.mjs';
 export const EC_BUSINESS_PROFILE='ec-business-v1';
 export const isBusinessEcommerceBasis=b=>b?.executionProfile===EC_BUSINESS_PROFILE;
@@ -13,6 +13,7 @@ export function validateBusinessEcommerceBasis(b){
  const p=b.businessProfile;
  if(!object(p)||p.schemaVersion!==1||p.similarity?.method!=='normalized-bigram-dice-v1'||p.similarity.threshold!==0.85||p.similarity.minimumRecords!==2||p.similarity.scope!=='batch')fail('电商相似度执行配置不受支持。');
  if(Object.hasOwn(p,'semanticPolicy'))validateEcommerceSemanticPolicy(p.semanticPolicy);
+ if(Object.hasOwn(p,'targetPolicyVersion'))validateEcommerceTargetPolicy(b);
  if(p.structure?.minimumSteps!==3||p.structure.counting!=='grapheme-with-spaces-v1'||!['zh','en'].every(l=>Number.isSafeInteger(p.structure.closingWaiver[l])&&p.structure.closingWaiver[l]>0)||p.privacy?.maskedAllowed!==false)fail('电商结构或隐私配置无效。');
  const t=p.timing;if(!object(t)||!['pending','ready'].includes(t.status)||!text(t.siteField)||!Array.isArray(t.sites)||t.sites.length>100||!Array.isArray(t.standards)||t.standards.length>400)fail('电商站点时效配置无效。');
  if(Object.hasOwn(t,'policyVersion'))validateEcommerceTimingPolicy(t);

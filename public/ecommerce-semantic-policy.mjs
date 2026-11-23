@@ -2,6 +2,7 @@
 // older scene must never opt it in or rewrite an existing task's execution basis.
 export const EC_SEMANTIC_POLICY_VERSION='ec-human-aligned-v1';
 export const EC_SEMANTIC_RULE_VERSION='V3.2';
+export const EC_TARGET_POLICY_VERSION='ec-specific-response-v1';
 const BUSINESS_PROFILE='ec-business-v1';
 const POLICY_ID='EC-BUSINESS-POLICY';
 const RULE_IDS=['EC-TEXT','EC-TARGET','EC-STEPS','EC-PRIVACY'];
@@ -11,6 +12,44 @@ const exactKeys=(value,keys)=>object(value)&&Object.keys(value).length===keys.le
 export function validateEcommerceSemanticPolicy(policy){
  if(!exactKeys(policy,['version','text'])||policy.version!==EC_SEMANTIC_POLICY_VERSION||!exactKeys(policy.text,['minimumSignificantErrors'])||![1,2].includes(policy.text.minimumSignificantErrors))throw new Error('电商语义口径无效：须使用 ec-human-aligned-v1，显著文本错误阈值仅支持 1 或 2 处。');
  return true;
+}
+
+export function hasSpecificResponsePolicy(basis){return basis?.executionProfile===BUSINESS_PROFILE&&basis.businessProfile?.targetPolicyVersion===EC_TARGET_POLICY_VERSION;}
+export function validateEcommerceTargetPolicy(basis){
+ if(basis.businessProfile?.targetPolicyVersion!==EC_TARGET_POLICY_VERSION||!basis.businessProfile.semanticPolicy)throw new Error('电商具体诉求回应口径无效：须使用 ec-specific-response-v1 并保留已校准语义策略。');
+ validateEcommerceSemanticPolicy(basis.businessProfile.semanticPolicy);return true;
+}
+
+// Shared by the seed, controlled publication and model request. A new frozen
+// marker is deliberate: installed software must not rewrite historical tasks.
+export const EC_TARGET_SPECIFIC_CRITERIA={
+ summary:'有具体诉求时必须实质回应诉求，或给出针对该问题的处理进展/方案/步骤；纯致歉＋倾听表态＋通用渠道指引判不符合。',
+ passCriteria:'单条针对性必须满足其一：(a) 针对评论中的具体问题、诉求或夸赞点作出实质回应；(b) 给出针对该问题的处理进展、方案或步骤。回复须有对应原文可说明这种关联；只重复诉求关键词不算实质回应。批次重复检查另按冻结相似度规则执行。',
+ failCriteria:'有具体诉求但未满足(a)/(b)，包括纯致歉、倾听/重视表态、泛泛承诺，或加上通用渠道指引（热线/WhatsApp/私信/购买渠道）仍无实质回应时，判不符合。仅复述问题再让用户自行联系渠道也不通过。不能用礼貌、称呼、关键词命中或提供联系方式替代具体回应。本批次至少两个不同来源行回复归一化相似度达到85%仍不通过；相似度由程序计算，批次相似比较逻辑不变。',
+ exceptionCriteria:'原评论只有笼统好评且无具体诉求/夸赞点时，按实际可回应内容判断，不编造问题、不强制解决方案或固定段落。已有回复但内容空泛属于不符合；原评论或回复缺失才为无法判定。渠道指引若同时给出对应问题的明确解释/处理进展/可执行下一步，可满足(a)/(b)，不以出现WhatsApp等词机械判Fail。reason须简要列明具体诉求、回复实际回应及满足(a)/(b)或缺失之处；不得编造回复没有的方案。',
+};
+
+export function upgradeEcommerceTargetBasis(basis){
+ const next=structuredClone(basis);if(next?.executionProfile!==BUSINESS_PROFILE)return next;
+ if(Object.hasOwn(next.businessProfile??{},'targetPolicyVersion')){validateEcommerceTargetPolicy(next);return next;}
+ validateEcommerceSemanticPolicy(next.businessProfile?.semanticPolicy);
+ const rule=next.rules.find(r=>r.id==='EC-TARGET');if(!rule)throw new Error('缺少EC-TARGET规则，未发布具体诉求回应口径。');
+ const previous=rule.version;rule.version=upgradedVersion(previous);Object.assign(rule,EC_TARGET_SPECIFIC_CRITERIA);
+ if(rule.english)rule.english.summary='Require a substantive response to the specific concern or issue-specific progress, solution or steps. Apology, listening and generic channel referrals alone fail; batch similarity is unchanged.';
+ rule.changeNote=`需求21补充：具体诉求回应硬判据；${previous} → ${rule.version}；${EC_TARGET_POLICY_VERSION}。`;
+ next.businessProfile.targetPolicyVersion=EC_TARGET_POLICY_VERSION;
+ for(const record of next.policies.filter(p=>p.id===POLICY_ID)){
+  const old=record.version;record.version=upgradedVersion(old);
+  const sectionId='EC-TARGET-BUSINESS-1';let section=record.sections.find(s=>s.id===sectionId);
+  if(!section){section={id:sectionId,title:rule.title||rule.id};record.sections.push(section);}
+  section.text=`通过：${rule.passCriteria}\n不通过：${rule.failCriteria}\n例外：${rule.exceptionCriteria}`;
+  // Other sections and their content are retained verbatim.
+  if(Object.hasOwn(section,'version'))section.version=record.version;
+  record.content=record.sections.map(s=>`${s.id} ${s.title}\n${s.text}`).join('\n\n');
+  record.summary=(record.summary||'')+' 需求21补充：具体诉求回应按(a)/(b)硬判据执行，纯致歉加通用渠道不通过。';
+  record.changeNote=`需求21补充：${old} → ${record.version}；${EC_TARGET_POLICY_VERSION}；仅更新EC-TARGET章节。`;
+ }
+ return next;
 }
 
 const criteria={

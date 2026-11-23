@@ -4,7 +4,7 @@ import {createDraft,publishVersion,retireVersion,nextVersion} from '../public/ca
 import {createBasisSnapshot} from '../public/task-basis.mjs';
 import {validateSceneRegistry,validateScenePackage,latestSceneConfiguration,sceneEntity,sameSceneValue,SceneConfigurationError} from '../public/scene-configuration.mjs';
 import {isFixed24EcommerceBasis,upgradeEcommerceTimingBasis,EC_FIXED24_TIMING_POLICY_VERSION} from '../public/ecommerce-timing-policy.mjs';
-import {upgradeEcommerceSemanticBasis} from '../public/ecommerce-semantic-policy.mjs';
+import {upgradeEcommerceSemanticBasis,upgradeEcommerceTargetBasis,hasSpecificResponsePolicy,EC_TARGET_POLICY_VERSION} from '../public/ecommerce-semantic-policy.mjs';
 import {validateBusinessEcommerceBasis} from '../public/ecommerce-business-profile.mjs';
 const clone=x=>structuredClone(x),hash=x=>createHash('sha256').update(JSON.stringify(x)).digest('hex');
 const EC_SCENE='电商评论回复',EC_POLICY='ec-human-aligned-v1';
@@ -17,20 +17,22 @@ export function installEcommercePolicyUpgrade(document,{catalogSeed,sceneSeed,ac
  const bundled=sceneSeed.packages.find(p=>p.configuration.sceneId===EC_SCENE)?.configuration.basis;
  if(bundled?.executionProfile!=='ec-business-v1'||!sameSceneValue(bundled.businessProfile?.semanticPolicy,{version:EC_POLICY,text:{minimumSignificantErrors:1}}))throw new SceneConfigurationError('本安装包未包含已确认的电商语义政策，请使用包含 ec-human-aligned-v1 的新版完整安装包。',undefined,409);
  validateBusinessEcommerceBasis(bundled);
- const bundledBase=clone(bundled);delete bundledBase.businessProfile.semanticPolicy;const verified=upgradeEcommerceSemanticBasis(bundledBase);
+ const targetUpgrade=hasSpecificResponsePolicy(bundled);
+ const bundledBase=clone(bundled);delete bundledBase.businessProfile.semanticPolicy;delete bundledBase.businessProfile.targetPolicyVersion;let verified=upgradeEcommerceSemanticBasis(bundledBase);if(targetUpgrade)verified=upgradeEcommerceTargetBasis(verified);
  if(ecSemanticIds.some(id=>{const supplied=bundled.rules.find(r=>r.id===id),expected=verified.rules.find(r=>r.id===id);return ['summary','passCriteria','failCriteria','exceptionCriteria'].some(key=>supplied[key]!==expected[key]);}))throw new SceneConfigurationError('安装包电商政策标识与四项规则正文不一致，未更新；请使用经过验证的新版完整安装包。',undefined,409);
  const timingUpgrade=isFixed24EcommerceBasis(bundled);
  if(timingUpgrade){const base=clone(bundled);delete base.businessProfile.timing.policyVersion;const expected=upgradeEcommerceTimingBasis(base).rules.find(r=>r.id==='EC-TIME'),supplied=bundled.rules.find(r=>r.id==='EC-TIME');if(['summary','passCriteria','failCriteria','exceptionCriteria'].some(key=>supplied[key]!==expected[key]))throw new SceneConfigurationError('安装包电商固定时效标识与规则正文不一致，未更新。',undefined,409);}
  const state=document.state,current=latestSceneConfiguration(state,EC_SCENE);
  if(state?.sceneConfigurationMigration!==1)throw new SceneConfigurationError('请先迁移场景配置。',undefined,409);
  if(!current||current.engine!=='ecommerce'||current.executionMode!=='configured'||current.basis?.executionProfile!=='ec-business-v1')throw new SceneConfigurationError('当前电商场景尚未使用完整业务配置，不能仅更新四项语义政策。',undefined,409);
- if(current.basis.businessProfile?.semanticPolicy?.version===EC_POLICY&&(!timingUpgrade||isFixed24EcommerceBasis(current.basis)))throw new SceneConfigurationError('当前电商语义政策已装载；已发布的单处/两处错误门槛将保留。调整门槛请新建场景配置草稿后发布。',undefined,409);
+ if(current.basis.businessProfile?.semanticPolicy?.version===EC_POLICY&&(!timingUpgrade||isFixed24EcommerceBasis(current.basis))&&(!targetUpgrade||hasSpecificResponsePolicy(current.basis)))throw new SceneConfigurationError('当前电商语义政策已装载；已发布的单处/两处错误门槛将保留。调整门槛请新建场景配置草稿后发布。',undefined,409);
  if(expectedVersion!==undefined&&current.version!==expectedVersion)throw new SceneConfigurationError('电商配置在确认期间已变化，请刷新并核对当前版本后重试。',undefined,409);
  if(state.sceneConfigurationEvents.some(e=>e.operationId===operationId))throw new SceneConfigurationError('操作标识已使用，请刷新后重试。',undefined,409);
  validateBusinessEcommerceBasis(current.basis);
  const next=clone(document),s=next.state,c=clone(current),template=clone(sceneEntity(s,'deliveryTemplates',current.templateRef)),originalExceptions=current.exceptionRefs.map(r=>clone(sceneEntity(s,'ruleExceptionTables',r)));
  if(!template||originalExceptions.some(e=>!e))throw new SceneConfigurationError('当前电商配置的模板或例外表缺失，未更新。',undefined,409);
  c.basis=upgradeEcommerceSemanticBasis(current.basis);
+ if(targetUpgrade)c.basis=upgradeEcommerceTargetBasis(c.basis);
  if(timingUpgrade){c.basis=upgradeEcommerceTimingBasis(c.basis);c.ruleDependencies['EC-TIME']=[];delete c.timingRuleMetrics?.['EC-TIME'];c.timingPolicy.allowBatchOverride=false;}
  c.basis.capturedAt=now;c.basis.effectiveDate=now.slice(0,10);
  for(const collection of ['rules','policies'])for(const record of c.basis[collection])if(!sameSceneValue(record,current.basis[collection].find(r=>r.id===record.id))){record.effectiveAt=now.slice(0,10);record.createdAt=now;record.publishedAt=now;record.owner=actor.trim();record.changeNote=`${record.changeNote||''} 发布原因：${reason.trim()}`;}
@@ -47,6 +49,7 @@ export function installEcommercePolicyUpgrade(document,{catalogSeed,sceneSeed,ac
  const changedIds=c.basis.rules.filter(r=>!sameSceneValue(r,current.basis.rules.find(old=>old.id===r.id))).map(r=>r.id);
  const diff=[{path:'configuration.basis.businessProfile.semanticPolicy',before:current.basis.businessProfile.semanticPolicy??null,after:clone(c.basis.businessProfile.semanticPolicy)},...changedIds.map(id=>({path:`configuration.basis.rules.${id}`,before:clone(current.basis.rules.find(r=>r.id===id)),after:clone(c.basis.rules.find(r=>r.id===id))})),{path:'configuration.basis.policies',before:clone(current.basis.policies),after:clone(c.basis.policies)},{path:'configuration.ruleBindings',before:clone(current.ruleBindings),after:clone(c.ruleBindings)},{path:'template',before:clone(sceneEntity(s,'deliveryTemplates',current.templateRef)),after:clone(template)}];
  if(timingUpgrade){for(const key of ['basis.businessProfile.timing','ruleDependencies','timingPolicy']){const pick=(value)=>key.split('.').reduce((v,k)=>v?.[k],value);if(!sameSceneValue(pick(current),pick(c)))diff.push({path:`configuration.${key}`,before:clone(pick(current)),after:clone(pick(c))});}}
+ if(targetUpgrade)diff.push({path:'configuration.basis.businessProfile.targetPolicyVersion',before:current.basis.businessProfile.targetPolicyVersion??null,after:EC_TARGET_POLICY_VERSION});
  if(!sameSceneValue(originalExceptions,exceptions))diff.push({path:'exceptions',before:originalExceptions,after:clone(exceptions)});
  s.sceneConfigurationEvents.push({id:`ec-policy-upgrade-${operationId}`,operationId,requestHash:hash({policy:EC_POLICY,...(timingUpgrade?{timingPolicy:EC_FIXED24_TIMING_POLICY_VERSION}:{}),actor,reason,expectedVersion}),sceneId:EC_SCENE,action:'ec-policy-upgrade',policyVersion:EC_POLICY,...(timingUpgrade?{timingPolicyVersion:EC_FIXED24_TIMING_POLICY_VERSION}:{}),seedHash:hash(sceneSeed),actor:actor.trim(),reason:reason.trim(),at:now,before:{configuration:clone(current),template:clone(sceneEntity(s,'deliveryTemplates',current.templateRef)),exceptions:originalExceptions},after:clone(after),diff});
  validateSceneRegistry(s,state,{trustedScene:true});return next;

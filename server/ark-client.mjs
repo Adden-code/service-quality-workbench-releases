@@ -1,5 +1,5 @@
 import {isBusinessEcommerceBasis,replyStructureFacts} from '../public/ecommerce-business-profile.mjs';
-import {ecommerceSemanticPolicy,ecommerceSemanticFacts,ecommerceSemanticGuidance,EC_SEMANTIC_POLICY_VERSION} from './ecommerce-semantic-prompt.mjs';
+import {ecommerceSemanticPolicy,ecommerceSemanticFacts,ecommerceSemanticGuidance,ecommerceTargetPolicy,ecommerceTargetGuidance,EC_SEMANTIC_POLICY_VERSION} from './ecommerce-semantic-prompt.mjs';
 import {modelConfigSnapshot} from './model-config.mjs';
 import {prepareRulePrompt,parseRuleCandidates,RulePreparationError,RULE_PREPARATION_PROMPT_VERSION} from './rule-preparation.mjs';
 import {validateDuplicateGroups} from './ecommerce-engine.mjs';
@@ -76,11 +76,12 @@ function prepareInspection(session,basis,{sceneCapabilities}={}){
  prepared.triageRequired=session.reviewPolicy?.enabled===true;
  prepared.turnMap=new Map(session.turns.map(turn=>[turn.id,turn]));
   prepared.messages[0].content+=' 每项另输出confidence（必须为不带引号的JSON数字，0到1的有限数值；证据不足请如实降低，不能为免审抬高；confidence must be an unquoted JSON number）、evidenceQuotes（数组，每项含turnId、逐字quote和与原轮次一致的role）、conflictsWith（数组，列出无法用原文消解的冲突规则id，无冲突必须显式空数组）。逐字引文只能摘取声明轮次且turnId必须同时列在evidence；不得拼接多轮或重写原句。输出前检查整体判定原则与各项结果的一致性；未消解矛盾须列入conflictsWith。以上字段是判定证据和自评元数据，不要求或输出思维链。';
- try{prepared.ecommerceSemanticPolicy=ecommerceSemanticPolicy(basis);}catch{fail('INVALID_INPUT','冻结的电商语义执行策略无效。',400);}
+ try{prepared.ecommerceSemanticPolicy=ecommerceSemanticPolicy(basis);prepared.ecommerceTargetPolicy=ecommerceTargetPolicy(basis);}catch{fail('INVALID_INPUT','冻结的电商语义执行策略无效。',400);}
  if(prepared.ecommerceSemanticPolicy){
   prepared.messages[0].content+=ecommerceSemanticGuidance(prepared.ecommerceSemanticPolicy);
   const data=JSON.parse(prepared.messages[1].content);
   data.basis.executionProfile=basis.executionProfile;data.basis.businessProfile={semanticPolicy:prepared.ecommerceSemanticPolicy};
+  if(prepared.ecommerceTargetPolicy){prepared.messages[0].content+=ecommerceTargetGuidance();data.basis.businessProfile.targetPolicyVersion=prepared.ecommerceTargetPolicy;}
   data.ecommercePolicyFacts=ecommerceSemanticFacts(session,basis,sceneCapabilities);prepared.messages[1].content=JSON.stringify(data);
  }
  return prepared;
@@ -238,7 +239,7 @@ export function createArkClient({fetchImpl=fetch,timeoutMs=120000,maxResponseByt
       prepared.messages[0].content+=prepared.ecommerceSemanticPolicy?' 本次只检查EC-TEXT、EC-TARGET、EC-STEPS、EC-PRIVACY。本条ecommercePolicyFacts是程序字符统计与已有评价分类；分类输入仍须结合sceneContext及原文证据，不能自行猜测。针对性仅核对单条实质回应，批次相似度由程序执行。':isBusinessEcommerceBasis(basis)?` 本次只检查EC-TEXT、EC-TARGET、EC-STEPS、EC-PRIVACY。针对性仅核对单条实质回应，批次相似度由程序执行。文本质量必须分别检查拼写、语法、标点/表情、通顺/歧义，理由写明具体类别及原文依据，不添加“明显”等门槛。结构项同时检查步骤编号与按评价类型的回复结构，任一失败即Fail；接受第一步/①/1.等完整顺序编号。少于3步仅免步骤编号要求，不免回复结构。程序字符统计：${JSON.stringify(replyStructureFacts(session.turns.filter(t=>['客服','坐席','agent','assistant'].includes(String(t.role).toLowerCase())).map(t=>t.text).join('\n'),basis))}；closingOptional=true才豁免结束语，其他组成仍需检查；分类未知且结构依赖分类时转无法判定。公开回复中的掩码个人信息同样禁止；仅输入字段含个人信息不能据此判违规。`:' 本次只检查当前一行评论，精确返回EC-TEXT、EC-TARGET、EC-STEPS、EC-PRIVACY四项；EC-TARGET仅检查当前回复的实质针对性，完整业务批次重复检查由独立阶段处理。没有至少3步操作指导时EC-STEPS为符合。';
       if(ruleIds)prepared.messages[0].content=prepared.messages[0].content.replace('本次只检查EC-TEXT、EC-TARGET、EC-STEPS、EC-PRIVACY。','本次是评价归类依赖恢复，仅检查并精确返回EC-STEPS一项；其他项已有冻结判定，不得输出。');
       const {content,...meta}=await request(config,prepared.messages,4096,signal,trace);
-      return traced(trace,'validation',{content,expectedSessionId:session.id,expectedRuleIds:semanticBasis.rules.map(r=>r.id)},()=>({results:parseResults(content,prepared),...meta,promptVersion:prepared.ecommerceSemanticPolicy?EC_SEMANTIC_POLICY_VERSION:'ec-row-ark-v1'}));
+      return traced(trace,'validation',{content,expectedSessionId:session.id,expectedRuleIds:semanticBasis.rules.map(r=>r.id)},()=>({results:parseResults(content,prepared),...meta,promptVersion:prepared.ecommerceSemanticPolicy?(prepared.ecommerceTargetPolicy||EC_SEMANTIC_POLICY_VERSION):'ec-row-ark-v1'}));
     },
     async compareEcommerceReplies({config,block,plan,signal,trace,retryFeedback,allowPartial=false}={}) {
       if(block?.oversized)fail('INPUT_TOO_LARGE','本比较块超过输入预算，未截断原文或将未完成比较视为通过。',400);
@@ -267,7 +268,7 @@ export function createArkClient({fetchImpl=fetch,timeoutMs=120000,maxResponseByt
       if(!object(body)||!Array.isArray(body.records)||body.records.length!==ids.size||new Set(body.records.map(r=>r.sessionId)).size!==ids.size||!Array.isArray(body.checkedSessionIds)||body.checkedSessionIds.length!==ids.size||new Set(body.checkedSessionIds).size!==ids.size||body.checkedSessionIds.some(id=>!ids.has(id)))throw invalidOutput();
       const records=body.records.map(row=>{const index=sessions.findIndex(s=>s.id===row.sessionId);if(index<0)throw invalidOutput();return{sessionId:row.sessionId,results:parseResults(JSON.stringify({results:row.results}),expected[index])};});
       let groups;try{groups=validateDuplicateGroups(body.duplicateGroups,sessions);}catch{throw invalidOutput();}
-      return{records,duplicateGroups:groups,...meta,promptVersion:expected[0].ecommerceSemanticPolicy?EC_SEMANTIC_POLICY_VERSION:'ec-batch-ark-v1'};
+      return{records,duplicateGroups:groups,...meta,promptVersion:expected[0].ecommerceSemanticPolicy?(expected[0].ecommerceTargetPolicy||EC_SEMANTIC_POLICY_VERSION):'ec-batch-ark-v1'};
       });
     },
     async prepareRules({config,input,signal}={}) {
@@ -295,7 +296,7 @@ export function createArkClient({fetchImpl=fetch,timeoutMs=120000,maxResponseByt
     async inspect({config,session,basis,signal,trace,sceneSnapshot,sceneCapabilities}={}) {
       const prepared=prepareInspection(session,basis,{sceneCapabilities});addSceneContext(prepared.messages,sceneSnapshot,sceneCapabilities);
       const {content,...meta}=await request(config,prepared.messages,16384,signal,trace);
-      return traced(trace,'validation',{content,expectedSessionId:session.id,basis:JSON.parse(prepared.messages[1].content).basis},()=>({results:parseResults(content,prepared),...meta,...(prepared.ecommerceSemanticPolicy?{promptVersion:EC_SEMANTIC_POLICY_VERSION}:{})}));
+      return traced(trace,'validation',{content,expectedSessionId:session.id,basis:JSON.parse(prepared.messages[1].content).basis},()=>({results:parseResults(content,prepared),...meta,...(prepared.ecommerceSemanticPolicy?{promptVersion:prepared.ecommerceTargetPolicy||EC_SEMANTIC_POLICY_VERSION}:{})}));
     },
     async test({config,signal}={}) {
       const messages=[{role:'system',content:'这是一项虚构的连接测试。只回复 OK。'},{role:'user',content:'虚构测试：1 + 1 = 2。请只回复 OK。'}];

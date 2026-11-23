@@ -1,7 +1,21 @@
 import {isBusinessEcommerceBasis,replyStructureFacts} from '../public/ecommerce-business-profile.mjs';
-import {EC_SEMANTIC_POLICY_VERSION,validateEcommerceSemanticPolicy} from '../public/ecommerce-semantic-policy.mjs';
+import {EC_SEMANTIC_POLICY_VERSION,validateEcommerceSemanticPolicy,EC_TARGET_POLICY_VERSION,validateEcommerceTargetPolicy,EC_TARGET_SPECIFIC_CRITERIA} from '../public/ecommerce-semantic-policy.mjs';
 
 export {EC_SEMANTIC_POLICY_VERSION};
+
+export function ecommerceTargetPolicy(basis){
+ if(!isBusinessEcommerceBasis(basis)||!Object.hasOwn(basis.businessProfile??{},'targetPolicyVersion'))return null;
+ validateEcommerceTargetPolicy(basis);return EC_TARGET_POLICY_VERSION;
+}
+export function ecommerceTargetGuidance(){return `\n独立冻结针对性口径 ${EC_TARGET_POLICY_VERSION}（仅EC-TARGET①②）：${Object.values(EC_TARGET_SPECIFIC_CRITERIA).join('\n')}
+以下均为合成判据示例，不是当前记录，不可复制示例结论或事实：
+例1 评论“设备运行很慢”；回复“抱歉，我们认真倾听，请拨打热线或联系WhatsApp。”→不符合：没有回应慢的原因或处理动作。
+例2 评论“包装缺少充电线，希望补发”；回复“抱歉没有充电线，请自行联系购买渠道。”→不符合：复述缺件和通用转介不构成补发处理说明。
+例3 同样的缺件诉求；回复“该套装应含充电线，我们已为这次缺件登记补发申请，审核后会通知您。”→针对性符合：明确回应缺件并说明处理进展；不要求已经解决成功。
+例4 评论“连接时显示E7”；回复“E7表示配对未完成，请先在设置中移除旧配对后重新连接；若仍出现E7，请通过商城私信提供设备型号，以继续核查此连接问题。”→针对性符合：有具体解释和步骤，不能因包含私信指引扣分。
+例5 评论“很好”；回复“感谢您的认可！”→不能仅因没有解决方案或固定段落判不符合；没有具体诉求时不创造要求。
+仅EC-TARGET的reason采用简短依据“具体诉求：…；回复实际回应：…；满足(a)/(b)或缺失：…”；不输出思维链，不改变其他规则的理由要求。对照评论与回复，不能把评论提出的希望当作客服已给出的方案。保持原有输出schema，不新增必填字段。以上示例只说明①②，不替代程序批次重复结果。
+重试时仍执行(a)/(b)；纯致歉＋倾听表态＋通用渠道指引=不符合，禁止为纠正格式把这一硬判据降级为建议。\n`;}
 
 // A frozen opt-in is required. Historical and non-business profiles never inherit
 // the current default, including when an unrelated profile carries this field.
