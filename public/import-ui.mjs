@@ -14,7 +14,7 @@ const head=(title,sub='')=>uiHtml`<header class="modal-head"><div><h2 id="dialog
 const selectTitle=(id,key,title)=>key&&(/^(?:input-field-|input-extra-\d+-column$|input-sheet$|rule-import-sheet$)/.test(id))?(getLocale()==='en'?`Original: ${title}`:title):uiT(title);
 const select=(id,label,value,options,attrs='')=>uiHtml`<div class="field-group"><label class="field-label" for="${e(id)}">${e(uiT(label))}</label><select class="field" id="${e(id)}" ${attrs}>${options.map(([key,title])=>uiHtml`<option value="${e(key)}" ${String(value??'')===String(key)?'selected':''}>${e(selectTitle(id,key,title))}</option>`).join('')}</select></div>`;
 const input=(id,label,value='',attrs='')=>uiHtml`<div class="field-group"><label class="field-label" for="${e(id)}">${e(uiT(label))}</label><input class="field" id="${e(id)}" value="${e(value)}" ${attrs}></div>`;
-const textarea=(id,label,value='',attrs='')=>uiHtml`<div class="field-group"><label class="field-label" for="${e(id)}">${e(uiT(label))}</label><textarea class="field" id="${e(id)}" rows="3" ${attrs}>${e(value)}</textarea></div>`;
+const textarea=(id,label,value='',attrs='')=>uiHtml`<div class="field-group"><label class="field-label" for="${e(id)}">${e(uiT(label))}</label><textarea data-business-original class="field" id="${e(id)}" rows="3" ${attrs}>${e(value)}</textarea></div>`;
 const error=d=>uiHtml`<div class="form-error" id="import-error" role="alert">${e(uiError(d.error||''))}</div><div id="import-feedback" role="status">${d.loading?uiT('正在处理…'):''}</div>`;
 const options=values=>values.map(value=>[value,value]);
 const sceneOptions=(state,includeDisabled=false)=>listScenarios(state,{includeDisabled}).map(config=>[config.id,`${config.name}${!config.enabled?'（已停用）':''}`]);
@@ -29,7 +29,7 @@ function rawTableView(dialog){
 export function contextFieldsView(session,keys=null){
   const fields=(session.contextFields||[]).filter(field=>keys===null||keys.includes(field.key));
   if(!fields.length)return '';
-  return uiHtml`<section class="context-fields" aria-label="配套字段证据"><h3>配套字段${keys===null?'':uiT('证据')}</h3>${fields.map(field=>uiHtml`<div class="context-field" data-context-key="${e(field.key)}"><div><strong>${e(businessText(field.label))}</strong><span>${e(field.value)}</span></div><small>${e(field.source?.sheet)} · 第${e(field.source?.row)}行 · ${e(field.source?.column)}${field.turnId?uiT(` · 关联第${e(field.turnId)}轮`):''}</small></div>`).join('')}</section>`;
+  return uiHtml`<section class="context-fields" aria-label="配套字段证据"><h3>配套字段${keys===null?'':uiT('证据')}</h3>${fields.map(field=>uiHtml`<div class="context-field" data-context-key="${e(field.key)}"><div><strong>${e(businessText(field.label))}</strong><span>${e(businessText(field.value))}</span></div><small>${e(field.source?.sheet)} · 第${e(field.source?.row)}行 · ${e(businessText(field.source?.column))}${field.turnId?uiT(` · 关联第${e(field.turnId)}轮`):''}</small></div>`).join('')}</section>`;
 }
 
 function profilesView(d,state){

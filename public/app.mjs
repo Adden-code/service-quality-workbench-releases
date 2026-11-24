@@ -1,3 +1,4 @@
+import {createReasonTranslationController} from './reason-translation.mjs';
 import {rawInlineKeyboard} from './raw-inline-review.mjs';
 import {installReadingControls} from './raw-review-layout.mjs';
 installReadingControls();
@@ -73,6 +74,7 @@ let overlayEpoch=0,closingOverlay=false,finishOverlayClose=null,backdropPress=nu
 const searchKeys={'task-search':'taskQuery','review-search':'reviewQuery','catalog-search':'catalogQuery'};
 const ui={dataMode:'manual',page:'overview',period:'month',dashboardTaskId:INITIAL_TASK_ID,taskStatus:'全部',taskQuery:'',catalogQuery:'',reviewTaskId:INITIAL_TASK_ID,reviewStatus:'待确认',reviewQuery:'',selectedId:'',openRules:[],highlightedTurns:[],resultFilter:'全部',exportTaskId:INITIAL_TASK_ID,includePending:false,reportPeriod:'month',reportTaskId:INITIAL_TASK_ID};
 const workspace=createWorkspaceClient({structuralSharing:true,storage:{getItem:key=>localStorage.getItem(key)}});
+const reasonTranslations=createReasonTranslationController({getToken:()=>workspace.token,onChange:()=>redrawLocalized()});
 const contentTranslations=createContentTranslationController({getToken:()=>workspace.token,onChange:()=>redrawLocalized()});
 const workflowManager=createWorkflowManager({getToken:()=>workspace.token,openModal:openDialog,closeModal:()=>closeDialog({force:true}),onChange:()=>{if(dialog?.type==='workflow')renderDialog();},toast,download});
 let state=createBusinessState(),catalog=createBusinessCatalog();
@@ -208,7 +210,8 @@ async function saveCatalogToWorkspace(next){
 }
 function renderStorageWarning(){
   const slot=document.getElementById('workspace-warning');if(!slot)return;
-  slot.innerHTML=storageWarning?uiHtml`<div class="storage-warning" role="alert">${e(uiError(storageWarning))} <button class="text-btn" data-act="${workspace.hasPending?'workspace-retry':'workspace-reload'}">${workspace.hasPending?uiT('重试保存'):uiT('重新加载工作区')}</button></div>`:'';
+  const upgrade=workspace.snapshot?.builtinUpgrade,upgradeNotice=upgrade&&['upgraded','failed'].includes(upgrade.status)?`<div class="notice-banner ${upgrade.status==='failed'?'warning':''}" role="status" data-builtin-upgrade>${e(getLocale()==='en'?(upgrade.messageEn||(upgrade.status==='failed'?'The bundled criteria upgrade failed. Your existing workspace remains available. Retry from Scenario management → Load bundled update.':'Bundled criteria upgraded. Existing tasks retain their original snapshots.')):upgrade.message)}${upgrade.status==='failed'?`<button class="text-btn" data-act="scenario-manage">${getLocale()==='en'?'Scenario management':'场景管理'}</button>`:''}</div>`:'';
+  slot.innerHTML=upgradeNotice+(storageWarning?uiHtml`<div class="storage-warning" role="alert">${e(uiError(storageWarning))} <button class="text-btn" data-act="${workspace.hasPending?'workspace-retry':'workspace-reload'}">${workspace.hasPending?uiT('重试保存'):uiT('重新加载工作区')}</button></div>`:'');
 }
 function reviewNow(){return new Date().toISOString();}
 function toast(message,error=false){
@@ -270,6 +273,7 @@ function render(){
   renderDialog(false);
   businessExportManager.setActive(page[0]==='exports'&&businessAvailable);
   rawReviewTimer.sync();
+  if(ui.page==='review'&&current())reasonTranslations.ensure(current());
 }
 function redrawLocalized(){
   // Rendering a translated view must not replace unsaved user input with a
@@ -560,6 +564,7 @@ document.addEventListener('click',async event=>{
     }
     if(action==='reload-build'){location.reload();return;}
     if(action==='task-problem-summary'){const task=state.tasks.find(t=>t.id===id);if(task){const text=taskProblemSummary(task,ui.buildInfo||{version:workspace.snapshot?.productVersion});try{await navigator.clipboard.writeText(text);toast(getLocale()==='en'?'Problem summary copied':'问题摘要已复制');}catch{download(text,'quality-problem-summary.json','application/json');}}return;}
+    if(action==='reason-translation-retry'){if(current())reasonTranslations.ensure(current(),{retry:true});return;}
     if(action==='ui-locale'){setLocale(button.dataset.locale);document.title=uiT('会话质检工作台');redrawLocalized();return;}
     if(await ecommerceConversionManager.action(action,button))return;
     if(await importDraftManager.action(action,button))return;
@@ -837,7 +842,7 @@ window.addEventListener('beforeunload',event=>{if(workspaceBackupManager.isBusy)
 matchMedia('(prefers-reduced-motion: reduce)').addEventListener('change',event=>{if(event.matches){cancelAllMotion();if(closingOverlay)finishOverlayClose?.();}});
 if(navigation.some(n=>n[0]===location.hash.slice(1)))ui.page=location.hash.slice(1);
 setLocale(getLocale());document.title=uiT('会话质检工作台');
-window.addEventListener('pagehide',()=>contentTranslations.stop());
+window.addEventListener('pagehide',()=>{contentTranslations.stop();reasonTranslations.stop();});
 setMode('manual');
 try{ui.modelConfig=await workspace.readModelConfig();}catch{ui.modelConfig={configured:false,keyConfigured:false,model:'glm-5.3-flash'};}
 render();

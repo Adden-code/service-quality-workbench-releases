@@ -101,5 +101,5 @@ export function taskDetailView(state,ui){
 export function taskImportLink(state,task){
  const lineage=importLineage(state,task);if(!lineage)return '';
  const first=state.tasks.find(t=>t.id===lineage.firstTaskId),removed=state.taskDeletionAudit?.find(a=>a.task.id===lineage.firstTaskId);
- return uiHtml`<p class="soft-note task-import-lineage">第${lineage.ordinal}次导入 · ${lineage.firstTaskId===task.id?'首次任务':first?uiHtml`<button class="text-btn" data-act="task-detail" data-id="${e(first.id)}">关联的首次任务：${e(first.id)}</button>`:uiHtml`首次任务 ${e(lineage.firstTaskId)} ${removed?'已删除，关联保留于任务删除审计':'当前工作区不可查看'}`}</p>`;
+ return uiHtml`<p class="soft-note task-import-lineage">第${lineage.ordinal}次导入 · ${lineage.firstTaskId===task.id?uiT('首次任务'):first?uiHtml`<button class="text-btn" data-act="task-detail" data-id="${e(first.id)}">关联的首次任务：${e(first.id)}</button>`:uiHtml`首次任务 ${e(lineage.firstTaskId)} ${removed?'已删除，关联保留于任务删除审计':'当前工作区不可查看'}`}</p>`;
 }

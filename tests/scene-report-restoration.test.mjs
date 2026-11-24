@@ -39,7 +39,7 @@ test('custom section headings and old aggregation contracts remain frozen',()=>{
 });
 test('English translation slots never reuse Chinese base translations; original job fingerprints remain visible',()=>{
  const {snapshot,enrichment}=sceneReportFixture();snapshot.targetLang='zh';snapshot.records[0].raw22[8]='原评价中文';enrichment.translations[snapshot.records[0].id].comment.text='不能用于英文的中文译文';
- const html=buildSceneReportHtml(snapshot,enrichment,{language:'en',job:{snapshotFingerprint:'saved-original-fingerprint'}});assert.doesNotMatch(html,/不能用于英文的中文译文/);assert.match(html,/Translation missing \(pending or failed\)/);assert.match(html,/Original/);assert.match(html,/saved-original-fingerprint/);assert.match(html,/Saved report job fingerprint/);
+ const html=buildSceneReportHtml(snapshot,enrichment,{language:'en',job:{snapshotFingerprint:'saved-original-fingerprint'}});assert.doesNotMatch(html,/不能用于英文的中文译文/);assert.match(html,/Untranslated: English translation unavailable/);assert.match(html,/Original/);assert.match(html,/saved-original-fingerprint/);assert.match(html,/Saved report job fingerprint/);
 });
 test('known frozen default rename aliases restore approved headings, with or without spaces; custom titles remain exact',()=>{
  for(const [key,title,expected] of [['improvements','不合格原因聚类与 Top3 改进方向','不合格原因聚类与改进建议'],['improvements','不合格原因聚类与Top3改进方向','不合格原因聚类与改进建议'],['voc','用户评价原声聚类','用户评价声量聚类'],['voc','用户评价 原声聚类','用户评价声量聚类'],['improvements','业务自定义：不合格原因聚类与 Top3 改进方向','业务自定义：不合格原因聚类与 Top3 改进方向'],['voc','业务自定义：用户评价原声聚类','业务自定义：用户评价原声聚类']]){

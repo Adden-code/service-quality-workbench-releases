@@ -19,7 +19,7 @@ export function englishDeliveryHeaders(snapshot,enrichment={},options={},config)
  if(snapshot.deliveryType==='consultation-v1')return[...snapshot.original.headers,'Full conversation — English translation',...config.analysisFields.flatMap(key=>(unverifiedRoleEvidence(snapshot)?conversationAnalysisNames:analysisNames)[key]||[]),...config.customFields.map(field=>locale.display(field.label)),...snapshot.basis.rules.map(rule=>locale.ruleLabel(rule.id,rule.title||rule.name||rule.id)),'Overall result','Failure reason summary'];
  return[...snapshot.headers22,'Customer review — English translation','Agent reply — English translation',...ENGLISH_BUSINESS_RULES.map(rule=>`AI initial — ${rule.label}`),'AI initial — Overall',...ENGLISH_BUSINESS_RULES.map(rule=>`Historical human — ${rule.label}`),'Historical human — Overall',...ENGLISH_BUSINESS_RULES.map(rule=>`Final — ${rule.label}`),'Overall result','Failure reason summary',...(snapshot.extensions?.headers??[])];
 }
-function originalTranslation(locale,source){if(!String(source??'').trim())return'';const value=locale.translation(source);return value.text||`[Translation ${value.status==='failed'?'failed':value.status==='pending'?'pending':'missing'}]`;}
+function originalTranslation(locale,source){return locale.display(source);}
 export function englishAnalysisValues(config,analysis,record,locale,roleEvidenceMode){
  const values={};
  if(analysis?.status!=='completed')for(const key of config.analysisFields)values[key]=Array(analysisNames[key]?.length||1).fill(countLabel(analysis?.status));

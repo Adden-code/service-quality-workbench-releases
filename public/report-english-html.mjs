@@ -21,7 +21,7 @@ const note=(text,warning=false)=>`<p class="note${warning?' warning':''}">${e(te
 const rowsOf=record=>record.sourceRow??array(record.sourceRows).join(', ');
 const styles=reportStyles;
 function evidence(locale,source,label='Evidence',rawQuote=false){
- const original=String(source??''),value=locale.translation(original),translation=!original.trim()?'[not applicable]':value.text||`[Translation ${value.status==='failed'?'failed':value.status==='pending'?'pending':'missing'}]`;
+ const original=String(source??''),translation=!original.trim()?'[not applicable]':locale.display(original);
  return`<div class="evidence"><h4>${e(label)} — Original</h4><p class="original">${rawQuote?`<mark class="raw-quotation">${e(original)}</mark>`:e(original)}</p><h4>English translation</h4><p class="translation"><span class="translation-label">Translation: </span>${e(translation)}</p></div>`;
 }
 function overview(snapshot,locale){

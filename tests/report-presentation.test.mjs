@@ -129,7 +129,7 @@ test('configured scenarios preserve selected modules and English source-bound tr
     assert.equal((html.match(/class="report-section"/g)||[]).length,1);assert.ok(!html.includes('DISABLED-ACTION'));
   }
   const ec=reportFixture();ec.snapshot.targetLang='en';ec.enrichment.translations['case-bad'].comment={status:'translated',text:'不允许混用的中文译文',detectedLanguage:'zh'};
-  const html=buildBusinessReportHtml(ec.snapshot,ec.enrichment,{language:'en'});assert.match(html,/Original/);assert.match(html,/\[Translation missing\]/);assert.ok(!html.includes('不允许混用的中文译文'));
+  const html=buildBusinessReportHtml(ec.snapshot,ec.enrichment,{language:'en'});assert.match(html,/Original/);assert.match(html,/Untranslated: English translation unavailable/);assert.ok(!html.includes('不允许混用的中文译文'));
 });
 
 test('long source identifiers and maximum category labels stay contained in mobile and A4 layouts',async t=>{

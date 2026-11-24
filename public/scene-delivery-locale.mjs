@@ -27,14 +27,19 @@ const labels={
 
 export function sceneReportLocale(snapshot,enrichment={},options={}){
  const locale=createReportLocale(snapshot,enrichment,options),english=locale.language==='en';
- const text=value=>{if(!english||typeof value!=='string')return value;if(/^含 \d+ 项无法判定$/.test(value))return value.match(/\d+/)[0]+' undetermined checks';if(Object.hasOwn(labels,value))return labels[value];const fixed=englishReportValue(value);if(fixed!==value)return fixed;if(!/[\u3400-\u9fff]/.test(value))return value;return locale.display(value);};
+ const planned=new Set(locale.fields.map(field=>field.text));
+ const text=value=>{if(!english||typeof value!=='string')return value;if(/^含 \d+ 项无法判定$/.test(value))return value.match(/\d+/)[0]+' undetermined checks';if(Object.hasOwn(labels,value))return labels[value];const fixed=englishReportValue(value);if(fixed!==value)return fixed;if(planned.has(value))return locale.display(value);if(!/[\u3400-\u9fff]/.test(value))return value;return locale.display(value);};
  const source=value=>english?locale.sourceLabel(value):value;
  function sheets(input){if(!english)return input;const t=snapshot.executionSnapshot.template;
+  const columns=snapshot.sourceFormat==='business-export-23.v1'?t.columns.filter(c=>!/^historical(?::|Overall)/.test(c.field||'')):t.columns,visible=columns.filter(c=>c.visible);
+  const recordForSourceRow=number=>snapshot.records.find(record=>record.id===snapshot.original?.rows?.find(row=>row.sourceRow===number)?.recordId||record.sourceRow===number);
+  const columnText=(value,column,record)=>{const field=column?.field;if(['translation','commentTranslation','replyTranslation'].includes(field)&&record){const original=field==='translation'?record.conversation:record.raw22?.[field==='commentTranslation'?8:9];return original?locale.display(original):'';}return text(value);};
   return input.map((sheet,index)=>{if(sheet.name==='证据核验明细')return evidenceAuditSheet(snapshot,true);if(sheet.name==='判定来源与分流')return resultProvenanceSheet(snapshot,'en');
    const result={...sheet,name:labels[sheet.name]||sheet.name.replace(/^原始数据/,'Original data '),headers:sheet.headers.map(text)};
-   if(index===0){const sourceCount=snapshot.original?.headers?.length??snapshot.systemSourceHeaders?.length??((snapshot.headers22?.length||0)+(snapshot.extensions?.headers?.length||0));result.headers=sheet.headers.map((v,i)=>i<sourceCount?'Original data':text(v));result.rows=sheet.rows.map(row=>row.map((v,i)=>i<sourceCount?v:text(v)));}
-   else if(index===1)result.rows=sheet.rows.map(row=>row.map((v,i)=>i===0?v:text(v)));
-   else if(index===2)result.rows=sheet.rows.map(row=>row.map((v,i)=>[4,6].includes(i)?text(v):v));
+   if(index===0){const sourceCount=snapshot.original?.headers?.length??snapshot.systemSourceHeaders?.length??((snapshot.headers22?.length||0)+(snapshot.extensions?.headers?.length||0));result.headers=sheet.headers.map((v,i)=>i<sourceCount?'Original data':text(v));result.rows=sheet.rows.map((row,rowIndex)=>row.map((v,i)=>i<sourceCount?v:rowIndex===0?text(v):columnText(v,visible[i-sourceCount-1],recordForSourceRow(row[sourceCount]))));}
+   else if(index===1)result.rows=sheet.rows.map(row=>row.map((v,i)=>i===0?v:columnText(v,columns[i-1],snapshot.records.find(record=>record.id===row[0]))));
+   else if(index===2){result.headers.push('AI reason — English view','Human reason — English view','Classification reason — English view');result.rows=sheet.rows.map(row=>{const audit=snapshot.sceneAudit.find(item=>item.id===row[0]),human=audit?.review?.drafts?.[row[2]];return [...row.map((v,i)=>[4,6].includes(i)?text(v):v),locale.display(row[9]),locale.display(human?.reason||''),locale.display(audit?.classificationReason||'')];});}
+   else if(index===3){result.headers.push('Reason — English view','Reason — original');result.rows=sheet.rows.map(row=>{const capability=snapshot.sceneAudit.find(item=>item.id===row[0])?.capabilities?.outputs?.[row[1]],reason=capability?.reason||capability?.value?.reason||'';return [...row,locale.display(reason),reason];});}
    else if(index===4)result.rows=sheet.rows.map(([key,value])=>[text(key),key==='来源声明'?`${snapshot.source.name}; SHA256 ${snapshot.source.sha256}; local frozen snapshot`:['冻结版本','输出语种','模板列规则'].includes(key)?value:text(value)]);
    else if(index>=5){result.headers=sheet.name.startsWith('原始数据')?sheet.headers:sheet.headers.map(text);result.rows=sheet.rows;}
    return result;

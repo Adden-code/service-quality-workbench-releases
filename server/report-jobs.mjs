@@ -1,3 +1,5 @@
+import {activeDesktopJobCount} from './desktop-activity.mjs';
+import {deliveryUnitProgress,projectIncompleteDelivery,adoptIncompleteDelivery} from './delivery-progress.mjs';
 import {REPORT_CLUSTER_POLICY,hasReportClusterPolicy,buildReportIssueClusters} from '../public/report-issue-clusters.mjs';
 import {createJobScheduler,validJobConcurrency,serialOperations,interleaveReportUnits} from './bounded-job-scheduler.mjs';
 import {validatePartialReportResult,rebuildValidatedReportAudit} from './report-enrichment.mjs';
@@ -63,8 +65,8 @@ function inputFor(snapshot,unit,prepared){
  if(unit.kind==='issueClusters')return{ruleId:unit.ruleId,records:rows.map(row=>({id:row.id,reason:row.final.find(item=>(item.ruleId||item.id)===unit.ruleId)?.reason||'',comment:row.raw22[8],reply:row.raw22[9]}))};
  return{records:rows.map(row=>({id:row.id,comment:row.raw22[8]}))};
 }
-function progress(job){const counts={total:job.units.length,done:0,failed:0,pending:0,running:0};for(const unit of job.units){if(unit.status==='completed')counts.done++;else counts[unit.status]++;}return{...counts,percent:counts.total?Math.round((counts.done+counts.failed)/counts.total*100):100};}
-function summary(job){return{schemaVersion:1,id:job.id,...(job.reportClusterPolicy?{reportClusterPolicy:job.reportClusterPolicy}:{}),concurrency:job.concurrency??2,taskId:job.taskId,taskName:job.taskName,createdAt:job.createdAt,updatedAt:job.updatedAt,status:job.status,phase:job.phase,options:copy(job.options),snapshotFingerprint:job.snapshotFingerprint,sourceRevision:job.sourceRevision,progress:progress(job),warningsCount:job.units.filter(unit=>unit.status==='failed').length,resultAvailable:true,stopReason:job.stopReason||'',modelConfig:copy(job.modelConfig),traceRunIds:[...job.traceRunIds],nodes:job.units.map(({id,kind,label,status,attempts,durationMs,errorCode,error})=>({id,kind,label,status,attempts,durationMs,...(errorCode?{errorCode,error}:{})}))};}
+function progress(job){return deliveryUnitProgress(job.units);}
+function summary(job){return{schemaVersion:1,id:job.id,...(job.reportClusterPolicy?{reportClusterPolicy:job.reportClusterPolicy}:{}),concurrency:job.concurrency??2,taskId:job.taskId,taskName:job.taskName,createdAt:job.createdAt,updatedAt:job.updatedAt,status:job.status,phase:job.phase,options:copy(job.options),snapshotFingerprint:job.snapshotFingerprint,sourceRevision:job.sourceRevision,progress:progress(job),warningsCount:job.units.filter(unit=>unit.status==='failed').length,resultAvailable:true,stopReason:job.stopReason||'',modelConfig:copy(job.modelConfig),traceRunIds:[...job.traceRunIds],nodes:job.units.map(({id,kind,label,status,attempts,durationMs,errorCode,error,notApplicable})=>({id,kind,label,status,attempts,durationMs,...(notApplicable?{notApplicable:true}:{}),...(errorCode?{errorCode,error}:{})}))};}
 function bounded(value,secret){const clean=input=>typeof input==='string'?(secret?input.split(secret).join('[已隐藏密钥]'):input):Array.isArray(input)?input.map(clean):input&&typeof input==='object'?Object.fromEntries(Object.entries(input).filter(([key])=>!['apikey','authorization','proxyauthorization'].includes(key.toLowerCase().replace(/[\s_-]/g,''))).map(([key,item])=>[key,clean(item)])):input??null;const safe=clean(value),text=JSON.stringify(safe),bytes=Buffer.byteLength(text);return bytes<=16384?safe:{truncated:true,bytes,limitBytes:16384,sha256:hash(text),preview:text.slice(0,3000),...(safe?.kind==='consultationAnalysis'&&safeConsultationDiagnostic(safe.diagnostic)?{diagnostic:safeConsultationDiagnostic(safe.diagnostic)}:{}),reason:'节点快照已摘要；原文及完整成功输出保留在交付任务中。'};}
 async function abortable(operation,signal){if(signal.aborted)throw Object.assign(new Error('interrupted'),{code:'INTERRUPTED'});let cancel;try{return await Promise.race([Promise.resolve().then(operation),new Promise((_,reject)=>{cancel=()=>reject(Object.assign(new Error('interrupted'),{code:'INTERRUPTED'}));signal.addEventListener('abort',cancel,{once:true});})]);}finally{if(cancel)signal.removeEventListener('abort',cancel);}}
 
@@ -99,16 +101,18 @@ export async function createReportJobs({dataDir,store,modelConfig,client,traceSt
  // Project legacy completed translations through the current target guard.
  // Reads never rewrite saved jobs, attempts, results or caches and never call a model.
  async function visibleJob(saved){
-  const job=copy(saved);if(job.options?.targetLang!=='en')return job;const snapshot=await snapshotOf(job);
-  const prepared=plan(snapshot,job.modelConfigFingerprint);let invalid=false;
+  const job=projectIncompleteDelivery(copy(saved));const snapshot=job.options?.targetLang==='en'?await snapshotOf(job):null;
+  const prepared=snapshot?plan(snapshot,job.modelConfigFingerprint):null;let invalid=false;
   for(const unit of job.units)if(unit.kind==='translation'&&unit.status==='completed'){
    const output=await outputOf(job,unit);
+   unit.notApplicable=Array.isArray(output?.items)&&output.items.length>0&&output.items.every(item=>item.isTargetLanguage===true);
+   if(job.options?.targetLang!=='en')continue;
    try{validateReportTranslationResult({items:output?.items},inputFor(snapshot,unit,prepared));}
-   catch(error){if(error.code!=='INVALID_OUTPUT')throw error;unit.status='failed';unit.errorCode='invalid_output';unit.error='已保存译文未通过英文语种校验，请重试缺失项。';invalid=true;}
+   catch(error){if(error.code!=='INVALID_OUTPUT')throw error;delete unit.notApplicable;unit.status='failed';unit.errorCode='invalid_output';unit.error='已保存译文未通过英文语种校验，请重试缺失项。';invalid=true;}
   }
   if(invalid&&job.status==='completed')job.status='completed_with_warnings';return job;
  }
- function adoptTranslationFailures(job,view){for(const unit of job.units){const checked=view.units.find(item=>item.id===unit.id);if(unit.kind==='translation'&&unit.status==='completed'&&checked?.status==='failed'){unit.status='failed';unit.errorCode=checked.errorCode;unit.error=checked.error;}}}
+ function adoptTranslationFailures(job,view){adoptIncompleteDelivery(job,view);for(const unit of job.units){const checked=view.units.find(item=>item.id===unit.id);if(unit.kind==='translation'&&unit.status==='completed'&&checked?.status==='failed'){unit.status='failed';unit.errorCode=checked.errorCode;unit.error=checked.error;}}}
  function validatedTranslations(value,input){
   try{return validateReportTranslationResult({items:value?.items},input);}
   catch(error){if(error.code==='INVALID_OUTPUT')error.traceOutput={kind:'translation',content:JSON.stringify(value??null).slice(0,20000)};throw error;}
@@ -237,6 +241,7 @@ export async function createReportJobs({dataDir,store,modelConfig,client,traceSt
   pause(id){return serial(async()=>{const job=find(id);if(active.has(id)){const work=active.get(id);work.paused=true;work.scheduler?.wake();}if(job.status==='running'){job.status='paused';job.completedAt=null;job.stopReason='user_paused';await persist(job);}return summary(job);});},
   resume(id){return serial(async()=>{const job=find(id);if(closing)throw new ReportJobError('服务正在关闭。',503);if(active.has(job.id))throw new ReportJobError('请求仍在收尾，请稍后继续。',409);if(job.status!=='paused')return summary(await visibleJob(job));await snapshotOf(job);const config=savedConfig(job);adoptTranslationFailures(job,await visibleJob(job));job.status='running';delete job.stopReason;job.resumeCount++;await persist(job);launch(job,config);return summary(job);});},
   retry(id){return serial(async()=>{const job=find(id);if(closing)throw new ReportJobError('服务正在关闭。',503);if(active.has(job.id))throw new ReportJobError('已有生成请求正在执行。',409);await snapshotOf(job);const config=savedConfig(job);adoptTranslationFailures(job,await visibleJob(job));if(!job.units.some(unit=>unit.status==='failed'))return summary(job);for(const unit of job.units)if(unit.status==='failed'){unit.status='pending';delete unit.error;delete unit.errorCode;}job.status='running';delete job.stopReason;job.round++;await persist(job);launch(job,config);return summary(job);});},
+  activityCount(){return activeDesktopJobCount({pendingOperations,activeIds:[...active.keys()],jobs:[...jobs.values()]});},
   isBusy(){return pendingOperations>0||active.size>0;},
   async waitForIdle(){await serialTail;while(active.size){await Promise.all([...active.values()].map(work=>work.promise));await serialTail;}},
   close(){if(closePromise)return closePromise;closing=true;closePromise=(async()=>{await serialTail;for(const work of active.values())work.controller.abort();await Promise.all([...active.values()].map(work=>work.promise));await files.close();})();return closePromise;},

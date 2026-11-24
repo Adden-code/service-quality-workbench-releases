@@ -1,3 +1,4 @@
+import {reasonText} from './reason-translation.mjs';
 import {hasUnverifiedEvidence} from './evidence-status.mjs';
 import {capabilityHelpActions,capabilityName} from './task-diagnostics.mjs';
 import {classificationReviewForm} from './ecommerce-classification-review.mjs';
@@ -26,7 +27,7 @@ export function reviewBusinessText(value,english=getLocale()==='en'){
  const text=typeof value==='string'?value:'',known=businessTerms[text];if(known)return known[english?1:0];
  let result=text;for(const [key,labels]of Object.entries(businessTerms))result=result.replaceAll(key,labels[english?1:0]);
  // Unknown machine identifiers/JSON belong in the existing run diagnostics, never in the business review view.
- return /[{}]|\b[A-Za-z]+[._][A-Za-z]+\b/.test(result)?(english?'See run details for technical information.':'详细技术信息请在运行记录中查看。'):result;
+ return /[{}]|\b[A-Za-z]+[._][A-Za-z]+\b/.test(result)?(english?'See run details for technical information.':'详细技术信息请在运行记录中查看。'):reasonText(text,english?'en':'zh');
 }
 export function sceneReviewEvidence(session,ruleId,classificationDraft){
  const outputs=session.sceneCapabilities?.outputs;if(!outputs)return ruleId==='EC-TIME'?classificationReviewForm(session,classificationDraft):'';const english=getLocale()==='en',metrics=outputs.timing?.metrics||[],L=(zh,en)=>english?en:zh,T=v=>e(reviewBusinessText(v,english));

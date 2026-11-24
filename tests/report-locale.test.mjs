@@ -22,7 +22,7 @@ test('verified English original translations are reused from the frozen base wit
  const source=snapshot.records[0].conversation;snapshot.targetLang='en';enrichment.translations['new-bad'].conversation={status:'translated',text:'Reusable full English conversation'};
  const fields=collectReportTranslationFields(snapshot,enrichment);assert.ok(!fields.some(field=>field.text===source));
  const locale=createReportLocale(snapshot,enrichment,{language:'en'});assert.equal(locale.display(source),'Reusable full English conversation');
- snapshot.targetLang='zh';assert.ok(collectReportTranslationFields(snapshot,enrichment).some(field=>field.text===source));assert.match(createReportLocale(snapshot,enrichment,{language:'en'}).display(source),/Translation missing/);
+ snapshot.targetLang='zh';assert.ok(collectReportTranslationFields(snapshot,enrichment).some(field=>field.text===source));assert.match(createReportLocale(snapshot,enrichment,{language:'en'}).display(source),/Untranslated: English translation unavailable/);
 });
 
 test('consultation collector includes selected human labels, analysis and grounded original evidence',async()=>{
@@ -34,8 +34,8 @@ test('consultation collector includes selected human labels, analysis and ground
 test('report locale matches stable IDs AND sourceText, never reuses stale or failed translations',async()=>{
  const {createReportLocale,collectReportTranslationFields}=await implementation(),{snapshot,enrichment}=reportFixture(),fields=collectReportTranslationFields(snapshot,enrichment),field=fields.find(value=>value.text===snapshot.records[1].summary);
  const locale=createReportLocale(snapshot,enrichment,{language:'en',translations:[{id:field.id,sourceText:field.text,text:'Verified English summary',status:'translated'}]});
- assert.equal(locale.text(field.id,field.text),'Verified English summary');assert.match(locale.text(field.id,'changed source'),/Translation missing/);
- const failed=createReportLocale(snapshot,enrichment,{language:'en',translations:[{id:field.id,sourceText:field.text,text:'MUST NOT USE',status:'failed'}]});assert.match(failed.text(field.id,field.text),/Translation failed/);assert.ok(!failed.text(field.id,field.text).includes('MUST NOT USE'));
+ assert.equal(locale.text(field.id,field.text),'Verified English summary');assert.match(locale.text(field.id,'changed source'),/Untranslated: English translation unavailable/);
+ const failed=createReportLocale(snapshot,enrichment,{language:'en',translations:[{id:field.id,sourceText:field.text,text:'MUST NOT USE',status:'failed'}]});assert.match(failed.text(field.id,field.text),/Untranslated: translation failed/);assert.ok(!failed.text(field.id,field.text).includes('MUST NOT USE'));
  assert.equal(createReportLocale(snapshot,enrichment).text(field.id,field.text),field.text);
 });
 
@@ -69,7 +69,7 @@ test('Chinese-only, product-code padded, und and forged same base translations s
  ]){
   const {snapshot,enrichment}=reportFixture();snapshot.targetLang='en';snapshot.records[0].raw22[8]=source;enrichment.translations['case-good'].comment=entry;
   assert.ok(collectReportTranslationFields(snapshot,enrichment).some(field=>field.id==='record.case-good.comment'&&field.text===source),JSON.stringify(entry));
-  assert.match(createReportLocale(snapshot,enrichment,{language:'en'}).display(source),/Translation missing/);
+  assert.match(createReportLocale(snapshot,enrichment,{language:'en'}).display(source),/Untranslated: English translation unavailable/);
  }
 });
 

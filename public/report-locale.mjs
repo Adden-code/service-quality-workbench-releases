@@ -2,6 +2,7 @@ import {hasReportClusterPolicy,reportClusterView,reportClusterTextParts} from '.
 import {selectConsultationCaseExcerpts} from './consultation-excerpts.mjs';
 import {CONVERSATION_UNVERIFIED,groundedConversationQuote} from './role-evidence.mjs';
 import {reusableEnglishBaseTranslation} from './translation-language.mjs';
+import {sceneDeliveryRows,sceneDeliveryValue} from './scene-delivery-values.mjs';
 
 const array=value=>Array.isArray(value)?value:[];
 const readable=value=>typeof value==='string'&&value.trim();
@@ -57,7 +58,13 @@ export function collectReportTranslationFields(snapshot,enrichment={}){
   for(const c of array(t.columns)){add(['scene','column',c.id],c.label);array(c.enum).forEach((x,i)=>add(['scene','column',c.id,'enum',i],x));const parts=[];let g=t.columnGroups.find(g=>g.id===c.groupId);const seen=new Set();while(g&&!seen.has(g.id)){seen.add(g.id);parts.unshift(g.label);g=t.columnGroups.find(x=>x.id===g.parentId);}add(['scene','column',c.id,'groupPath'],parts.join(' / '));}
   for(const label of array(frozen.taxonomy?.labels))add(['scene','label',label.id],label.label);
   for(const site of array(frozen.configuration.timingPolicy?.sites))add(['scene','site',site.id],site.label);
-  for(const row of array(snapshot.sceneAudit)){add(['scene','row',row.id,'product'],row.product);for(const [key,result] of Object.entries(row.capabilities?.outputs||{}))if(result.status==='completed'){add(['scene','row',row.id,key,'text'],result.value?.text);add(['scene','row',row.id,key,'label'],result.value?.label);}for(const r of row.ai||[])add(['scene','row',row.id,r.ruleId,'reason'],r.reason);for(const [id,r] of Object.entries(row.review?.drafts||{}))add(['scene','row',row.id,id,'humanReason'],r.reason);}
+  for(const row of array(snapshot.sceneAudit)){add(['scene','row',row.id,'product'],row.product);add(['scene','row',row.id,'classificationReason'],row.classificationReason);for(const [key,result] of Object.entries(row.capabilities?.outputs||{})){add(['scene','row',row.id,key,'reason'],result.reason);add(['scene','row',row.id,key,'valueReason'],result.value?.reason);if(result.status==='completed'){add(['scene','row',row.id,key,'text'],result.value?.text);add(['scene','row',row.id,key,'label'],result.value?.label);}}for(const r of row.ai||[])add(['scene','row',row.id,r.ruleId,'reason'],r.reason);for(const [id,r] of Object.entries(row.review?.drafts||{}))add(['scene','row',row.id,id,'humanReason'],r.reason);}
+  // Collect the exact strings the configured workbook renders, including composed
+  // failure summaries and hidden sibling columns retained in All business columns.
+  if(array(snapshot.sceneAudit).length)for(const row of sceneDeliveryRows(snapshot))for(const column of array(t.columns)){
+   if(column.generator==='rule'||['translation','commentTranslation','replyTranslation'].includes(column.field))continue;
+   add(['scene','row',row.record.id,'column',column.id],sceneDeliveryValue(row,column,snapshot,enrichment));
+  }
  }
 
  const consultation=snapshot?.deliveryType==='consultation-v1',basis=snapshot?.basis??{},scenario=snapshot?.scenarioSnapshot;
@@ -123,13 +130,11 @@ export function createReportLocale(snapshot,enrichment={},options={}){
  // source-bound same result still passes the shared Latin-source check.
  const state=(id,source)=>{const reusedValue=reused.get(id);if(reusedValue?.source===source)return reusedValue;const field=byId.get(id),entry=entries.get(id);if(!field||field.text!==source)return{status:'missing',text:''};const checked=entry?.status==='same'&&entry.detectedLanguage===undefined?{...entry,detectedLanguage:'en'}:entry;if(reusableEnglishBaseTranslation(source,checked))return{status:entry.status,text:entry.status==='same'?source:entry.text};return{status:entry?.status==='failed'?'failed':entry?.status==='pending'?'pending':'missing',text:''};};
  const lookup=source=>{const ids=byText.get(source)||[];return ids.map(id=>state(id,source)).find(value=>['same','translated'].includes(value.status))||reusedByText.get(source)||ids.map(id=>state(id,source)).find(value=>value.status==='failed')||ids.map(id=>state(id,source)).find(value=>value.status==='pending')||{status:'missing',text:''};};
- const fallback=value=>`[Translation ${value.status==='failed'?'failed':value.status==='pending'?'pending':'missing'}]`;
- const text=(id,source)=>{source=String(source??'');if(language==='zh'||!source.trim())return source;const value=state(id,source);return value.text||fallback(value);};
- const display=source=>{source=String(source??'');if(language==='zh'||!source.trim())return source;const value=lookup(source);return value.text||fallback(value);};
- // Only source identifiers/group values use this explicit provenance display.
- // English prose/aliases use text/display and never append untranslated source.
+ const fallback=(value,source)=>`${source} [Untranslated: ${value.status==='failed'?'translation failed':value.status==='pending'?'translation pending':'English translation unavailable'}]`;
+ const text=(id,source)=>{source=String(source??'');if(language==='zh'||!source.trim())return source;const value=state(id,source);return value.text||fallback(value,source);};
+ const display=source=>{source=String(source??'');if(language==='zh'||!source.trim())return source;const value=lookup(source);return value.text||fallback(value,source);};
  const sourceLabel=source=>{source=String(source??'');if(language==='zh'||!source.trim())return source;const value=lookup(source);return value.text?value.text===source?source:`${value.text} [Original: ${source}]`:`[Original: ${source}]`;};
- const quote=source=>{source=String(source??'');if(!source.trim())return'Original: [empty]\nEnglish translation: [not applicable]';const value=lookup(source);return`Original: ${source}\nEnglish translation: ${value.text||`[Translation ${value.status==='failed'?'failed':value.status==='pending'?'pending':'missing'}]`}`;};
+ const quote=source=>{source=String(source??'');if(!source.trim())return'Original: [empty]\nEnglish translation: [not applicable]';return`Original: ${source}\nEnglish translation: ${display(source)}`;};
  const counts={total:fields.length,done:0,failed:0,pending:0,missing:0};for(const field of fields){const value=state(field.id,field.text);if(['same','translated'].includes(value.status))counts.done++;else counts[value.status]++;}
- return{language,fields,text,display,sourceLabel,quote,state,translation:source=>lookup(String(source??'')),counts,value:englishReportValue,ruleLabel:(id,source)=>{const builtin=ENGLISH_BUSINESS_RULES.find(rule=>rule.id===id)?.label;if(builtin)return builtin;if(language==='zh')return String(source||id);const value=lookup(String(source||id));return value.text||`${id} ${fallback(value)}`;}};
+ return{language,fields,text,display,sourceLabel,quote,state,translation:source=>lookup(String(source??'')),counts,value:englishReportValue,ruleLabel:(id,source)=>{if(language==='zh')return String(source||id);const builtin=ENGLISH_BUSINESS_RULES.find(rule=>rule.id===id)?.label;if(builtin)return builtin;const value=lookup(String(source||id));return value.text||`${id} · ${fallback(value,String(source||id))}`;}};
 }

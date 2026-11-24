@@ -96,14 +96,14 @@ test('source worksheet, extensions and physical column maps participate in stale
  }finally{manager.close();}
 });
 
-test('a late partial download response cannot regress a newer completed progress state',async()=>{
+test('a late partial download response cannot regress a newer completed progress state',async t=>{
   const {createBusinessExportManager}=await implementation(),state=managerState(),ui=businessUI(),{snapshot,enrichment}=reportFixture(),running=summaryFixture(),completed=summaryFixture({status:'completed',updatedAt:'2026-11-04T10:02:00+08:00',progress:{total:4,done:4,failed:0,pending:0,running:0,percent:100}});let resultCalls=0,resolveOld,serverComplete=false,completedObserved=false;
   const manager=createBusinessExportManager({api:async path=>{
     if(path.includes('?taskId='))return{jobs:[running]};
     if(path.endsWith('/result')){resultCalls++;if(resultCalls===2)return await new Promise(resolve=>resolveOld=resolve);return{snapshot,enrichment,job:serverComplete?completed:running};}
     if(serverComplete)completedObserved=true;return{job:serverComplete?completed:running};
   },getState:()=>state,getUI:()=>ui,onRender:()=>{},download:()=>{},notify:()=>{},pollMs:50,createSnapshot:()=>snapshot});
-  manager.setActive(true);await tick();await tick();const downloading=manager.handleAction('business-download-html');await tick();serverComplete=true;
+  t.after(()=>manager.close());manager.setActive(true);await tick();await tick();const downloading=manager.handleAction('business-download-html');await tick();serverComplete=true;
   const deadline=Date.now()+1200;while(!completedObserved&&Date.now()<deadline)await new Promise(resolve=>setTimeout(resolve,10));assert.ok(completedObserved,'progress poll observed completion');await tick();
   resolveOld({snapshot,enrichment,job:running});await downloading;
   assert.ok(manager.view(state,ui).includes('<h2>已完成</h2>'));assert.ok(!manager.view(state,ui).includes('<h2>生成中</h2>'));manager.close();

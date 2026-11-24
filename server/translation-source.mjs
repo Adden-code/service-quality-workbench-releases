@@ -1,6 +1,7 @@
 import {createHash} from 'node:crypto';
 import {getTaskBasis} from '../public/task-basis.mjs';
 import {findScenario} from '../public/scenarios.mjs';
+import {sessionDisplayFields} from '../public/session-display-fields.mjs';
 
 export class TranslationJobError extends Error {
  constructor(message,status=400,code='TRANSLATION_INPUT'){super(message);this.name='TranslationJobError';this.status=status;this.code=code;}
@@ -11,7 +12,7 @@ export const translationHash=value=>createHash('sha256').update(typeof value==='
 export function translationJobId(id){if(typeof id!=='string'||!/^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/.test(id))throw new TranslationJobError('翻译任务标识无效。');return id;}
 const validToken=value=>typeof value==='string'&&value.trim()===value&&value.length>0&&value.length<=200&&!/[\p{Cc}]/u.test(value);
 export function translationSource(source){
- const shapes={session:['kind','taskId','sessionId'],task:['kind','taskId'],rule:['kind','id','version'],policy:['kind','id','version'],catalog:['kind','section'],scenario:['kind','id'],report:['kind','jobId']};
+ const shapes={'session-display':['kind','taskId','sessionId'],session:['kind','taskId','sessionId'],task:['kind','taskId'],rule:['kind','id','version'],policy:['kind','id','version'],catalog:['kind','section'],scenario:['kind','id'],report:['kind','jobId']};
  const keys=plain(source)&&Object.hasOwn(shapes,source.kind)?shapes[source.kind]:null;
  if(!keys||Object.keys(source).length!==keys.length||!keys.every(key=>Object.hasOwn(source,key)&&validToken(source[key])))throw new TranslationJobError('翻译来源选择器无效，不接受自定义文本或额外字段。');
  if(source.kind==='catalog'&&!['rules','policies'].includes(source.section))throw new TranslationJobError('翻译目录范围无效。');
@@ -62,7 +63,11 @@ export async function freezeTranslationSource({source,store,reportJobs,collectRe
  }else{
   const doc=await store.read();sourceRevision=doc.revision??null;
   const state=doc.state||{},catalog=doc.catalog||{};
-  if(source.kind==='session'||source.kind==='task'){
+  if(source.kind==='session-display'){
+   const task=state.tasks?.find(item=>item.id===source.taskId),session=state.sessions?.find(item=>item.taskId===source.taskId&&item.id===source.sessionId);
+   if(!task||!session)throw new TranslationJobError('翻译来源会话不存在或不属于当前任务。',404);
+   fields=validateFields(sessionDisplayFields(session));data={task:pick(task,['id']),session:pick(session,['id','taskId'])};
+  }else if(source.kind==='session'||source.kind==='task'){
    const task=state.tasks?.find(item=>item.id===source.taskId);if(!task)throw new TranslationJobError('翻译来源任务不存在。',404);
    const sessions=(state.sessions||[]).filter(item=>item.taskId===task.id&&(source.kind==='task'||item.id===source.sessionId));if(source.kind==='session'&&sessions.length!==1)throw new TranslationJobError('翻译来源会话不存在或不属于当前任务。',404);
    data={task:taskOf(task),basis:basisOf(getTaskBasis(state,task)),sessions:sessions.map(sessionOf)};
@@ -70,7 +75,7 @@ export async function freezeTranslationSource({source,store,reportJobs,collectRe
    const values=(catalog[source.kind==='rule'?'rules':'policies']||[]).filter(item=>item.id===source.id&&item.version===source.version);if(values.length!==1)throw new TranslationJobError('翻译来源的明确版本不存在。',404);data={[source.kind]:record(values[0],source.kind==='rule'?'rules':'policies')};
   }else if(source.kind==='catalog')data={catalog:(catalog[source.section]||[]).map(item=>pick(item,['id','version','title','category','scope']))};
   else{const scenario=findScenario(state,source.id);if(!scenario)throw new TranslationJobError('翻译来源场景不存在。',404);data={scenario:scenarioOf(scenario)};}
-  fields=validateFields(fieldsOf(data));
+  fields??=validateFields(fieldsOf(data));
  }
  const snapshot={schemaVersion:1,source,sourceRevision,data,fields};return{snapshot,sourceFingerprint:translationHash(snapshot)};
 }
