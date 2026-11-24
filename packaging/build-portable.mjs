@@ -14,10 +14,11 @@ import {englishUsageGuide} from './english-guide.mjs';
 import {acceptanceChecklist} from './self-service-guide.mjs';
 import {builtinUsageGuide} from './builtin-guide.mjs';
 import {prepareFactoryResources,parseFactoryBuildArgs} from './factory-resources.mjs';
+import {buildDesktopShell} from './build-desktop.mjs';
 
 const project=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 export const portableVersion=productVersion;
-export const portableFiles=Object.freeze([...payloadFiles.filter(p=>p!=='launch-demo.mjs'),'packaging/portable-runtime.mjs','packaging/portable-launch.mjs','packaging/version.mjs']);
+export const portableFiles=Object.freeze([...payloadFiles.filter(p=>p!=='launch-demo.mjs'),'packaging/portable-runtime.mjs','packaging/portable-launch.mjs','packaging/desktop-host.mjs','packaging/version.mjs']);
 export const portableModules=Object.freeze(['java.se','jdk.crypto.ec','jdk.crypto.mscapi','jdk.unsupported','jdk.charsets','jdk.localedata','jdk.zipfs']);
 const partName=/^[A-Za-z0-9][A-Za-z0-9._-]{0,159}$/;
 const shaPattern=/^[a-f0-9]{64}$/;
@@ -86,7 +87,7 @@ try {
 }
 `;
 function guide(){return businessUsageGuide(portableVersion);}
-export async function buildPortable({outputDir,nodeExe,nodeLicense,javaRuntime,jarPath,catalogSeedFile,sceneSeedFile,sourceDir=project,sampleFile,requireFactoryMaterials=false,factoryProfile='all-scenes',materialsKind='unverified',archive:makeArchive=true,split:makeSplit=true}={}){
+export async function buildPortable({outputDir,nodeExe,nodeLicense,javaRuntime,jarPath,catalogSeedFile,sceneSeedFile,sourceDir=project,sampleFile,requireFactoryMaterials=false,factoryProfile='all-scenes',materialsKind='unverified',desktopShell=false,webViewSdkDir=process.env.WEBVIEW2_SDK_DIR,archive:makeArchive=true,split:makeSplit=true}={}){
  for(const item of [nodeExe,nodeLicense,jarPath])if(!(await fs.stat(item)).isFile())throw new Error('构建输入不是文件。');
  if(!(await fs.stat(path.join(javaRuntime,'bin/java.exe'))).isFile())throw new Error('Java运行环境缺失。');
  const output=path.resolve(outputDir);await fs.mkdir(output,{recursive:false});
@@ -107,12 +108,13 @@ export async function buildPortable({outputDir,nodeExe,nodeLicense,javaRuntime,j
  for(const [name,stop] of [['启动会话质检工作台.exe',false],['停止会话质检工作台.exe',true]])run(csc,['/nologo','/target:winexe','/platform:anycpu','/optimize+','/codepage:65001','/reference:System.Windows.Forms.dll',...(stop?['/define:STOP_BUILD']:[]),'/out:'+path.join(root,name),path.join(project,'packaging/PortableLauncher.cs')]);
  await fs.copyFile(path.join(root,'启动会话质检工作台.exe'),path.join(root,'Start Quality Workbench.exe'));
  await fs.copyFile(path.join(root,'停止会话质检工作台.exe'),path.join(root,'Stop Quality Workbench.exe'));
- await fs.writeFile(path.join(root,'portable-info.json'),JSON.stringify({schemaVersion:1,version:portableVersion,engine:'spring-ai',modelProvider:'openai-compatible',platform:'windows-x64',rules:factoryProfile==='builtin-two-scenes'?'NP 17 entities / 16 checks + derived overall; EC business-v1 / manual site working calendars / >=2 distinct rows at 85%; historical tasks frozen':'Sheet4 V1; V2.1-A time upgrade / four other checks V1 / configured workingHours or continuous / same agent >=3',modules:portableModules,...factory,manifestExcludes:['文件校验清单.json']},null,2));
+ const desktop=desktopShell?await buildDesktopShell({root,sdkDir:webViewSdkDir}):null;
+ await fs.writeFile(path.join(root,'portable-info.json'),JSON.stringify({schemaVersion:1,version:portableVersion,engine:'spring-ai',modelProvider:'openai-compatible',platform:'windows-x64',rules:factoryProfile==='builtin-two-scenes'?'NP 17 entities / 16 checks + derived overall; EC criteria follow versioned scene seed and frozen task snapshot; current bundle fixed24 + same administrator >=3 at 85%; historical tasks frozen':'Sheet4 V1; V2.1-A time upgrade / four other checks V1 / configured workingHours or continuous / same agent >=3',modules:portableModules,...factory,desktop,manifestExcludes:['文件校验清单.json']},null,2));
  await writeBuildIdentity({root,sourceDir:project,version:portableVersion});
  const files=(await walk(root)).sort((a,b)=>a.relative.localeCompare(b.relative));
  const manifest=[];for(const file of files)manifest.push({path:file.relative,bytes:file.bytes,sha256:await hashFile(file.file)});
  await fs.writeFile(path.join(root,'文件校验清单.json'),JSON.stringify({schemaVersion:1,version:portableVersion,files:manifest},null,2));
- const staged={root,archive:null,unpackedBytes:manifest.reduce((sum,f)=>sum+f.bytes,0),files:manifest.length+1,...factory};
+ const staged={root,archive:null,unpackedBytes:manifest.reduce((sum,f)=>sum+f.bytes,0),files:manifest.length+1,...factory,desktop};
  if(!makeArchive){await fs.writeFile(path.join(output,'package-info.json'),JSON.stringify({...staged,root:path.basename(root),version:portableVersion},null,2));return staged;}
  const archive=path.join(output,`会话质检工作台_SpringAI_${portableVersion}_完整便携包.zip`),zip=new JSZip();
  for(const file of await walk(root))zip.file(file.relative,createReadStream(file.file));

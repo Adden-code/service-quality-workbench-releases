@@ -1,4 +1,5 @@
 import {rawDirectGuide} from './raw-direct-guide.mjs';
+import {ecommerceCurrentPolicyGuide} from './builtin-guide.mjs';
 export function triageWorkflowGuide(language='zh'){
  if(language==='en')return rawDirectGuide('en')+`Structured import, legacy workflow and result sources
 
@@ -28,8 +29,12 @@ Review audit export includes saved human-review and evidence-needed processing/r
 Downloaded HTML reports include Print / Save as PDF. Open the local HTML, use the browser print dialog and check page orientation, long tables and page breaks before saving or distributing a PDF. This uses the browser's local printing capability; it does not add a PDF rendering service or change saved judgments.
 Workspace usage shows aggregate logical file sizes and available disk space using file metadata only. A bounded scan labels incomplete totals and skips links/unreadable files. Refresh for updated figures while jobs are running. This page is read-only: it neither deletes historical traces/caches nor changes workspace records. Migration backups cover the prior workspace file only, not a complete backup of originals and reports. Full workspace backup/restore is available from Backup and restore; automatic cleanup is not implemented. A usage scan is not a backup operation. See the backup section for exclusions and recovery steps. Multi-user claims/coordination and automatic threshold recommendations are also outside this release.
 
+${ecommerceCurrentPolicyGuide('en')}Repeat imports and display language
+The same source content may be imported again into an independent task. Keep source identifiers/text unchanged; lineage and repeat-import labels are retained, and cross-batch statistics separate repeat imports by default. Reinspect with new rules remains the explicit parent-linked path. Within-file validation still applies.
+Fixed controls switch Chinese/English immediately. AI verdict and ecommerce classification reasons use cached display translations; a cache miss may request the configured translation model and shows a labeled original with translating/unavailable status. Cached views switch immediately. Translation never reruns inspection or edits source reasons, verdicts, human reviews or audit records.
+
 Release and material boundaries
-The user has reported intranet acceptance of R7-R11 in an earlier release. The user reported that the four 0.10.3 fixes worked in intranet testing. The user subsequently confirmed the 0.10.6 archive/void, import and main rule-scope changes; the 0.10.7 changes still require intranet verification, and model quality needs a real golden comparison; external synthetic tests cannot establish business judgment accuracy. The 49-conversation / 1,735-turn count belongs only to its legacy structured benchmark and is not a raw-import turn count. An authorized intranet custodian may add approved resources/catalog-seed.json before first start and update the delivered metadata/checksums; a new empty workspace can load it, while existing workspaces are never overwritten or backfilled. The separate synthetic catalog self-test is not a business rule set.
+This guide describes expected behavior and checks to execute; it is not evidence of completed acceptance. Real model quality needs an intranet golden comparison; synthetic tests cannot establish business judgment accuracy. The 49-conversation / 1,735-turn count belongs only to its legacy structured benchmark and is not a raw-import turn count. An authorized intranet custodian may add approved resources/catalog-seed.json before first start and update metadata/checksums for a program-only package. Complete built-in packages load empty workspaces automatically; existing-workspace startup first makes a full .sqwb backup, then publishes newer bundled versions with a system-upgrade audit. Local maintained settings and historical task snapshots remain intact. Failure keeps the previous workspace available and displays recovery instructions; manual loading remains available. The separate synthetic catalog self-test is not a business rule set.
 
 Navigation and recovery
 Model Settings can return to conversion review while retaining the source file and manual edits. Cleaning-origin tasks export the business Excel and HTML, including an audit worksheet. Product grouping stays Unprovided when no original product-column mapping was frozen. Task progress identifies AI-final and human-confirmed sources, and report shortcuts select the current task. Invalid report inputs now identify the input/reference problem instead of reporting a provider failure. Policy metadata is kept in the frozen task but only the documented policy fields are sent to analysis.
@@ -71,8 +76,12 @@ Multiple tasks wait in one serial queue. Position includes the running task. Que
 下载的HTML报告增加“打印／另存PDF”。在本机浏览器打开HTML，使用打印对话框，先核对纸张方向、长表格和分页再保存或分发PDF。此功能使用浏览器本机打印能力，不新增PDF渲染服务，也不修改已保存判定。
 “工作区用量”仅读取文件元数据，显示分类逻辑大小及所在磁盘可用空间；达到扫描上限、跳过链接或遇到不可读文件时明确为部分统计，运行中可刷新。该页只读，不删除历史轨迹／缓存，也不修改工作区记录。迁移备份只保护迁移前的工作区文件，不含完整原件和报告。完整备份／恢复已在“备份与恢复”入口提供；自动清理未实现。请按前文备份说明操作，用量查看不等于备份。多人认领协作、自动门槛推荐亦不在本版。
 
+${ecommerceCurrentPolicyGuide('zh')}重复导入与展示语言
+同内容源文件可再次导入为独立任务，源标识和原文无需改动；保留来源关联和重复导入标记，跨批次统计默认将重复导入分开。“使用新规则重检”仍提供明确的父任务关联。单文件内部校验继续有效。
+固定操作文案即时切换中英文；AI判断理由和电商分类理由使用展示译文缓存。无缓存时可能请求已配置翻译模型，明确标记原文与翻译中／不可用；缓存命中即时切换。翻译不重跑质检，不改源理由、判定、人工审核或审计记录。
+
 版本与材料边界
-用户曾反馈较早版本R7—R11在内网验收落地。用户已反馈0.10.3四项修复在内网实测生效。用户已反馈0.10.6归档作废、规则导入与作用域主体通过；本次0.10.7改动仍需内网复测，模型质量仍需真实金标准对照，外部合成测试不代表业务判断准确率；49会话／1735轮仅用于对应的旧结构化基准，不作为原文导入轮次。内网交付人员可在首次启动前放入获准resources/catalog-seed.json，并同步交付元数据与校验清单。仅新建空工作区可写入，已有工作区不覆盖、不补种。单独的合成目录自检材料不得当业务规则使用。
+本说明描述预期行为与待执行检查，不代表验收已完成。真实模型效果须在内网按金标准对照，合成测试不证明业务判断准确率。49会话／1735轮仅属于对应旧结构化基准，不作为原文导入轮次。程序包可由获准内网交付人员在首次启动前放入resources/catalog-seed.json并同步元数据和校验清单；完整内置包空工作区自动装载，存量工作区启动先完整.sqwb备份，再发布内置新版并记录system-upgrade审计。本机维护参数与历史任务冻结快照保留；失败保留旧工作区并提示恢复，手动装载入口继续可用。合成目录自检材料不得当业务规则使用。
 
 返回与继续
 模型设置可返回解析核对，保留原文件及人工修改。清洗来源任务可生成业务Excel和HTML，附表保留转换审计。未冻结原表产品列时，产品分组仍为“未提供”。任务进度分列AI终判与人工确认，报告快捷入口定位当前任务。报告输入或冻结依据不合规时明确报告输入问题；冻结快照保留完整政策元数据，模型分析仅接收约定字段。

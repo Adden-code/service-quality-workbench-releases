@@ -10,9 +10,9 @@
 
 [Setup]
 AppId={{92F2894F-E647-4F16-9F59-CFB5A52C573C}
-AppName=Quality Workbench / 会话质检工作台
+AppName={cm:ProductName}
 AppVersion={#ProductVersion}
-AppVerName=Quality Workbench {#ProductVersion} / 会话质检工作台
+AppVerName={cm:ProductName} {#ProductVersion}
 AppPublisher=MSS
 DefaultDirName={code:DefaultProgramDirectory}
 DefaultGroupName=Quality Workbench
@@ -29,18 +29,23 @@ DiskSpanning=no
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
-UninstallDisplayName=Quality Workbench / 会话质检工作台
-UninstallDisplayIcon={app}\启动会话质检工作台.exe
+UninstallDisplayName={cm:ProductName}
+UninstallDisplayIcon={app}\QualityWorkbench.exe
 CloseApplications=no
 RestartApplications=no
 SetupLogging=yes
+ShowLanguageDialog=yes
+LanguageDetectionMethod=uilanguage
+UsePreviousLanguage=yes
 InfoBeforeFile={#PayloadDir}\Read Me First.txt
 
 [Languages]
-Name: "english"; MessagesFile: "compiler:Default.isl"
-Name: "chinesesimp"; MessagesFile: "ChineseSimplified.isl"
+Name: "english"; MessagesFile: "compiler:Default.isl"; InfoBeforeFile: "{#PayloadDir}\User Guide (English).txt"
+Name: "chinesesimp"; MessagesFile: "ChineseSimplified.isl"; InfoBeforeFile: "{#PayloadDir}\使用说明.txt"
 
 [CustomMessages]
+english.ProductName=Quality Workbench
+chinesesimp.ProductName=会话质检工作台
 english.CreateDesktopShortcut=Create a desktop shortcut
 chinesesimp.CreateDesktopShortcut=创建桌面快捷方式
 english.OpenWorkbench=Open Quality Workbench
@@ -58,19 +63,25 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopShortcut}"; Flags: checkedon
 [Files]
 Source: "{#PayloadDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
+[INI]
+Filename: "{app}\desktop-language.ini"; Section: "Desktop"; Key: "Language"; String: "{language}"; Flags: uninsdeleteentry uninsdeletesectionifempty
+
 [Icons]
-Name: "{userdesktop}\会话质检工作台"; Filename: "{app}\启动会话质检工作台.exe"; WorkingDir: "{app}"; Tasks: desktopicon; Languages: chinesesimp
-Name: "{userdesktop}\Quality Workbench"; Filename: "{app}\Start Quality Workbench.exe"; WorkingDir: "{app}"; Tasks: desktopicon; Languages: english
-Name: "{group}\会话质检工作台"; Filename: "{app}\启动会话质检工作台.exe"; WorkingDir: "{app}"
-Name: "{group}\停止会话质检工作台"; Filename: "{app}\停止会话质检工作台.exe"; WorkingDir: "{app}"
-Name: "{group}\使用说明"; Filename: "{app}\使用说明.txt"
-Name: "{group}\User Guide (English)"; Filename: "{app}\User Guide (English).txt"
-Name: "{group}\Start Quality Workbench"; Filename: "{app}\Start Quality Workbench.exe"
-Name: "{group}\Stop Quality Workbench"; Filename: "{app}\Stop Quality Workbench.exe"
-Name: "{group}\卸载会话质检工作台"; Filename: "{uninstallexe}"
+Name: "{userdesktop}\会话质检工作台"; Filename: "{app}\QualityWorkbench.exe"; WorkingDir: "{app}"; Tasks: desktopicon; Languages: chinesesimp
+Name: "{userdesktop}\Quality Workbench"; Filename: "{app}\QualityWorkbench.exe"; WorkingDir: "{app}"; Tasks: desktopicon; Languages: english
+Name: "{group}\会话质检工作台"; Filename: "{app}\QualityWorkbench.exe"; WorkingDir: "{app}"; Languages: chinesesimp
+Name: "{group}\浏览器启动（备用）"; Filename: "{app}\启动会话质检工作台.exe"; WorkingDir: "{app}"; Languages: chinesesimp
+Name: "{group}\停止会话质检工作台"; Filename: "{app}\停止会话质检工作台.exe"; WorkingDir: "{app}"; Languages: chinesesimp
+Name: "{group}\使用说明"; Filename: "{app}\使用说明.txt"; Languages: chinesesimp
+Name: "{group}\User Guide (English)"; Filename: "{app}\User Guide (English).txt"; Languages: english
+Name: "{group}\Quality Workbench"; Filename: "{app}\QualityWorkbench.exe"; Languages: english
+Name: "{group}\Browser start (fallback)"; Filename: "{app}\Start Quality Workbench.exe"; Languages: english
+Name: "{group}\Stop Quality Workbench"; Filename: "{app}\Stop Quality Workbench.exe"; Languages: english
+Name: "{group}\卸载会话质检工作台"; Filename: "{uninstallexe}"; Languages: chinesesimp
+Name: "{group}\Uninstall Quality Workbench"; Filename: "{uninstallexe}"; Languages: english
 
 [Run]
-Filename: "{app}\启动会话质检工作台.exe"; Description: "{cm:OpenWorkbench}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\QualityWorkbench.exe"; Description: "{cm:OpenWorkbench}"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
 Filename: "{app}\runtime\node\node.exe"; Parameters: """{app}\packaging\portable-launch.mjs"" --stop-installation"; WorkingDir: "{app}"; Flags: runhidden waituntilterminated skipifdoesntexist; RunOnceId: "StopVerifiedOwnRuntime"
@@ -86,11 +97,24 @@ end;
 
 function StopOwnRuntime(var Failure: String): Boolean;
 var
-  NodePath, ScriptPath: String;
+  NodePath, ScriptPath, ShellPath: String;
   ResultCode: Integer;
 begin
   Result := True;
   Failure := '';
+  ShellPath := ExpandConstant('{app}\QualityWorkbench.exe');
+  if FileExists(ShellPath) then begin
+    if not Exec(ShellPath, '--exit-for-install', ExpandConstant('{app}'), SW_HIDE, ewWaitUntilTerminated, ResultCode) then begin
+      Result := False;
+      Failure := CustomMessage('StopCommandFailed');
+      Exit;
+    end;
+    if ResultCode <> 0 then begin
+      Result := False;
+      Failure := CustomMessage('RuntimeIdentityMismatch');
+      Exit;
+    end;
+  end;
   NodePath := ExpandConstant('{app}\runtime\node\node.exe');
   ScriptPath := ExpandConstant('{app}\packaging\portable-launch.mjs');
   if not FileExists(NodePath) and not FileExists(ScriptPath) then

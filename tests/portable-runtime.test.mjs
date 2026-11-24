@@ -215,18 +215,23 @@ test('Java启动失败回收私有记录并保留安全诊断日志',async t=>{
 test('自有Java始终无法退出时停止失败并保留实例身份，禁止安装器误判已停',async t=>{
  const {startSupervisor,queryInstance,stopInstance}=await implementation();const {config}=await fixture(t);
  const child=Object.assign(new EventEmitter(),{pid:12345,exitCode:null,signalCode:null,kill(){return true;}});
- let health;
- const supervisor=await startSupervisor(config,{registerSignals:false,spawnWorker:(_exe,_args,options)=>{
+ let health,failureLogs=0,releaseFailureLog,enteredFailureLog;
+ const failureLogGate=new Promise(resolve=>releaseFailureLog=resolve),failureLogEntered=new Promise(resolve=>enteredFailureLog=resolve);
+ const supervisor=await startSupervisor(config,{registerSignals:false,appendLog:async(...args)=>{if(String(args[1]).includes('WORKER_CLOSE_FAILED')&&++failureLogs===2){enteredFailureLog();await failureLogGate;}return fs.appendFile(...args);},spawnWorker:(_exe,_args,options)=>{
   health=http.createServer((req,res)=>{res.setHeader('Content-Type','application/json');res.end(JSON.stringify({status:'ok',engine:'spring-ai'}));});
   health.listen(Number(options.env.WORKBENCH_WORKER_PORT),'127.0.0.1');return child;
  }});
  const exitWorker=()=>{child.exitCode=0;child.emit('exit',0,null);};
- t.after(async()=>{exitWorker();await supervisor.stop();if(health.listening)await close(health);});
+ t.after(async()=>{releaseFailureLog();exitWorker();await supervisor.stop();if(health.listening)await close(health);});
  const before=await readJson(config.instanceFile);
  await assert.rejects(supervisor.stop(),/停止|退出/);
  assert.deepEqual(await readJson(config.instanceFile),before);assert.equal(existsSync(config.lockFile),true);
  const status=await queryInstance(config);assert.equal(status.state,'stopping');assert.equal(status.stopFailure,'WORKER_CLOSE_FAILED');
- await assert.rejects(stopInstance(config),/停止|退出/);
+ let commandSettled=false;const secondStop=stopInstance(config);void secondStop.then(()=>{commandSettled=true;},()=>{commandSettled=true;});
+ await failureLogEntered;
+ try{const inFlight=await queryInstance(config);assert.equal(inFlight.stopFailure,undefined,'失败日志仍在落盘时，不能发布已结束失败让客户端提前重试');assert.equal(commandSettled,false);}
+ finally{releaseFailureLog();}
+ await assert.rejects(secondStop,/停止|退出/);
  exitWorker();await supervisor.stop();assert.equal(existsSync(config.instanceFile),false);
 });
 
@@ -241,7 +246,8 @@ test('活跃未知锁拒绝启动，死进程锁才允许恢复',async t=>{
   await fs.writeFile(config.lockFile,JSON.stringify({pid:process.pid,nonce:'unknown-live-owner'}));let spawns=0;
   await assert.rejects(startSupervisor(config,{spawnWorker:()=>spawns++,registerSignals:false}),/占用|锁|进程/);assert.equal(spawns,0);
   const dead=spawn(process.execPath,['-e','process.exit(0)']);await new Promise(resolve=>dead.once('exit',resolve));
-  await fs.writeFile(config.lockFile,JSON.stringify({pid:dead.pid,nonce:'dead-owner'}));
+  const rootDir=await fs.realpath(config.rootDir),dataDir=await fs.realpath(config.dataDir),normalized=s=>process.platform==='win32'?s.toLowerCase():s,rootId=createHash('sha256').update(normalized(rootDir)+'\0'+normalized(dataDir)).digest('hex');
+  await fs.writeFile(config.lockFile,JSON.stringify({pid:dead.pid,nonce:'dead-owner',rootDir,dataDir,rootId}));
   const supervisor=await startSupervisor(config,{spawnWorker:workerSpawn(),registerSignals:false});t.after(()=>supervisor.stop());assert.equal(supervisor.status().state,'ready');
 });
 

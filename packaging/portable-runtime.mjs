@@ -35,6 +35,7 @@ const englishErrors=Object.freeze({
  WORKER_EXIT:'The bundled Java worker exited during startup. Check logs/portable-startup.log in the data directory.',
  WORKER_TIMEOUT:'The Java worker health check timed out. The application was not started. Check the data-directory logs.',
  START_CANCELLED:'Application startup was cancelled.',
+ STALE_LOCK_CONFIRMATION:'A lock belongs to an exited process. Confirm recovery before starting.',
  SUPERVISOR_SPAWN_FAILED:'The bundled Node supervisor could not start. Check that the complete package is installed.',
  INVALID_ARGUMENT:'Unsupported command. Use the start or stop launcher, or --no-open, --status, --stop or --stop-installation.',
  START_TIMEOUT:'The service did not become ready before the startup deadline. Check logs/portable-startup.log in the data directory.',
@@ -92,6 +93,7 @@ async function readPrivateJson(file){
 }
 function validOwner(value){return value&&Number.isSafeInteger(value.pid)&&value.pid>0&&typeof value.nonce==='string'&&value.nonce.length>0;}
 function isDead(pid){try{process.kill(pid,0);return false;}catch(cause){return cause.code==='ESRCH';}}
+function matchesLock(value,id){return validOwner(value)&&typeof value.rootDir==='string'&&typeof value.dataDir==='string'&&samePath(value.rootDir,id.rootDir)&&samePath(value.dataDir,id.dataDir)&&value.rootId===id.rootId;}
 function matchesRecord(record,id){
   return record?.version===1&&validOwner({pid:record.pid,nonce:record.instanceId})&&/^[a-f0-9]{32}$/.test(record.instanceId)&&typeof record.rootDir==='string'&&typeof record.dataDir==='string'&&samePath(record.rootDir,id.rootDir)&&samePath(record.dataDir,id.dataDir)&&record.rootId===id.rootId&&Number.isInteger(record.controlPort)&&record.controlPort>0&&record.controlPort<=65535&&/^[a-f0-9]{64}$/.test(record.controlToken);
 }
@@ -100,7 +102,7 @@ async function acquireLock(config,id,nonce){
   async function create(){const handle=await fs.open(config.lockFile,'wx',0o600);try{await handle.writeFile(JSON.stringify({pid:process.pid,nonce,...id}));await handle.sync();return handle;}catch(cause){await handle.close();await fs.unlink(config.lockFile).catch(()=>{});throw cause;}}
   try{return await create();}catch(cause){if(cause.code!=='EEXIST')throw cause;}
   const original=await readPrivateJson(config.lockFile).catch(()=>null);
-  if(!validOwner(original)||!isDead(original.pid))throw unavailable();
+  if(!matchesLock(original,id)||!isDead(original.pid))throw unavailable();
   const recoveryFile=config.lockFile+'.recovery';let recovery;
   try{recovery=await fs.open(recoveryFile,'wx',0o600);}catch{throw unavailable();}
   try{
@@ -143,8 +145,13 @@ function requestJson(portNumber,route,{token,method='GET',timeout=1200}={}){
     });req.on('timeout',()=>req.destroy(new Error('timeout')));req.on('error',reject);req.end();
   });
 }
-function publicStatus(record,state,stopFailure){
-  return {version:1,productVersion,instanceId:record.instanceId,pid:record.pid,rootDir:record.rootDir,dataDir:record.dataDir,rootId:record.rootId,appPort:record.appPort,workerPort:record.workerPort,engine:'spring-ai',state,...(stopFailure==='WORKER_CLOSE_FAILED'?{stopFailure}:{}),url:`http://127.0.0.1:${record.appPort}/#tasks`};
+export function normalizeDesktopActivity(value){
+ const keys=['ai','report','translation','structured'],counts={ai:0,report:0,translation:0,structured:0};
+ if(!value||typeof value.busy!=='boolean'||typeof value.unknown!=='boolean'||!value.counts||keys.some(key=>!Number.isSafeInteger(value.counts[key])||value.counts[key]<0))return{busy:true,counts,unknown:true};
+ for(const key of keys)counts[key]=value.counts[key];return{busy:value.busy||value.unknown||Object.values(counts).some(n=>n>0),counts,unknown:value.unknown};
+}
+function publicStatus(record,state,stopFailure,activity){
+  return {version:1,productVersion,instanceId:record.instanceId,pid:record.pid,rootDir:record.rootDir,dataDir:record.dataDir,rootId:record.rootId,appPort:record.appPort,workerPort:record.workerPort,engine:'spring-ai',state,...(['WORKER_CLOSE_FAILED','APP_CLOSE_FAILED'].includes(stopFailure)?{stopFailure}:{}),url:`http://127.0.0.1:${record.appPort}/#tasks`,activity:normalizeDesktopActivity(activity)};
 }
 async function verifiedRecord(config){
   const id=await identity(config);if(!id)return null;
@@ -156,9 +163,38 @@ async function verifiedRecord(config){
   catch{throw error('INSTANCE_UNVERIFIED','现有实例进程仍存活但控制身份无法核验；请查看数据目录日志，不会结束未知进程。');}
   const status=response.value;
   if(response.status!==200||status?.instanceId!==record.instanceId||status.pid!==record.pid||status.rootId!==id.rootId||!samePath(status.rootDir||'',id.rootDir)||!samePath(status.dataDir||'',id.dataDir)||status.engine!=='spring-ai'||!['starting','ready','stopping'].includes(status.state)||status.appPort!==record.appPort||status.workerPort!==record.workerPort)throw error('INSTANCE_IDENTITY','便携控制接口身份不匹配，拒绝复用或停止。');
-  return {record,status:publicStatus(record,status.state,status.stopFailure)};
+  return {record,status:publicStatus(record,status.state,status.stopFailure,status.activity)};
 }
 export async function queryInstance(config){return (await verifiedRecord(config))?.status||null;}
+export async function inspectDesktopInstance(config){
+ let id=await identity(config);
+ if(!id){const rootDir=await fs.realpath(config.rootDir),dataDir=path.resolve(config.dataDir),normalized=s=>process.platform==='win32'?s.toLowerCase():s;id={rootDir,dataDir,rootId:createHash('sha256').update(normalized(rootDir)+'\0'+normalized(dataDir)).digest('hex')};}
+ const base={state:'stopped',url:`http://127.0.0.1:${config.appPort}/#tasks`,dataDir:id.dataDir,rootId:id.rootId,staleLock:{present:false,recoverable:false,reason:'none'},activity:{busy:false,counts:{ai:0,report:0,translation:0,structured:0},unknown:false}};
+ let lock,record,status;
+ try{lock=await readPrivateJson(config.lockFile);record=await readPrivateJson(config.instanceFile);status=await queryInstance(config);}catch(cause){return{...base,state:'blocked',staleLock:{present:Boolean(lock)||Boolean(await plainFile(config.lockFile,{optional:true}).catch(()=>true)),recoverable:false,reason:cause.code||'INSTANCE_UNVERIFIED'},activity:normalizeDesktopActivity(null)};}
+ if(status)return{...base,...status,staleLock:{present:Boolean(lock),recoverable:false,reason:'owner-alive'}};
+ if(lock){
+  const matching=matchesLock(lock,id)&&(!record||matchesRecord(record,id)&&record.pid===lock.pid&&record.instanceId===lock.nonce),dead=validOwner(lock)&&isDead(lock.pid),recoverable=matching&&dead;
+  return{...base,state:recoverable?'stopped':'blocked',staleLock:{present:true,recoverable,reason:!matching?'identity-mismatch':dead?'owner-dead':'owner-alive'},activity:recoverable?base.activity:normalizeDesktopActivity(null)};
+ }
+ return base;
+}
+export async function recoverStalePortableLock(config,{beforeVerify}={}){
+ const id=await identity(config);if(!id)return{recovered:false};
+ const original=await readPrivateJson(config.lockFile);if(!original)return{recovered:false};
+ const record=await readPrivateJson(config.instanceFile);
+ if(!matchesLock(original,id)||record&&(!matchesRecord(record,id)||record.pid!==original.pid||record.instanceId!==original.nonce))throw error('INSTANCE_IDENTITY','残留锁与当前程序、数据目录或实例身份不一致，未恢复。');
+ if(!isDead(original.pid))throw error('INSTANCE_LOCKED','锁的进程仍存活或无法确认已退出，未恢复。');
+ const originalBytes=await fs.readFile(config.lockFile),recoveryFile=config.lockFile+'.recovery';let recovery;
+ try{recovery=await fs.open(recoveryFile,'wx',0o600);}catch{throw error('INSTANCE_LOCKED','其他进程正在核对残留锁，请稍后重试。');}
+ try{
+  // Test-only race injection; the desktop CLI never supplies this hook.
+  if(beforeVerify)await beforeVerify();
+  const current=await readPrivateJson(config.lockFile),currentRecord=await readPrivateJson(config.instanceFile),currentId=await identity(config);
+  if(!currentId||currentId.rootId!==id.rootId||!matchesLock(current,id)||JSON.stringify(current)!==JSON.stringify(original)||!(await fs.readFile(config.lockFile)).equals(originalBytes)||JSON.stringify(currentRecord)!==JSON.stringify(record)||!isDead(current.pid))throw error('INSTANCE_LOCKED','残留锁在恢复前已变化，未删除当前锁。');
+  await fs.unlink(config.lockFile);return{recovered:true};
+ }finally{await recovery.close();await fs.unlink(recoveryFile).catch(()=>{});}
+}
 export async function stopInstance(config){
   const verified=await verifiedRecord(config);if(!verified)return {state:'stopped',stopped:false};
   let reply;
@@ -169,7 +205,7 @@ export async function stopInstance(config){
     const record=await readPrivateJson(config.instanceFile);if(!record||record.instanceId!==verified.record.instanceId)return {state:'stopped',stopped:true};
     // A verified supervisor may close its control listener just before removing the completion marker.
     const current=await queryInstance(config).catch(cause=>{if(cause.code==='INSTANCE_UNVERIFIED')return null;throw cause;});
-    if(current?.stopFailure==='WORKER_CLOSE_FAILED')throw error('STOP_FAILED','自有Java执行服务未能退出，停止失败；已保留实例身份，请勿覆盖程序文件。');
+    if(current?.stopFailure==='WORKER_CLOSE_FAILED'||current?.stopFailure==='APP_CLOSE_FAILED')throw error('STOP_FAILED','工作台落盘关闭或自有Java执行服务退出未完成；已保留实例身份，请勿覆盖程序文件。');
     await sleep(100);
   }
   throw error('STOP_TIMEOUT','实例正在关闭，20秒内尚未完成；没有结束其他进程。');
@@ -236,26 +272,26 @@ function healthyWorker(workerPort,bridgeToken){
   });
 }
 
-export async function startSupervisor(config,{spawnWorker=spawn,createWorkbenchServer,registerSignals=true,env=process.env}={}){
+export async function startSupervisor(config,{spawnWorker=spawn,createWorkbenchServer,registerSignals=true,env=process.env,appendLog=fs.appendFile}={}){
   // Dependency injection is only for isolated lifecycle tests; production always uses the packaged Java.
   await validateResources(config);
   const id=await identity(config,{create:true}),nonce=randomBytes(16).toString('hex'),bridgeToken=randomBytes(32).toString('hex');
   let lock,record,control,app,child,state='starting',workerExited=false,stopping,ready=false,stopFailure,installationFile;
   let finishStartup;const startupFinished=new Promise(resolve=>finishStartup=resolve);
   const signalHandlers=new Map();
-  const log=async code=>{try{await fs.mkdir(config.logsDir,{recursive:true,mode:0o700});await fs.appendFile(path.join(config.logsDir,'portable-startup.log'),`${new Date().toISOString()} ${code} app=${config.appPort} worker=${config.workerPort}\n`,{mode:0o600});}catch{/* Do not log process environments, request bodies, or model secrets. */}};
+  const log=async code=>{try{await fs.mkdir(config.logsDir,{recursive:true,mode:0o700});await appendLog(path.join(config.logsDir,'portable-startup.log'),`${new Date().toISOString()} ${code} app=${config.appPort} worker=${config.workerPort}\n`,{mode:0o600});}catch{/* Do not log process environments, request bodies, or model secrets. */}};
   async function stop(){
     if(stopping)return stopping;
     state='stopping';stopFailure=undefined;
-    stopping=(async()=>{
+    const attempt=(async()=>{
       // A stop during asynchronous app creation must also close resources created later.
       await startupFinished;
       for(const [signal,handler] of signalHandlers)process.off(signal,handler);
-      try{await closeServer(app,true);}catch{await log('APP_CLOSE_FAILED');}
+      try{await closeServer(app,true);}catch{await log('APP_CLOSE_FAILED');throw Object.assign(error('STOP_FAILED','工作台落盘关闭未成功，已保留实例身份。'),{stopFailure:'APP_CLOSE_FAILED'});}
       try{await stopChild(child);}catch{
-        stopFailure='WORKER_CLOSE_FAILED';await log(stopFailure);
+        await log('WORKER_CLOSE_FAILED');
         // Keep the control channel, identity record and lock until our worker has actually exited.
-        throw error('STOP_FAILED','自有Java执行服务未能退出，停止失败；已保留实例身份。');
+        throw Object.assign(error('STOP_FAILED','自有Java执行服务未能退出，停止失败；已保留实例身份。'),{stopFailure:'WORKER_CLOSE_FAILED'});
       }
       try{await closeServer(control);}catch{await log('CONTROL_CLOSE_FAILED');}
       if(lock){await lock.close().catch(()=>{});const current=await readPrivateJson(config.lockFile).catch(()=>null);if(current?.nonce===nonce)await fs.unlink(config.lockFile).catch(()=>{});}
@@ -264,7 +300,10 @@ export async function startSupervisor(config,{spawnWorker=spawn,createWorkbenchS
       await unregisterInstallation(installationFile,nonce);
       await log('STOPPED');
     })();
-    try{return await stopping;}catch(cause){stopping=undefined;throw cause;}
+    stopping=attempt;
+    // Publish a terminal failure only after this attempt has settled. A client
+    // must not retry into a still-pending promise while failure logging awaits I/O.
+    try{return await attempt;}catch(cause){if(stopping===attempt){stopping=undefined;stopFailure=cause.stopFailure;}throw cause;}
   }
   try{
     lock=await acquireLock(config,id,nonce);
@@ -278,8 +317,8 @@ export async function startSupervisor(config,{spawnWorker=spawn,createWorkbenchS
       const allowed=req.socket.remoteAddress==='127.0.0.1'&&req.headers.host===expected&&req.headers.origin===undefined&&typeof provided==='string'&&/^[a-f0-9]{64}$/.test(provided)&&timingSafeEqual(Buffer.from(provided),Buffer.from(controlToken));
       res.setHeader('Cache-Control','no-store');res.setHeader('Content-Type','application/json; charset=utf-8');res.setHeader('X-Content-Type-Options','nosniff');
       if(!allowed){res.writeHead(403);res.end(JSON.stringify({error:'Control denied'}));req.resume();return;}
-      if(req.url==='/status'&&req.method==='GET'){res.end(JSON.stringify(publicStatus(record,state,stopFailure)));return;}
-      if(req.url==='/stop'&&req.method==='POST'){res.end(JSON.stringify({instanceId:nonce,state:'stopping'}));req.resume();setImmediate(()=>void stop().catch(()=>{}));return;}
+      if(req.url==='/status'&&req.method==='GET'){let activity;try{activity=app?.desktopActivity?.();}catch{}res.end(JSON.stringify(publicStatus(record,state,stopFailure,activity)));return;}
+      if(req.url==='/stop'&&req.method==='POST'){const requested=stop();res.end(JSON.stringify({instanceId:nonce,state:'stopping'}));req.resume();void requested.catch(()=>{});return;}
       res.writeHead(404);res.end(JSON.stringify({error:'Unavailable'}));req.resume();
     });control.requestTimeout=3000;control.headersTimeout=3000;
     const controlPort=await listen(control,0);
@@ -305,7 +344,7 @@ export async function startSupervisor(config,{spawnWorker=spawn,createWorkbenchS
     if(workerExited||stopping)throw error('WORKER_EXIT','Java执行服务在启动时退出。');
     app.on('error',()=>{if(registerSignals)process.exitCode=1;void log('APP_ERROR');void stop().catch(()=>{});});
     ready=true;state='ready';finishStartup();await log('READY');
-    return {status:()=>publicStatus(record,state,stopFailure),stop};
+    return {status:()=>publicStatus(record,state,stopFailure,app?.desktopActivity?.()),stop};
   }catch(cause){finishStartup();await log(cause?.portable?cause.code:'START_FAILED');await stop();throw cause?.portable?cause:error('START_FAILED','便携主管启动失败，请查看数据目录日志。');}
 }
 
