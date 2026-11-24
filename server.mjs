@@ -20,6 +20,8 @@ import {findScenario,isSceneKey} from './public/scenarios.mjs';
 import {loadBundledCatalogSeed} from './server/catalog-seed.mjs';
 import {loadBundledSceneSeed} from './server/scene-seed.mjs';
 import {installEcommercePolicyUpgrade} from './server/builtin-scene-upgrade.mjs';
+import {upgradeBuiltinOnStartup} from './server/startup-builtin-upgrade.mjs';
+import {readDesktopActivity} from './server/desktop-activity.mjs';
 import {createImportDraftStore} from './server/import-drafts.mjs';
 import {createRawStructureJobs} from './server/raw-structure-jobs.mjs';
 import {createWorkspaceUsageReader} from './server/workspace-usage.mjs';
@@ -39,7 +41,7 @@ async function body(req,max){
   for await(const chunk of req){size+=chunk.length;if(size>max)throw new WorkspaceError('请求内容超过大小限制。',413);parts.push(chunk);}
   return Buffer.concat(parts,size);
 }
-export async function createWorkbenchServer({dataDir=process.env.DEMO_DATA_DIR||path.join(project,'data'),publicDir=path.join(project,'public'),maxBodyBytes=32*1024*1024,fsOps,modelConfig,arkClient,catalogSeed=()=>loadBundledCatalogSeed(path.join(project,'resources')),sceneSeed=()=>loadBundledSceneSeed(path.join(project,'resources')),executionEngine=process.env.QA_AI_ENGINE||'native-node',bridgeToken=process.env.WORKBENCH_BRIDGE_TOKEN,workerPort=process.env.WORKBENCH_WORKER_PORT||4192,storageMode='single'}={}){
+export async function createWorkbenchServer({dataDir=process.env.DEMO_DATA_DIR||path.join(project,'data'),publicDir=path.join(project,'public'),maxBodyBytes=32*1024*1024,fsOps,modelConfig,arkClient,catalogSeed=()=>loadBundledCatalogSeed(path.join(project,'resources')),sceneSeed=()=>loadBundledSceneSeed(path.join(project,'resources')),executionEngine=process.env.QA_AI_ENGINE||'native-node',bridgeToken=process.env.WORKBENCH_BRIDGE_TOKEN,workerPort=process.env.WORKBENCH_WORKER_PORT||4192,storageMode='single',automaticBuiltinUpgrade=true}={}){
   if(!['native-node','spring-ai'].includes(executionEngine))throw new WorkspaceError('不支持的模型执行引擎。');
   const client=arkClient||createArkClient(executionEngine==='spring-ai'?{fetchImpl:createSpringAiFetch({bridgeToken,workerPort})}:{});
   const transport=createWorkspaceTransport();
@@ -47,13 +49,13 @@ export async function createWorkbenchServer({dataDir=process.env.DEMO_DATA_DIR||
   const guardedRoot=process.platform==='win32'?root.toLowerCase():root,guardedData=process.platform==='win32'?resolvedData.toLowerCase():resolvedData;
   if(guardedData===guardedRoot||guardedData.startsWith(guardedRoot+path.sep))throw new WorkspaceError('工作区数据目录必须位于 public 目录之外。');
   const recovery=await createWorkspaceRestore({dataDir:resolvedData});
-  let store,token=randomBytes(32).toString('hex');
+  let store,builtinUpgrade={status:'current'},token=randomBytes(32).toString('hex');
   const readWorkspaceUsage=createWorkspaceUsageReader(resolvedData);
   let config,ai,traces,reportJobs,translationJobs,importDrafts,rawStructureJobs,serverClosing=false,maintenance=false,unavailable=false,inflight=0,mutationEpoch=0,preview=null;const connectionTests=new Set();
   async function closeServices(){await Promise.all([ai?.close(),reportJobs?.close(),translationJobs?.close(),rawStructureJobs?.close()]);await importDrafts?.close();await traces?.close();await store?.close();}
   async function openServices(){
     transport.clear();store=null;config=null;ai=null;traces=null;reportJobs=null;translationJobs=null;importDrafts=null;rawStructureJobs=null;
-    try{store=await createWorkspaceStore({dataDir:resolvedData,catalogSeed,sceneSeed,storageMode,...(fsOps?{fsOps}:{})});importDrafts=await createImportDraftStore({dataDir:resolvedData,workspaceStore:store});traces=await createWorkflowTraceStore({dataDir:resolvedData});config=modelConfig||await createModelConfig({dataDir:resolvedData});ai=await createAiService({store,modelConfig:config,client,traceStore:traces});reportJobs=await createReportJobs({maxAttempts:3,dataDir:resolvedData,store,modelConfig:config,client,traceStore:traces});translationJobs=await createTranslationJobs({maxAttempts:3,dataDir:resolvedData,store,modelConfig:config,client,traceStore:traces,reportJobs});rawStructureJobs=await createRawStructureJobs({dataDir:resolvedData,store,modelConfig:config,client,traceStore:traces});}
+    try{store=await createWorkspaceStore({dataDir:resolvedData,catalogSeed,sceneSeed,storageMode,...(fsOps?{fsOps}:{})});builtinUpgrade=automaticBuiltinUpgrade?await upgradeBuiltinOnStartup({store,dataDir:resolvedData,catalogSeed,sceneSeed,productVersion:PRODUCT_VERSION}):{status:'current'};importDrafts=await createImportDraftStore({dataDir:resolvedData,workspaceStore:store});traces=await createWorkflowTraceStore({dataDir:resolvedData});config=modelConfig||await createModelConfig({dataDir:resolvedData});ai=await createAiService({store,modelConfig:config,client,traceStore:traces});reportJobs=await createReportJobs({maxAttempts:3,dataDir:resolvedData,store,modelConfig:config,client,traceStore:traces});translationJobs=await createTranslationJobs({maxAttempts:3,dataDir:resolvedData,store,modelConfig:config,client,traceStore:traces,reportJobs});rawStructureJobs=await createRawStructureJobs({dataDir:resolvedData,store,modelConfig:config,client,traceStore:traces});}
     catch(error){await closeServices();throw error;}
   }
   try{await openServices();}catch(error){await recovery.close();throw error;}
@@ -72,7 +74,7 @@ export async function createWorkbenchServer({dataDir=process.env.DEMO_DATA_DIR||
       if(req.headers['x-workspace-sync']==='records-v1')res.workspaceEnvelope=async value=>{
         if(!value||!(value.patch||value.unchanged||typeof value.initialized==='boolean'))return value;
         const {state:ignoredState,catalog:ignoredCatalog,patch:ignoredPatch,baseRevision:ignoredBase,revision:ignoredRevision,initialized:ignoredInit,unchanged:ignoredUnchanged,...extra}=value;
-        const current=store.transportSnapshot(),meta={...extra,token,aiRuntime:ai.runtime(),reviewCommands:true,productVersion:PRODUCT_VERSION};
+        const current=store.transportSnapshot(),meta={...extra,token,aiRuntime:ai.runtime(),reviewCommands:true,productVersion:PRODUCT_VERSION,builtinUpgrade};
         if(!current.initialized)return{...current,...meta};
         const since=Number(req.headers['x-workspace-revision']);
         if(Number.isSafeInteger(since)&&since===current.revision&&req.headers['x-workspace-epoch']===token)return{initialized:true,revision:since,unchanged:true,...meta};
@@ -388,7 +390,7 @@ export async function createWorkbenchServer({dataDir=process.env.DEMO_DATA_DIR||
       }
       if(pathname==='/api/workspace'){
         if(req.method==='GET'&&req.headers['x-workspace-sync']==='records-v1'){await json(res,200,{initialized:true});return;}
-        if(req.method==='GET'){const since=url.searchParams.get('since');await json(res,200,{...await(since!==null?store.changesSince(Number(since)):store.read()),token,aiRuntime:ai.runtime(),reviewCommands:true,productVersion:PRODUCT_VERSION});return;}
+        if(req.method==='GET'){const since=url.searchParams.get('since');await json(res,200,{...await(since!==null?store.changesSince(Number(since)):store.read()),token,aiRuntime:ai.runtime(),reviewCommands:true,productVersion:PRODUCT_VERSION,builtinUpgrade});return;}
         if(req.method!=='PUT')throw new WorkspaceError('Method not allowed',405);
         requireMutation('application/json');const bytes=await body(req,maxBodyBytes);let request;
         try{request=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(bytes));}catch{throw new WorkspaceError('保存请求不是有效 JSON。');}
@@ -423,6 +425,7 @@ export async function createWorkbenchServer({dataDir=process.env.DEMO_DATA_DIR||
   server.waitForRawStructureIdle=()=>rawStructureJobs.waitForIdle();
   server.waitForTranslationsIdle=()=>translationJobs.waitForIdle();
   server.traces=traces;
+  server.desktopActivity=()=>readDesktopActivity({ai,report:reportJobs,translation:translationJobs,structured:rawStructureJobs});
   const cancelTests=()=>{for(const controller of connectionTests)controller.abort();};
   server.closeWorkspace=async()=>{serverClosing=true;cancelTests();await closeServices();await recovery.close();};
   const close=server.close.bind(server);server.close=callback=>{

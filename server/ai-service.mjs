@@ -1,5 +1,7 @@
 import {assertTaskWritable,isInactiveTask,taskHasPendingAI} from '../public/task-lifecycle.mjs';
 import {isBusinessEcommerceBasis} from '../public/ecommerce-business-profile.mjs';
+import {hasTargetCalibrationPolicy} from '../public/ecommerce-semantic-policy.mjs';
+import {activeDesktopJobCount} from './desktop-activity.mjs';
 import {isFixed24EcommerceBasis} from '../public/ecommerce-timing-policy.mjs';
 import {createHash} from 'node:crypto';
 import {setTimeout as delay} from 'node:timers/promises';
@@ -89,7 +91,7 @@ function publishEcommerceCheckpoints(state,task){
  for(const row of q.rows){const s=state.sessions.find(s=>s.id===row.sessionId),results=merged.get(row.sessionId);if(!results||human(s))continue;
   if(s.aiExecution?.status==='completed'&&canonical(s.aiResults)===canonical(results))continue;
   archiveFailedAIDecision(s);s.aiResults=copy(results);const result=row.semanticResult;
-  s.aiExecution={status:'completed',runId:row.semanticRunId||row.runId||task.aiRun.id,modelId:result.modelId||task.aiRun.modelId,requestedModel:row.semanticRequestedModel||task.aiRun.modelId,startedAt:row.startedAt,completedAt:now(),inputSha256:row.inputSha256,basisSha256:digest(task.basisSnapshot),promptVersion:result.promptVersion==='ec-local-unreplied-v1'?result.promptVersion:isBusinessEcommerceBasis(task.basisSnapshot)?(task.basisSnapshot.businessProfile?.semanticPolicy?.version==='ec-human-aligned-v1'?'ec-human-aligned-v1':'ec-business-v1'):isStageATimeBasis(task.basisSnapshot)?'ec-stage-a-time-v1-content-v1':'ec-row-hybrid-v2',...(result.requestId?{requestId:result.requestId}:{}),...(result.usage?{usage:copy(result.usage)}:{})};row.resultStatus='completed';
+  s.aiExecution={status:'completed',runId:row.semanticRunId||row.runId||task.aiRun.id,modelId:result.modelId||task.aiRun.modelId,requestedModel:row.semanticRequestedModel||task.aiRun.modelId,startedAt:row.startedAt,completedAt:now(),inputSha256:row.inputSha256,basisSha256:digest(task.basisSnapshot),promptVersion:result.promptVersion==='ec-local-unreplied-v1'?result.promptVersion:hasTargetCalibrationPolicy(task.basisSnapshot)?task.basisSnapshot.businessProfile.targetPolicyVersion:isBusinessEcommerceBasis(task.basisSnapshot)?(task.basisSnapshot.businessProfile?.semanticPolicy?.version==='ec-human-aligned-v1'?'ec-human-aligned-v1':'ec-business-v1'):isStageATimeBasis(task.basisSnapshot)?'ec-stage-a-time-v1-content-v1':'ec-row-hybrid-v2',...(result.requestId?{requestId:result.requestId}:{}),...(result.usage?{usage:copy(result.usage)}:{})};row.resultStatus='completed';
  }
  refresh(task,state);
 }
@@ -408,6 +410,7 @@ export async function createAiService(options={}){
     })();
     voidOperations.set(taskId,{promise:operation,key});operation.finally(()=>voidOperations.delete(taskId)).catch(()=>{});return operation;
    },
+   activityCount(){return Math.max(cancellations.size,voidOperations.size,activeDesktopJobCount({pendingOperations,activeIds:[...active.keys()],jobs:(cachedState?.aiTaskQueue?.entries||[]).map(e=>({id:e.taskId,status:e.status}))}));},
    isBusy(){return pendingOperations>0||active.size>0||cancellations.size>0||voidOperations.size>0||cachedState?.aiTaskQueue?.status==='ready'&&dispatchableEntries(cachedState.aiTaskQueue).length>0;},
    async waitForIdle(){for(;;){await startQueue;await Promise.all([...active.values()].map(job=>job.promise));await startQueue;if(active.size)continue;const queue=cachedState?.aiTaskQueue;if(closing||writeError||queue?.status!=='ready'||!dispatchableEntries(queue).length)return;await serialized(dispatchNext);}},
    runtime(){const queue=taskQueueRuntime(cachedState?.aiTaskQueue);return{activeTasks:[...active.keys()],error:writeError,...queue,...(writeError?{queueStatus:'paused',queuePauseReason:'storage_error'}:{})};},

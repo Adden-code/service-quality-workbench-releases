@@ -1,3 +1,4 @@
+import {activeDesktopJobCount} from './desktop-activity.mjs';
 // User-triggered derivative export only. These jobs never write sessions,
 // inspection evidence, human reviews, or any optional result back to a task.
 import fs from 'node:fs/promises';
@@ -147,6 +148,7 @@ export async function createRawStructureJobs({dataDir,store,modelConfig,client,t
   pause(id){return serial(async()=>{const job=find(id);if(active?.job.id===job.id)active.paused=true;if(job.status==='running'){job.status='paused';job.stopReason='user_paused';await persist(job);}return summary(job);});},
   resume(id){return serial(async()=>{if(closing)fail('服务正在关闭。',503);if(active)fail('已有结构化请求仍在收尾，请稍后继续。',409);const job=find(id);if(job.status!=='paused')return summary(job);await snapshotOf(job);const config=configFor(job);for(const unit of job.units)if(unit.status==='failed'&&fatal(unit.errorCode))unit.status='pending';job.status='running';delete job.stopReason;await persist(job);launch(job,config);return summary(job);});},
   retry(id){return serial(async()=>{if(closing)fail('服务正在关闭。',503);if(active)fail('已有结构化请求仍在执行。',409);const job=find(id);await snapshotOf(job);const config=configFor(job);if(!job.units.some(unit=>unit.status==='failed'))return summary(job);for(const unit of job.units)if(unit.status==='failed'){unit.status='pending';delete unit.errorCode;delete unit.error;}job.status='running';delete job.stopReason;await persist(job);launch(job,config);return summary(job);});},
+  activityCount(){return activeDesktopJobCount({pendingOperations,activeIds:active?[active.job.id]:[],jobs:[...jobs.values()]});},
   isBusy(){return pendingOperations>0||active!==null;},
   async waitForIdle(){await tail;while(active){await active.promise;await tail;}},
   close(){if(closePromise)return closePromise;closing=true;closePromise=(async()=>{await tail;if(active){active.controller.abort();await active.promise;}await files.close();})();return closePromise;}

@@ -2,6 +2,7 @@ import {createRecordWriter,isRecordIndex,readRecordDocument} from './workspace-r
 import {applyReviewCommand} from '../public/review-command.mjs';
 import {workspacePatch,mergeWorkspacePatch} from '../public/workspace-patch.mjs';
 import {installBuiltinSceneUpgrade,installEcommercePolicyUpgrade} from './builtin-scene-upgrade.mjs';
+import {prepareAutomaticBuiltinUpgrade} from './startup-builtin-upgrade.mjs';
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import {createHash,randomBytes} from 'node:crypto';
@@ -204,6 +205,7 @@ export async function createWorkspaceStore({dataDir,fsOps=fs,catalogSeed=null,sc
       return persist({...next,revision:document.revision+1});
     });},
     installBuiltinScenes(input){return serial(async()=>{const next=installBuiltinSceneUpgrade(document,input);validateWorkspace(next.state,next.catalog,document.state,{trustedScene:true});await ensureSceneSeedSources(input.sceneSeed);await checkSources(next.state,next.catalog);return persist({...next,revision:document.revision+1});});},
+    upgradeBuiltinAutomatically(input){return serial(async()=>{const plan=prepareAutomaticBuiltinUpgrade(document,input);if(!plan)return read();const next=plan.next;validateWorkspace(next.state,next.catalog,document.state,{trustedScene:true});await ensureSceneSeedSources(input.sceneSeed);await checkSources(next.state,next.catalog);return persist({...next,revision:document.revision+1});});},
     installEcommercePolicy(input){return serial(async()=>{const next=installEcommercePolicyUpgrade(document,input);validateWorkspace(next.state,next.catalog,document.state,{trustedScene:true});await checkSources(next.state,next.catalog);return persist({...next,revision:document.revision+1});});},
     configureScene(input){return serial(async()=>{
       const next=sceneConfigurationMutation(document,input);if(canonical(next)===canonical(document))return read();
