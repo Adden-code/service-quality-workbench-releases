@@ -36,7 +36,12 @@ function preserveLocalSettings(pkg,current,state){
  // algorithm policies always come from the new bundle.
  c.runtimeFields=c.runtimeFields.map(field=>{const old=current.runtimeFields.find(f=>f.key===field.key);return old?{...field,default:clone(old.default)}:field;});
  c.failurePolicy=clone(current.failurePolicy);
- if(c.engine==='conversation')c.timingPolicy=clone(current.timingPolicy);
+ if(c.engine==='conversation'){
+  c.timingPolicy={...clone(current.timingPolicy),enabled:c.capabilities.some(a=>a.key==='timing')};
+  // Older workspaces had no timing capability or standards. Enabling the new
+  // capability must not invent thresholds or carry an inconsistent off switch.
+  if(c.timingPolicy.enabled&&!c.timingPolicy.standards.length&&!c.timingPolicy.fallbackStandards.length)Object.assign(c.timingPolicy,{standardsStatus:'pending',allowBatchOverride:false,missingStandard:'uncertain'});
+ }
  else if(c.basis.businessProfile&&current.basis.businessProfile){
   const old=current.basis.businessProfile;
   c.basis.businessProfile.timing.sites=clone(old.timing.sites);

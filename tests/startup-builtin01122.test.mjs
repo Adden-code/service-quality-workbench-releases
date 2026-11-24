@@ -53,6 +53,16 @@ async function importedTask(store,label){
 }
 const backups=async container=>(await fs.readdir(container)).filter(n=>n.includes('.before-auto-builtin-')&&n.endsWith('.sqwb'));
 const startup=(store,dataDir,f,extra={})=>upgradeBuiltinOnStartup({store,dataDir,catalogSeed:f.catalogSeed,sceneSeed:f.sceneSeed,productVersion:f.productVersion,...extra});
+for(const maintained of [false,true])test(`adding bundled timing capability preserves ${maintained?'local standards':'pending empty standards'} without retaining the old disabled switch`,async t=>{
+ const box=await sandbox(t),f=seeds(),store=await withStore(t,box.dataDir,{catalogSeed:f.catalogSeed,sceneSeed:f.oldSeed});
+ if(maintained)await localSettings(store);const before=await store.read(),old=latestSceneConfiguration(before.state,NP),updated=clone(f.sceneSeed),np=updated.packages[0];
+ assert.equal(old.timingPolicy.enabled,false);
+ np.configuration.capabilities.push({key:'timing',phase:'pre',dependsOn:[],executorVersion:'scene-capability.v1'});np.configuration.timingPolicy.enabled=true;np.configuration.timingPolicy.standardsStatus='pending';
+ const result=await startup(store,box.dataDir,f,{sceneSeed:updated});assert.equal(result.status,'upgraded',JSON.stringify(result));
+ const after=await store.read(),current=latestSceneConfiguration(after.state,NP);assert.equal(current.timingPolicy.enabled,true);assert.deepEqual(current.timingPolicy.standards,old.timingPolicy.standards);
+ if(!maintained)assert.equal(current.timingPolicy.standardsStatus,'pending');
+ assert.deepEqual(after.state.tasks,before.state.tasks);assert.deepEqual(after.state.sessions,before.state.sessions);assert.equal((await backups(box.container)).length,1);
+});
 test('old workspace upgrades only changed EC, retains local settings and old task snapshots, new tasks freeze v2',async t=>{
  const box=await sandbox(t),f=seeds(),store=await withStore(t,box.dataDir,{catalogSeed:f.catalogSeed,sceneSeed:f.oldSeed});await localSettings(store);const oldTask=await importedTask(store,'before'),before=await store.read(),originalBytes=await fs.readFile(path.join(box.dataDir,'workspace.json'));
  const result=await startup(store,box.dataDir,f);assert.equal(result.status,'upgraded',JSON.stringify(result));assert.deepEqual(result.scenes,[sceneId]);assert.equal((await backups(box.container)).length,1);
