@@ -1,5 +1,5 @@
 import {validateCalendar,timeDurationMs} from './working-time.mjs';
-import {validateEcommerceSemanticPolicy,validateEcommerceTargetPolicy} from './ecommerce-semantic-policy.mjs';
+import {validateEcommerceSemanticPolicy,validateEcommerceTargetPolicy,hasTargetCalibrationPolicy} from './ecommerce-semantic-policy.mjs';
 import {isFixed24EcommerceBasis,validateEcommerceTimingPolicy,EC_FIXED24_TIMING_POLICY_VERSION} from './ecommerce-timing-policy.mjs';
 export const EC_BUSINESS_PROFILE='ec-business-v1';
 export const isBusinessEcommerceBasis=b=>b?.executionProfile===EC_BUSINESS_PROFILE;
@@ -11,7 +11,8 @@ const text=x=>typeof x==='string'&&x.trim();
 export function validateBusinessEcommerceBasis(b){
  if(!isBusinessEcommerceBasis(b)||b.ruleSetSnapshot||!Array.isArray(b.rules)||b.rules.length!==5||new Set(b.rules.map(r=>r.id)).size!==5||!IDS.every(id=>b.rules.some(r=>r.id===id)))fail('内置电商版本必须包含独立五项规则。');
  const p=b.businessProfile;
- if(!object(p)||p.schemaVersion!==1||p.similarity?.method!=='normalized-bigram-dice-v1'||p.similarity.threshold!==0.85||p.similarity.minimumRecords!==2||p.similarity.scope!=='batch')fail('电商相似度执行配置不受支持。');
+ const calibrated=hasTargetCalibrationPolicy(b);
+ if(!object(p)||p.schemaVersion!==1||p.similarity?.method!=='normalized-bigram-dice-v1'||p.similarity.threshold!==0.85||p.similarity.minimumRecords!==(calibrated?3:2)||p.similarity.scope!==(calibrated?'batch-administrator':'batch'))fail('电商相似度执行配置不受支持。');
  if(Object.hasOwn(p,'semanticPolicy'))validateEcommerceSemanticPolicy(p.semanticPolicy);
  if(Object.hasOwn(p,'targetPolicyVersion'))validateEcommerceTargetPolicy(b);
  if(p.structure?.minimumSteps!==3||p.structure.counting!=='grapheme-with-spaces-v1'||!['zh','en'].every(l=>Number.isSafeInteger(p.structure.closingWaiver[l])&&p.structure.closingWaiver[l]>0)||p.privacy?.maskedAllowed!==false)fail('电商结构或隐私配置无效。');
@@ -32,13 +33,60 @@ export function businessReplySimilarity(left,right){
 }
 const coordinate=s=>JSON.stringify([s.ecommerce.fileSha256,s.ecommerce.sheet,s.ecommerce.row]);
 export function businessDuplicateGroups(sessions,basis){
+ if(hasTargetCalibrationPolicy(basis))return businessDuplicateAssessment(sessions,basis).duplicateGroups;
  validateBusinessEcommerceBasis(basis);const pairs=[],covered=new Set(),used=new Set(),rows=sessions.filter(s=>{const c=coordinate(s);if(used.has(c))return false;used.add(c);return Boolean(s.ecommerce.raw[9].trim());});
  // Keep pair evidence, never turn an A~B~C chain into an unproved A~C group.
  for(let i=0;i<rows.length;i++)for(let j=i+1;j<rows.length;j++){const a=rows[i],b=rows[j];if(covered.has(a.id)&&covered.has(b.id))continue;const score=businessReplySimilarity(a.ecommerce.raw[9],b.ecommerce.raw[9]);if(score>=basis.businessProfile.similarity.threshold){pairs.push({kind:score===1?'exact':'similar',sessionIds:[a.id,b.id],reason:`归一化字符二元组 Dice 相似度 ${(score*100).toFixed(2)}%，达到 85%；本批次两个不同来源行。`});covered.add(a.id);covered.add(b.id);}}
  return pairs;
 }
 export function validateBusinessDuplicateGroups(groups,sessions,basis){
+ if(hasTargetCalibrationPolicy(basis))return validateCalibratedDuplicateGroups(groups,sessions,basis);
  validateBusinessEcommerceBasis(basis);if(!Array.isArray(groups)||groups.length>124750)fail('电商批次配对证据无效。');const map=new Map(sessions.map(s=>[s.id,s]));return groups.map(g=>{const rows=g?.sessionIds?.map(id=>map.get(id));if(!rows||rows.length!==2||rows.some(s=>!s)||coordinate(rows[0])===coordinate(rows[1])||!text(g.reason)||g.reason.length>2000)fail('新电商重复证据须为两个真实不同来源行。');const score=businessReplySimilarity(rows[0].ecommerce.raw[9],rows[1].ecommerce.raw[9]);if(score<0.85||g.kind!==(score===1?'exact':'similar'))fail('重复证据不能通过程序相似度复算。');return{sessionIds:[...g.sessionIds],kind:g.kind,reason:g.reason};});
+}
+const administrator=s=>s.ecommerce.raw[11].trim();
+// Every hard-failure witness is a complete triangle. This covers every row that
+// belongs to a >=3-member clique without enumerating all maximal cliques.
+export function businessDuplicateAssessment(sessions,basis){
+ validateBusinessEcommerceBasis(basis);
+ if(!hasTargetCalibrationPolicy(basis))return{duplicateGroups:businessDuplicateGroups(sessions,basis),advisoryGroups:[],missingAdministratorSessionIds:[]};
+ const used=new Set(),rows=sessions.filter(s=>{const key=coordinate(s);if(used.has(key))return false;used.add(key);return Boolean(s.ecommerce.raw[9].trim());});
+ const adjacency=rows.map(()=>new Map()),duplicateGroups=[],advisoryGroups=[],covered=new Set(),advised=new Set();
+ for(let i=0;i<rows.length;i++)for(let j=i+1;j<rows.length;j++){
+  if(!administrator(rows[i])||administrator(rows[i])!==administrator(rows[j]))continue;
+  const score=businessReplySimilarity(rows[i].ecommerce.raw[9],rows[j].ecommerce.raw[9]);
+  if(score>=.85){adjacency[i].set(j,score);adjacency[j].set(i,score);}
+ }
+ for(let i=0;i<rows.length;i++){
+  if(covered.has(i))continue;
+  let found=false;
+  for(const [j,ij] of adjacency[i]){
+   for(const [k,ik] of adjacency[i]){
+    if(k<=j||!adjacency[j].has(k))continue;
+    const minimum=Math.min(ij,ik,adjacency[j].get(k));
+    duplicateGroups.push({sessionIds:[rows[i].id,rows[j].id,rows[k].id],kind:minimum===1?'exact':'similar',reason:`同一管理员的3个不同来源行彼此归一化字符二元组Dice相似度均达到85%，最低 ${(minimum*100).toFixed(2)}%；不采用传递闭包。`});
+    [i,j,k].forEach(n=>covered.add(n));found=true;break;
+   }
+   if(found)break;
+  }
+ }
+ for(let i=0;i<rows.length;i++)for(const [j,score] of adjacency[i])if(j>i&&![i,j].every(n=>covered.has(n)||advised.has(n))){
+  advisoryGroups.push({sessionIds:[rows[i].id,rows[j].id],kind:score===1?'exact':'similar',reason:`改进建议：同一管理员有2条回复相似度 ${(score*100).toFixed(2)}%，未形成至少3条彼此达到85%的证据组，不作批次硬扣分。`});
+  [i,j].forEach(n=>advised.add(n));
+ }
+ return{duplicateGroups,advisoryGroups,missingAdministratorSessionIds:sessions.filter(s=>s.ecommerce.raw[9].trim()&&!administrator(s)).map(s=>s.id)};
+}
+function validateCalibratedDuplicateGroups(groups,sessions,basis){
+ validateBusinessEcommerceBasis(basis);if(!Array.isArray(groups)||groups.length>124750)fail('电商批次相似证据无效。');
+ const map=new Map(sessions.map(s=>[s.id,s]));
+ return groups.map(g=>{
+  if(!Array.isArray(g?.sessionIds)||g.sessionIds.length<3||g.sessionIds.length>500||new Set(g.sessionIds).size!==g.sessionIds.length||!text(g.reason)||g.reason.length>2000)fail('第二轮重复证据须含至少3条不同来源记录。');
+  const rows=g.sessionIds.map(id=>map.get(id));
+  if(rows.some(s=>!s||!s.ecommerce.raw[9].trim())||!administrator(rows[0])||rows.some(s=>administrator(s)!==administrator(rows[0]))||new Set(rows.map(coordinate)).size!==rows.length)fail('重复证据须属于同一非空管理员的不同真实来源行。');
+  let minimum=1;
+  for(let i=0;i<rows.length;i++)for(let j=i+1;j<rows.length;j++)minimum=Math.min(minimum,businessReplySimilarity(rows[i].ecommerce.raw[9],rows[j].ecommerce.raw[9]));
+  if(minimum<.85||g.kind!==(minimum===1?'exact':'similar'))fail('重复组内每一对回复必须通过85%程序相似度复算。');
+  return{sessionIds:[...g.sessionIds],kind:g.kind,reason:g.reason};
+ });
 }
 export function businessEvaluationType(session){const c=session.sceneCapabilities?.outputs?.ecommerceClassification;if(c?.status==='completed')return c.value.evaluationType;const n=Number(session.ecommerce.raw[10]);return n===1?'差评':n>=2&&n<=3?'中评':null;}
 // The source parser stores unzoned dates as UTC+08. Reinterpret only those wall-clock

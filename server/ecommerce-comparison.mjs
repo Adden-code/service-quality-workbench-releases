@@ -1,4 +1,5 @@
 import {isBusinessEcommerceBasis,businessDuplicateGroups} from '../public/ecommerce-business-profile.mjs';
+import {hasTargetCalibrationPolicy} from '../public/ecommerce-semantic-policy.mjs';
 import {createHash} from 'node:crypto';
 import {validateEcommerceRecord} from '../public/ecommerce-schema.mjs';
 
@@ -16,7 +17,7 @@ const wire=rep=>({id:rep.id,reply:rep.reply});
 export function planEcommerceComparisons(sessions,{maxRecords=20,maxWorkBytes=64000,maxBlocks=4096,basis}={}){
   if(!Array.isArray(sessions)||!sessions.length||sessions.length>500)fail('比较记录范围须为1至500条。');
   if(!Number.isSafeInteger(maxRecords)||maxRecords<2||maxRecords>40||!Number.isSafeInteger(maxWorkBytes)||maxWorkBytes<128||maxWorkBytes>800000||!Number.isSafeInteger(maxBlocks)||maxBlocks<1||maxBlocks>4096)fail('比较调度设置超出允许范围。');
-  if(isBusinessEcommerceBasis(basis)){const exactGroups=businessDuplicateGroups(sessions,basis);return {version:2,executionProfile:'ec-business-v1',fingerprint:hash(['ec-business-pairs-v1',basis.businessProfile.similarity,sessions.map(s=>[s.id,s.ecommerce.fileSha256,s.ecommerce.sheet,s.ecommerce.row,s.ecommerce.raw[9]])]),representatives:[],blocks:[],exactGroups,totalPairs:sessions.length*(sessions.length-1)/2};}
+  if(isBusinessEcommerceBasis(basis)){const calibrated=hasTargetCalibrationPolicy(basis),exactGroups=businessDuplicateGroups(sessions,basis);return {version:2,executionProfile:'ec-business-v1',fingerprint:hash([calibrated?basis.businessProfile.targetPolicyVersion:'ec-business-pairs-v1',basis.businessProfile.similarity,sessions.map(s=>[s.id,s.ecommerce.fileSha256,s.ecommerce.sheet,s.ecommerce.row,s.ecommerce.raw[9],...(calibrated?[s.ecommerce.raw[11].trim()]:[])])]),representatives:[],blocks:[],exactGroups,totalPairs:sessions.length*(sessions.length-1)/2};}
   const ids=new Set(),coordinates=new Set(),representatives=[],byText=new Map(),source=[];
   for(const session of sessions){
     if(!object(session)||typeof session.id!=='string'||!session.id||session.id.length>256||ids.has(session.id))fail('比较来源记录标识无效或重复。');

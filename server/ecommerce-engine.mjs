@@ -1,4 +1,5 @@
-import {isBusinessEcommerceBasis,businessDuplicateGroups,validateBusinessDuplicateGroups} from '../public/ecommerce-business-profile.mjs';
+import {isBusinessEcommerceBasis,businessDuplicateGroups,businessDuplicateAssessment,validateBusinessDuplicateGroups} from '../public/ecommerce-business-profile.mjs';
+import {hasTargetCalibrationPolicy} from '../public/ecommerce-semantic-policy.mjs';
 import {EC_RULE_IDS,ecommerceTimeValues,ecommerceSourceColumn,validateEcommerceRecord,validateEcommerceSource} from '../public/ecommerce-schema.mjs';
 import {isEcommerceBasis} from '../public/ecommerce-catalog.mjs';
 import {workflowInput} from './workflow-contract.mjs';
@@ -57,6 +58,7 @@ export function mergeEcommerceResults({sessions,semanticResults,duplicateGroups,
     semantic.set(row.sessionId,row.results);
   }
   const business=isBusinessEcommerceBasis(basis);
+  const calibrated=hasTargetCalibrationPolicy(basis),assessment=calibrated?businessDuplicateAssessment(sessions,basis):null;
   const groups=business?validateBusinessDuplicateGroups([...(deterministic?.duplicateGroups??businessDuplicateGroups(sessions,basis)),...duplicateGroups],sessions,basis):validateDuplicateGroups([...(deterministic?.duplicateGroups??exactDuplicateGroups(sessions)),...validateDuplicateGroups(duplicateGroups,sessions)],sessions);
   const output=new Map();
   for(const s of sessions){
@@ -70,11 +72,22 @@ export function mergeEcommerceResults({sessions,semanticResults,duplicateGroups,
       if(r.ruleId==='EC-TARGET'){const pending=pendingComparisons[s.id]||[];r.comparisonAssessment={status:pending.length?'incomplete':'completed',pendingBlockIds:pending,semanticVerdict:r.verdict,semanticReason:r.reason};if(pending.length&&r.verdict!=='不符合'){r.semanticReason=r.reason;r.verdict='无法判定';r.reason=`模板化回复③尚有 ${pending.length} 个相似比较块未完成，仅该子维度待人工/重跑；逐行针对性①②：${r.semanticReason}`;}}
       if(r.ruleId==='EC-TARGET'&&unique.length){
         r.semanticReason=r.reason;
-        r.verdict='不符合';r.reason=`本批次${business?'不同来源行':'同一管理员'}回复重复/高度相似：${unique.map(g=>`${g.sessionIds.length}条记录，${g.reason}`).join('；')} 本条语义检查：${r.reason}`;
+        r.verdict='不符合';r.reason=`本批次${business&&!calibrated?'不同来源行':'同一管理员'}回复重复/高度相似：${unique.map(g=>`${g.sessionIds.length}条记录，${g.reason}`).join('；')} 本条语义检查：${r.reason}`;
         if(r.reason.length>20000)r.reason=r.reason.slice(0,19940)+'…（摘要已截短；完整模型语义理由及批次证据分别保留）';
         r.batchEvidence=unique;r.fieldEvidence=[...new Set([...(r.fieldEvidence||[]),...fieldKeys(s,[11])])];
       }else if(!hasReply||(r.ruleId==='EC-TARGET'&&(!record(s).raw[8].trim()||(!business&&!administrator(s)&&r.verdict!=='不符合')))){
         r.verdict='无法判定';r.reason=!hasReply?'原表回复内容缺失，未编造回复，待补充后检查。':!record(s).raw[8].trim()?'评论内容缺失，无法核对回复针对性。':r.verdict==='不符合'?r.reason:'管理员缺失，无法完成本项的同客服批次重复检查。';
+      }
+      if(calibrated&&r.ruleId==='EC-TARGET'&&hasReply&&!unique.length){
+        const advisory=assessment.advisoryGroups.find(g=>g.sessionIds.includes(s.id));
+        if(advisory)r.reason+=` ${advisory.reason}`;
+        if(assessment.missingAdministratorSessionIds.includes(s.id)){
+          const semanticVerdict=r.comparisonAssessment.semanticVerdict,semanticReason=r.comparisonAssessment.semanticReason;
+          if(r.verdict!=='不符合')r.verdict='无法判定';
+          r.reason+=' 管理员缺失，无法完成同管理员批次重复子项，未猜测归属；单条语义判定保留。';
+          r.comparisonAssessment={...r.comparisonAssessment,status:'incomplete',semanticVerdict,semanticReason};
+        }
+        if(r.reason.length>20000){r.semanticReason=r.semanticReason||r.comparisonAssessment.semanticReason;r.reason=r.reason.slice(0,19940)+'…（摘要已截短；完整语义理由保留）';}
       }
       return r;
     })];
@@ -95,11 +108,11 @@ export async function inspectEcommerceBatch({sessions,basis,client,config,signal
     if(!isEcommerceBasis(basis))fail('电商评论任务的测试标准版本不匹配，请重新核对规则，未运行固定算法。');
     return{basis,scope:'本次完整导入批次，同一非空管理员分别比较',thresholds:sessions.map(s=>({sessionId:s.id,hours:s.ecommerce.thresholdHours}))};
   });
-  const deterministic=await step('deterministic',{sessions:sessions.map(s=>({sessionId:s.id,administrator:administrator(s),reply:reply(s),commentTime:record(s).raw[12],replyTime:record(s).raw[13],...([2,3,4,5,6].includes(record(s).schemaVersion)?{dateSystem:record(s).dateSystem,normalizedTimes:ecommerceTimeValues(record(s))}:{}),thresholdHours:record(s).thresholdHours})),...(isStageATimeBasis(basis)?{ruleSet:basis.ruleSetSnapshot,inspectionAt}: {})},()=>({times:sessions.map(s=>({sessionId:s.id,result:timeJudgment(s,{basis,inspectionAt})})),duplicateGroups:exactDuplicateGroups(sessions)}));
+  const deterministic=await step('deterministic',{sessions:sessions.map(s=>({sessionId:s.id,administrator:administrator(s),reply:reply(s),commentTime:record(s).raw[12],replyTime:record(s).raw[13],...([2,3,4,5,6].includes(record(s).schemaVersion)?{dateSystem:record(s).dateSystem,normalizedTimes:ecommerceTimeValues(record(s))}:{}),thresholdHours:record(s).thresholdHours})),...(isStageATimeBasis(basis)?{ruleSet:basis.ruleSetSnapshot,inspectionAt}: {})},()=>({times:sessions.map(s=>({sessionId:s.id,result:timeJudgment(s,{basis,inspectionAt})})),duplicateGroups:isBusinessEcommerceBasis(basis)?businessDuplicateGroups(sessions,basis):exactDuplicateGroups(sessions)}));
   const skipped=isStageATimeBasis(basis)?sessions.filter(s=>!reply(s).trim()&&!record(s).raw[13].trim()):[],requested=sessions.filter(s=>!skipped.includes(s));
   const result=requested.length?await client.inspectEcommerce({config,sessions:requested,basis,signal,trace}):{records:[],duplicateGroups:[],modelId:config?.model,promptVersion:'ec-local-unreplied-v1'};
   const semanticResults=[...result.records,...skipped.map(s=>({sessionId:s.id,results:unrepliedSemanticResults()}))];
   const merged=await step('merge',{deterministic,semanticResults,duplicateGroups:result.duplicateGroups},()=>Object.fromEntries(mergeEcommerceResults({sessions,semanticResults,duplicateGroups:result.duplicateGroups,deterministic,basis,inspectionAt})));
   const outputs=new Map(Object.entries(merged));
-  return{outputs,modelId:result.modelId,requestId:result.requestId,usage:result.usage,promptVersion:'ec-hybrid-v1'};
+  return{outputs,modelId:result.modelId,requestId:result.requestId,usage:result.usage,promptVersion:hasTargetCalibrationPolicy(basis)?basis.businessProfile.targetPolicyVersion:'ec-hybrid-v1'};
 }

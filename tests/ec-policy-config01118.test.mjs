@@ -6,6 +6,7 @@ import {ecommerceBusinessSettings} from '../public/ecommerce-business-settings.m
 import {calibrationScope,calibratedReviewPolicy,stable} from '../public/rule-calibration-policy.mjs';
 import {defaultScenePackage,freezeSceneExecution} from '../public/scene-configuration.mjs';
 import {createSceneConfigurationManager} from '../public/scene-configuration-ui.mjs';
+import {getLocale,setLocale} from '../public/i18n.mjs';
 
 const IDS=['EC-TIME','EC-TEXT','EC-TARGET','EC-STEPS','EC-PRIVACY'];
 // Shape mirrors the approved frozen business basis; all strings and records are
@@ -25,6 +26,18 @@ test('old published basis remains valid and rendering it does not opt into new s
  assert.doesNotMatch(html,/data-scfg-path="[^"]*semanticPolicy/);
  assert.equal(JSON.stringify(old),before);
  assert.equal(Object.hasOwn(old.businessProfile,'semanticPolicy'),false);
+});
+
+test('English legacy elapsed and working-hours settings render translated evaluation labels without mutating frozen standards',()=>{
+ const locale=getLocale();setLocale('en');
+ try{for(const mode of ['elapsed','workingHours']){
+  const basis=fixture();basis.businessProfile.timing.mode=mode;
+  if(mode==='workingHours')for(const site of basis.businessProfile.timing.sites){site.calendarConfirmed=true;site.calendar={timezone:'UTC+08:00',workdays:['Mon','Tue','Wed','Thu','Fri'],workStart:'09:00',workEnd:'18:00',holidays:[],workingDates:[]};}
+  const config=freeze({basis,timingPolicy:{allowBatchOverride:false}}),before=JSON.stringify(config);
+  const html=ecommerceBusinessSettings(config);
+  assert.match(html,/Negative rating/);assert.match(html,/configuration\.basis\.businessProfile\.timing\.standards\.0\.hours/);
+  assert.doesNotMatch(html,/>差评</);assert.equal(JSON.stringify(config),before);assert.equal(config.basis.businessProfile.timing.standards[0].evaluationType,'差评');
+ }}finally{setLocale(locale);}
 });
 
 test('semantic policy has a strict version, field set and numeric enum with no silent defaults',()=>{

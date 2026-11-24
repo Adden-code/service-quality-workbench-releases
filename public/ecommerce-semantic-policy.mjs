@@ -3,6 +3,7 @@
 export const EC_SEMANTIC_POLICY_VERSION='ec-human-aligned-v1';
 export const EC_SEMANTIC_RULE_VERSION='V3.2';
 export const EC_TARGET_POLICY_VERSION='ec-specific-response-v1';
+export const EC_TARGET_CALIBRATION_POLICY_VERSION='ec-target-calibration-v2';
 const BUSINESS_PROFILE='ec-business-v1';
 const POLICY_ID='EC-BUSINESS-POLICY';
 const RULE_IDS=['EC-TEXT','EC-TARGET','EC-STEPS','EC-PRIVACY'];
@@ -15,8 +16,9 @@ export function validateEcommerceSemanticPolicy(policy){
 }
 
 export function hasSpecificResponsePolicy(basis){return basis?.executionProfile===BUSINESS_PROFILE&&basis.businessProfile?.targetPolicyVersion===EC_TARGET_POLICY_VERSION;}
+export function hasTargetCalibrationPolicy(basis){return basis?.executionProfile===BUSINESS_PROFILE&&basis.businessProfile?.targetPolicyVersion===EC_TARGET_CALIBRATION_POLICY_VERSION;}
 export function validateEcommerceTargetPolicy(basis){
- if(basis.businessProfile?.targetPolicyVersion!==EC_TARGET_POLICY_VERSION||!basis.businessProfile.semanticPolicy)throw new Error('电商具体诉求回应口径无效：须使用 ec-specific-response-v1 并保留已校准语义策略。');
+ if(![EC_TARGET_POLICY_VERSION,EC_TARGET_CALIBRATION_POLICY_VERSION].includes(basis.businessProfile?.targetPolicyVersion)||!basis.businessProfile.semanticPolicy)throw new Error('电商具体诉求回应口径无效：须使用受支持的冻结版本并保留已校准语义策略。');
  validateEcommerceSemanticPolicy(basis.businessProfile.semanticPolicy);return true;
 }
 
@@ -28,6 +30,37 @@ export const EC_TARGET_SPECIFIC_CRITERIA={
  failCriteria:'有具体诉求但未满足(a)/(b)，包括纯致歉、倾听/重视表态、泛泛承诺，或加上通用渠道指引（热线/WhatsApp/私信/购买渠道）仍无实质回应时，判不符合。仅复述问题再让用户自行联系渠道也不通过。不能用礼貌、称呼、关键词命中或提供联系方式替代具体回应。本批次至少两个不同来源行回复归一化相似度达到85%仍不通过；相似度由程序计算，批次相似比较逻辑不变。',
  exceptionCriteria:'原评论只有笼统好评且无具体诉求/夸赞点时，按实际可回应内容判断，不编造问题、不强制解决方案或固定段落。已有回复但内容空泛属于不符合；原评论或回复缺失才为无法判定。渠道指引若同时给出对应问题的明确解释/处理进展/可执行下一步，可满足(a)/(b)，不以出现WhatsApp等词机械判Fail。reason须简要列明具体诉求、回复实际回应及满足(a)/(b)或缺失之处；不得编造回复没有的方案。',
 };
+
+export const EC_TARGET_CALIBRATION_CRITERIA={
+ summary:'好评须有结合评价的增量信息；中差评须具体回应问题；同管理员至少3条彼此达到85%相似度才触发批次硬扣分。',
+ passCriteria:'好评：围绕具体夸赞点或实际评价增加产品解释、使用建议、个性化处理或后续跟进安排等有效信息；只有笼统好评时也须给出相关增量信息，但不编造产品事实或问题。中差评/负向诉求：具体回应问题，或提供对应处理进展、方案、步骤；致歉/承认问题＋针对该问题的具体解释、澄清或情况说明＋可用的正式渠道也符合，不要求已解决、详细流程或承诺时限。高评分含负向诉求按实际问题适用负向边界。',
+ failCriteria:'好评仅复述夸赞＋感谢＋祝福，或堆砌卖点、礼貌套话而无相关增量信息，不符合。负向回复仅泛泛道歉＋联系渠道，或复述问题关键词而没有触及具体问题的解释/澄清/情况/动作，不符合。批次内同一非空管理员至少3个不同来源行的回复彼此归一化字符二元组Dice相似度均达到85%时不符合；不同管理员不能合并，链式相似不能连坐。',
+ exceptionCriteria:'同管理员仅2条相似回复只给改进建议，不作批次硬扣分；管理员缺失时不猜测归属，标记该批次子项无法完成，单条语义失败仍保留。原评论或回复缺失为无法判定；已有空泛回复为不符合。不因含WhatsApp、热线、私信等渠道词机械判Fail；渠道的可用性依据回复与冻结资料，不外查也不臆测。reason简要列明评价要点、回复增量/具体回应与满足或缺失之处；建议与硬失败分开，不新增必填字段。',
+};
+
+export function upgradeEcommerceTargetCalibrationBasis(basis){
+ const next=structuredClone(basis);if(next?.executionProfile!==BUSINESS_PROFILE)return next;
+ if(Object.hasOwn(next.businessProfile??{},'targetPolicyVersion'))validateEcommerceTargetPolicy(next);
+ if(hasTargetCalibrationPolicy(next))return next;
+ validateEcommerceSemanticPolicy(next.businessProfile?.semanticPolicy);
+ const rule=next.rules.find(r=>r.id==='EC-TARGET');if(!rule)throw new Error('缺少EC-TARGET规则，未发布第二轮针对性口径。');
+ const previous=rule.version;rule.version=upgradedVersion(previous);Object.assign(rule,EC_TARGET_CALIBRATION_CRITERIA);
+ if(rule.english)rule.english.summary='Positive replies require relevant incremental information. Specific complaint explanations with usable formal channels qualify. Batch failure requires at least 3 replies by the same administrator with pairwise Dice similarity >=85%; pairs are advisory.';
+ rule.changeNote=`需求21第二轮校准：${previous} → ${rule.version}；${EC_TARGET_CALIBRATION_POLICY_VERSION}。`;
+ next.businessProfile.targetPolicyVersion=EC_TARGET_CALIBRATION_POLICY_VERSION;
+ next.businessProfile.similarity={method:'normalized-bigram-dice-v1',threshold:.85,minimumRecords:3,scope:'batch-administrator'};
+ for(const record of next.policies.filter(p=>p.id===POLICY_ID)){
+  const previousVersion=record.version;record.version=upgradedVersion(previousVersion);
+  const sectionId='EC-TARGET-BUSINESS-1';let section=record.sections.find(s=>s.id===sectionId);
+  if(!section){section={id:sectionId,title:rule.title||rule.id};record.sections.push(section);}
+  section.text=`通过：${rule.passCriteria}\n不通过：${rule.failCriteria}\n例外：${rule.exceptionCriteria}`;
+  if(Object.hasOwn(section,'version'))section.version=record.version;
+  record.content=record.sections.map(s=>`${s.id} ${s.title}\n${s.text}`).join('\n\n');
+  record.summary=(record.summary||'')+' 需求21第二轮：好评增量信息、负向具体说明与正式渠道、同管理员至少3条彼此85%相似。';
+  record.changeNote=`需求21第二轮校准：${previousVersion} → ${record.version}；${EC_TARGET_CALIBRATION_POLICY_VERSION}；仅更新EC-TARGET章节。`;
+ }
+ return next;
+}
 
 export function upgradeEcommerceTargetBasis(basis){
  const next=structuredClone(basis);if(next?.executionProfile!==BUSINESS_PROFILE)return next;
