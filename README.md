@@ -1,5 +1,20 @@
 # 会话质检工作台
 
+## 0.11.22 桌面应用与双语交付 · 完整内置候选版
+
+**[免登录下载完整安装包（17条规则＋两场景）](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.22-full/QualityWorkbench-0.11.22-Full-Setup-Windows-x64.exe)**
+
+[发布与验收说明](https://github.com/Adden-code/service-quality-workbench-releases/releases/tag/v0.11.22-full) · [升级指引](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.22-full/Hotfix-Guide-zh.txt) · [SHA256](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.22-full/SHA256.txt) · [源码提交](https://github.com/Adden-code/service-quality-workbench-releases/commit/f3cf1128e252aff7bef5e71230933b86f215cc77)
+
+报告/审核引文角色标注与去重，双语页面和AI理由翻译，英文明细原因列覆盖及原文兜底，交付状态/进度统一。WebView2桌面壳作为默认入口，安装首屏可选中文/English并传递首次应用语言；关窗确认、托盘、单实例激活、停机落盘、残留锁安全恢复。保留127.0.0.1:4186和原浏览器启动/停止入口。使用系统共享WebView2运行时；缺失的内网电脑需另行离线安装微软运行时，主包不捆绑Chromium。
+
+EC-TARGET第二轮：好评须增量信息、负面具体解释与正式渠道可通过、同管理员至少3条彼此85%才作批次硬扣分。
+
+存量启动自动完整备份并发布内置新版本，保留本机参数及审计；历史任务不回溯。升级前停服，安装后刷新页面；新建或重检使用新口径。首次AI理由翻译需等待，缓存切换即时；不重跑质检。真实漏检率/一致率仍待内网同批验证。
+
+
+安装器98003645字节；SHA256：`bad726aaa2f86783dfb5954b6b267f97c91b6a7660f9246082b600d05b1461c9`。7附件匿名完整下载核验；源码分支`source-v0.11.22`。含获准公开规则示例，不含客户批次或凭据。
+
 ## 0.11.21 具体诉求回应硬判据强化 · 完整内置候选版
 
 **[免登录下载完整安装包（17条规则＋两场景）](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.21-full/QualityWorkbench-0.11.21-Full-Setup-Windows-x64.exe)**
