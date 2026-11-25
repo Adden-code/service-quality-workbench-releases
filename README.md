@@ -1,5 +1,19 @@
 # 会话质检工作台
 
+## 0.11.24 英文界面检查与升级自愈 · 完整内置版
+
+**[免登录下载完整安装包（17条规则＋两场景）](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.24-full/QualityWorkbench-0.11.24-Full-Setup-Windows-x64.exe)**
+
+[发布与验收说明](https://github.com/Adden-code/service-quality-workbench-releases/releases/tag/v0.11.24-full) · [升级指引](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.24-full/Hotfix-Guide-zh.txt) · [SHA256](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.24-full/SHA256.txt)
+
+本版仅实现需求37/38，规则种子与EC判据逐字沿用0.11.23，不含EC-TARGET校准。修复审核分页、政策标题与启动兜底文案，新增安装包构建前的英文页面检查：44个必验入口，52个生产视图、13个应用状态；未通过或检查记录过期均阻止打包。模型理由沿用展示翻译及原文审计。
+
+启动核验写入锁后，自动恢复中断写入的临时文件；翻译/报告暂存目录安全隔离保留原件。升级成功后保留最近2份可核验自动快照，手工备份不受影响；异常中断后续做保留检查。清理、升级和拒绝原因可查。历史任务冻结不变。
+
+安装首屏可选中文/English，WebView2桌面窗口与127.0.0.1:4186直连保持。安装、旧工作区升级与合成回归已验证，真实内网环境仍需复测。
+
+安装器98021468字节；SHA256：`81bc6a29df854bb3d4aa35f2190b23ed15ff8080518f0eb6279959dcb5a7bfce`。7附件匿名完整下载核验；[源码](https://github.com/Adden-code/service-quality-workbench-releases/commit/799101b9901ee556094cb0eb6bb583a61ed12bae)。含已获准公开的规则示例，不含客户批次或凭据。
+
 ## 0.11.23 英文界面与大工作区恢复 · 完整内置候选版
 
 **[免登录下载完整安装包（17条规则＋两场景）](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.23-full/QualityWorkbench-0.11.23-Full-Setup-Windows-x64.exe)**
