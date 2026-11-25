@@ -17,7 +17,7 @@ import {nativePolicy} from './native-language-fixture.mjs';
 import {materialSet,config,modelEnvelope,capabilityBody,ruleBody} from './native-language-stage2-fixture.mjs';
 const at='2026-11-25T01:00:00Z',scratch=path.resolve(process.env.R39_VERIFY_DIR||'../outputs/service-r39-step2-20261125/test-workspaces');
 export async function setup(t,{language='en',wrongFirst=false,count=2,forcedLanguage,capLanguage,dependencies=true}={}){
- await fs.mkdir(scratch,{recursive:true});const dir=await fs.mkdtemp(path.join(scratch,'native-run-'));let store=await createWorkspaceStore({dataDir:dir,nativeLanguageStage:2}),ai;const traceStore=await createWorkflowTraceStore({dataDir:dir});let hook=null,privateConfig=config;
+ await fs.mkdir(scratch,{recursive:true});const dir=await fs.mkdtemp(path.join(scratch,'native-run-'));let store=await createWorkspaceStore({dataDir:dir,nativeLanguageStage:2}),ai;const traceStore=await createWorkflowTraceStore({dataDir:dir});let hook=null,privateConfig=config,ruleResponse=null;
  t.after(async()=>{await ai?.close();await traceStore.close();await store.close();assert.ok(dir.startsWith(scratch+path.sep));await fs.rm(dir,{recursive:true,force:true});});
  let d=migrateSceneConfigurations({state:createBusinessState(),catalog:createCatalog()},{now:at});
  // Synthetic source fixture, not a production scene publication or NP criterion set.
@@ -34,9 +34,9 @@ export async function setup(t,{language='en',wrongFirst=false,count=2,forcedLang
  view=await store.read();await store.freezeLanguageMaterial({baseRevision:view.revision,operationId:'freeze',materialHashes:materials.map(m=>m.contentHash),promptId:'NP-NATIVE-PROMPTS',glossaryId:'NP-GLOSSARY',actor:'synthetic',reason:'Synthetic native task freeze'});
  view=await store.read();for(const key of ['languageMaterials','languageAudit'])state[key]=view.state[key];task=freezeTaskLanguageContract(task,view.state.workspaceSettings.languagePolicy,frozen);state.tasks[state.tasks.length-1]=task;
  await store.save({baseRevision:view.revision,mutationId:'create-native-task',state,catalog:view.catalog});
- const requests=[],attempts=new Map();const client=createArkClient({fetchImpl:async(_u,o)=>{const request=JSON.parse(o.body),data=JSON.parse(request.messages[1].content);requests.push(request);const id=data.session?.id||'cap-'+requests.length,n=(attempts.get(id)||0)+1;attempts.set(id,n);if(hook){const fn=hook;hook=null;await fn();}return modelEnvelope(data.capability?capabilityBody(data,capLanguage||forcedLanguage||language):ruleBody(data,forcedLanguage||(wrongFirst&&n===1?(language==='en'?'zh':'en'):language)));}});
+ const requests=[],attempts=new Map();const client=createArkClient({fetchImpl:async(_u,o)=>{const request=JSON.parse(o.body),data=JSON.parse(request.messages[1].content);requests.push(request);const id=data.session?.id||'cap-'+requests.length,n=(attempts.get(id)||0)+1;attempts.set(id,n);if(hook){const fn=hook;hook=null;await fn();}const body=data.capability?capabilityBody(data,capLanguage||forcedLanguage||language):ruleBody(data,forcedLanguage||(wrongFirst&&n===1?(language==='en'?'zh':'en'):language));if(!data.capability&&ruleResponse)ruleResponse(body,data);return modelEnvelope(body);}});
  const modelConfig={getPrivate:()=>privateConfig};ai=await createAiService({store,modelConfig,client,traceStore,maxAttempts:2,retryDelayMs:0});
- return{store,ai,task,requests,dir,traceStore,setHook(value){hook=value;},setConfig(value){privateConfig=value;},setOutputLanguage(value){forcedLanguage=value;},setCapabilityLanguage(value){capLanguage=value;},async reopen(){await ai.close();await store.close();store=await createWorkspaceStore({dataDir:dir,nativeLanguageStage:2});return store;}};
+ return{store,ai,task,requests,dir,traceStore,setHook(value){hook=value;},setConfig(value){privateConfig=value;},setOutputLanguage(value){forcedLanguage=value;},setCapabilityLanguage(value){capLanguage=value;},setRuleResponse(value){ruleResponse=value;},async reopen(){await ai.close();await store.close();store=await createWorkspaceStore({dataDir:dir,nativeLanguageStage:2});return store;}};
 }
 test('R39 step2 persisted native batch retries wrong language and reopens exact frozen scope',async t=>{
  const f=await setup(t,{wrongFirst:true});await f.ai.start(f.task.id,'synthetic-run');await f.ai.waitForIdle();
@@ -73,4 +73,24 @@ test('R39 step2 auxiliary-only language findings can be retried even when rule r
  const f=await setup(t,{count:1,capLanguage:'zh',dependencies:false});await f.ai.start(f.task.id,'synthetic-cap-only');await f.ai.waitForIdle();
  const row=(await f.store.read()).state.sessions.find(s=>s.taskId===f.task.id);assert.ok(row.aiResults.every(r=>r.languageValidation.status==='verified'));assert.equal(row.sceneCapabilities.outputs.demandSummary.languageValidation.status,'mismatch');
  f.setCapabilityLanguage('en');await f.ai.retryNativeLanguage(f.task.id,row.id);const after=(await f.store.read()).state.sessions.find(s=>s.id===row.id);assert.equal(after.sceneCapabilities.outputs.demandSummary.languageValidation.status,'verified');assert.deepEqual(after.nativeLanguageRetryHistory[0].beforeCapabilities,row.sceneCapabilities);
+});
+
+const incorrectAuxiliaryField=(body,data)=>{body.results[0].fieldEvidence=data.validationFeedback?.path==='results[0].fieldEvidence'?[]:['demandSummary.value.text=合成需求摘要'];};
+for(const language of ['zh','en'])test(`R39 ${language} persisted queue carries the parser's exact correction to the next native attempt`,async t=>{
+ const f=await setup(t,{language,count:1});f.setRuleResponse(incorrectAuxiliaryField);
+ await f.ai.start(f.task.id,'synthetic-field-feedback');await f.ai.waitForIdle();
+ const view=await f.store.read(),row=view.state.sessions.find(s=>s.taskId===f.task.id);
+ assert.equal(row.aiExecution.status,'completed');assert.ok(row.aiResults.every(r=>r.languageValidation.status==='verified'));
+ const calls=f.requests.map(r=>JSON.parse(r.messages[1].content)).filter(d=>d.basis);
+ assert.equal(calls.length,2);assert.equal(calls[1].validationFeedback.reasonCode,'unknown_context_field');
+ assert.deepEqual(row.aiResults[0].fieldEvidence,[]);assert.equal(isAIFinal(row),false);
+});
+test('native explicit row retry also carries field diagnostics and retains prior language candidates',async t=>{
+ const f=await setup(t,{language:'zh',forcedLanguage:'en',count:1});await f.ai.start(f.task.id,'synthetic-feedback-retry');await f.ai.waitForIdle();
+ const before=(await f.store.read()).state.sessions.find(s=>s.taskId===f.task.id);
+ assert.ok(before.aiResults.every(r=>r.languageValidation.status==='mismatch'));
+ f.setOutputLanguage('zh');f.setRuleResponse(incorrectAuxiliaryField);await f.ai.retryNativeLanguage(f.task.id,before.id);
+ const after=(await f.store.read()).state.sessions.find(s=>s.id===before.id);
+ assert.ok(after.aiResults.every(r=>r.languageValidation.status==='verified'));assert.deepEqual(after.nativeLanguageRetryHistory[0].beforeResults,before.aiResults);
+ const last=f.requests.map(r=>JSON.parse(r.messages[1].content)).filter(d=>d.basis).at(-1);assert.equal(last.validationFeedback.path,'results[0].fieldEvidence');
 });

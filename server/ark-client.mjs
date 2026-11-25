@@ -25,7 +25,11 @@ export class ArkError extends Error {
   constructor(code,message,status=502){super(message);this.name='ArkError';this.code=code;this.status=status;}
 }
 const fail=(code,message,status)=>{throw new ArkError(code,message,status);};
-const invalidOutput=()=>new ArkError('INVALID_OUTPUT','模型返回的判定格式或证据不完整，本会话未保存 AI 结果。');
+const invalidOutput=diagnostic=>{
+ const error=new ArkError('INVALID_OUTPUT','模型返回的判定格式或证据不完整，本会话未保存 AI 结果。');
+ if(diagnostic){error.diagnostic={layer:'structured-results',...diagnostic};error.traceOutput={diagnostic:error.diagnostic};}
+ return error;
+};
 const referenceKey=(policy,section=null)=>`${encodeURIComponent(policy.id)}@${policy.version}#${encodeURIComponent(section?.id??'')}`;
 const select=(value,keys)=>Object.fromEntries(keys.filter(key=>typeof value[key]==='string'||Number.isSafeInteger(value[key])).map(key=>[key,value[key]]));
 const text=value=>typeof value==='string'&&Boolean(value.trim());
@@ -89,22 +93,30 @@ function prepareInspection(session,basis,{sceneCapabilities}={}){
  return prepared;
 }
 function parseResults(content,expected) {
-  if(typeof content!=='string')throw invalidOutput();
-  let result;try{result=parseModelJson(content);}catch{throw invalidOutput();}
-  if(!object(result)||!Array.isArray(result.results)||result.results.length!==expected.rules.size)throw invalidOutput();
+  const reject=(path,reasonCode,requirement)=>{throw invalidOutput({path,reasonCode,expected:requirement});};
+  if(typeof content!=='string')reject('$','invalid_json','A JSON object encoded as text.');
+  let result;try{result=parseModelJson(content);}catch{reject('$','invalid_json','Valid JSON; escape quotes inside string values.');}
+  if(!object(result)||!Array.isArray(result.results)||result.results.length!==expected.rules.size)reject('results','rule_coverage','Exactly one result per requested rule.');
   const seen=new Set(),output=[];
-  for(const item of result.results){
-    if(!object(item)||!expected.rules.has(item.ruleId)||seen.has(item.ruleId)||!VERDICTS.has(item.verdict)||!text(item.reason)||item.reason.length>20000||!Array.isArray(item.evidence)||!Array.isArray(item.referenceIds))throw invalidOutput();
+  for(const [index,item] of result.results.entries()){
+    const at=field=>`results[${index}]${field?'.'+field:''}`;
+    if(!object(item))reject(at(),'invalid_result','A result object.');
+    if(!expected.rules.has(item.ruleId)||seen.has(item.ruleId))reject(at('ruleId'),'rule_coverage','A requested rule ID, without duplicates.');
+    if(!VERDICTS.has(item.verdict))reject(at('verdict'),'invalid_verdict','A verdict from the requested contract.');
+    if(!text(item.reason)||item.reason.length>20000)reject(at('reason'),'invalid_reason','Non-empty reason, at most 20000 characters.');
+    if(!Array.isArray(item.evidence))reject(at('evidence'),'invalid_turn_evidence','An array of actual integer session.turns.id values, not quotes or objects.');
+    if(!Array.isArray(item.referenceIds))reject(at('referenceIds'),'invalid_references','An array of full referenceKey values from policies linked to this rule.');
     const rejectedQuotes=[],evidence=item.evidence.map(id=>typeof id==='string'&&/^-?\d+$/.test(id.trim())?Number(id.trim()):id);
-    if(new Set(evidence).size!==evidence.length||evidence.some(id=>!Number.isSafeInteger(id)||!expected.turns.has(id)))throw invalidOutput();
-    if(new Set(item.referenceIds).size!==item.referenceIds.length||item.referenceIds.some(id=>typeof id!=='string'||!expected.rules.get(item.ruleId).has(id)))throw invalidOutput();
-    if(Object.hasOwn(item,'fieldEvidence')&&(!Array.isArray(item.fieldEvidence)||new Set(item.fieldEvidence).size!==item.fieldEvidence.length||item.fieldEvidence.some(key=>typeof key!=='string'||!expected.fieldKeys.has(key))))throw invalidOutput();
+    if(new Set(evidence).size!==evidence.length||evidence.some(id=>!Number.isSafeInteger(id)||!expected.turns.has(id)))reject(at('evidence'),'invalid_turn_evidence','Distinct actual integer session.turns.id values; put source text in evidenceQuotes.');
+    if(new Set(item.referenceIds).size!==item.referenceIds.length||item.referenceIds.some(id=>typeof id!=='string'||!expected.rules.get(item.ruleId).has(id)))reject(at('referenceIds'),'invalid_references','Distinct complete referenceKey values from policies linked to this rule.');
+    if(Object.hasOwn(item,'fieldEvidence')&&(!Array.isArray(item.fieldEvidence)||new Set(item.fieldEvidence).size!==item.fieldEvidence.length))reject(at('fieldEvidence'),'invalid_field_evidence','An optional array of distinct session.contextFields.key strings; omit or use [] when none are used.');
+    if(item.fieldEvidence?.some(key=>typeof key!=='string'||!expected.fieldKeys.has(key)))reject(at('fieldEvidence'),'unknown_context_field','Only actual session.contextFields.key values are allowed. Auxiliary outputs and key=value prose are not field keys. With no contextFields, omit fieldEvidence or return [].');
     const assurance={};
-    if(expected.triageRequired&&['confidence','evidenceQuotes','conflictsWith'].some(key=>!Object.hasOwn(item,key)))throw invalidOutput();
-    if(Object.hasOwn(item,'confidence')){const confidence=normalizeConfidenceValue(item.confidence);if(typeof confidence!=='number'||!Number.isFinite(confidence)||confidence<0||confidence>1)throw invalidOutput();assurance.confidence=confidence;}
-    if(Object.hasOwn(item,'conflictsWith')){if(!Array.isArray(item.conflictsWith)||new Set(item.conflictsWith).size!==item.conflictsWith.length||item.conflictsWith.some(id=>typeof id!=='string'||!expected.rules.has(id)||id===item.ruleId))throw invalidOutput();assurance.conflictsWith=[...item.conflictsWith];}
+    if(expected.triageRequired)for(const key of ['confidence','evidenceQuotes','conflictsWith'])if(!Object.hasOwn(item,key))reject(at(key),'missing_assurance','Include the required assurance field.');
+    if(Object.hasOwn(item,'confidence')){const confidence=normalizeConfidenceValue(item.confidence);if(typeof confidence!=='number'||!Number.isFinite(confidence)||confidence<0||confidence>1)reject(at('confidence'),'invalid_confidence','A finite number from 0 to 1.');assurance.confidence=confidence;}
+    if(Object.hasOwn(item,'conflictsWith')){if(!Array.isArray(item.conflictsWith)||new Set(item.conflictsWith).size!==item.conflictsWith.length||item.conflictsWith.some(id=>typeof id!=='string'||!expected.rules.has(id)||id===item.ruleId))reject(at('conflictsWith'),'invalid_conflicts','Distinct other requested rule IDs; [] if none.');assurance.conflictsWith=[...item.conflictsWith];}
     if(Object.hasOwn(item,'evidenceQuotes')){
-     if(!Array.isArray(item.evidenceQuotes)||item.evidenceQuotes.length>500)throw invalidOutput();
+     if(!Array.isArray(item.evidenceQuotes)||item.evidenceQuotes.length>500)reject(at('evidenceQuotes'),'invalid_quotes','An array of at most 500 {turnId,role,quote} objects.');
      assurance.evidenceQuotes=item.evidenceQuotes.flatMap(quote=>{
       const reject=reasonCode=>{rejectedQuotes.push({reasonCode,quote:typeof quote?.quote==='string'?quote.quote:null,turnId:quote?.turnId??null});return[];};
       if(!object(quote))return reject('invalid_quote');

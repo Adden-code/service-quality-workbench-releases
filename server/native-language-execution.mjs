@@ -49,6 +49,7 @@ export function nativeMessages(prepared,basis,context,{kind='inspection.structur
  // Source blocks/turns are kept byte-for-byte. Only instruction material is selected.
  if(sceneCapabilities)data.sceneContext={outputs:sceneCapabilities.outputs,ruleDependencies:snapshot.configuration.ruleDependencies,ruleExecutionPolicies:Object.fromEntries(Object.entries(snapshot.configuration.ruleExecutionPolicies||{}).map(([id,p])=>[id,{mode:p.mode}])),exceptionTables:(snapshot.exceptions||[]).map(table=>({id:table.id,version:table.version,entries:table.entries.map(entry=>({id:entry.id,condition:context.frozen.selected.find(m=>m.id===table.id).clauses.find(c=>c.clauseId===entry.id).text,result:entry.result==='不适用'?'NA':'CONTINUE',requires:entry.requires,priority:entry.priority}))}))};
  data.contentLanguage=context.language;data.contract=NATIVE_CONTRACT;
+ if(context.validationFeedback)data.validationFeedback=structuredClone(context.validationFeedback);
  const glossary=context.frozen.selected.find(m=>m.kind==='glossary');
  const content=nativeMessage(context,kind)+'\n'+nativeMessage(context,'context')+'\n'+glossary.clauses.map(c=>c.text).join('\n')+(context.attempt>1?'\n'+nativeMessage(context,'retry'):'');
  return {...prepared,messages:[{role:'system',content},{role:'user',content:JSON.stringify(data)}],input:data,promptVersion:context.execution.promptBundleRef.hash};
@@ -64,9 +65,17 @@ export function nativeCapabilityMessages(input,prepared,context){
  return{...prepared,messages:[{role:'system',content:nativeMessage(context,`capability.${input.capability}`)+'\n'+nativeMessage(context,'context')+(context.attempt>1?'\n'+nativeMessage(context,'retry'):'')+'\nJSON Schema: '+JSON.stringify(prepared.outputSchema)},{role:'user',content:JSON.stringify(data)}]};
 }
 export function adaptNativeRuleOutput(content){
- const body=parseModelJson(content);if(!Array.isArray(body?.results))languageError('INVALID_OUTPUT','Native rule results are missing.');
- for(const r of body.results){if(!Object.hasOwn(NATIVE_VERDICTS,r.verdict))languageError('INVALID_OUTPUT','Native verdict must be PASS, FAIL, UNKNOWN or NA.');r.verdict=NATIVE_VERDICTS[r.verdict];}
+ const reject=(path,reasonCode,expected)=>{const diagnostic={layer:'native-wire',path,reasonCode,expected};throw Object.assign(new Error(expected),{code:'INVALID_OUTPUT',diagnostic,traceOutput:{diagnostic}});};
+ let body;try{body=parseModelJson(content);}catch{reject('$','invalid_json','Valid JSON; escape quotes inside string values.');}
+ if(!Array.isArray(body?.results))reject('results','rule_coverage','A results array with one result per requested rule.');
+ for(const [i,r] of body.results.entries()){if(!r||typeof r!=='object'||Array.isArray(r)||!Object.hasOwn(NATIVE_VERDICTS,r.verdict))reject(`results[${i}].verdict`,'invalid_verdict','Native verdict must be PASS, FAIL, UNKNOWN or NA.');r.verdict=NATIVE_VERDICTS[r.verdict];}
  return JSON.stringify(body);
+}
+export function nativeValidationFeedback(error){
+ const d=error?.diagnostic;
+ if(d&&['native-wire','structured-results'].includes(d.layer))return structuredClone(d);
+ if(error?.nativeLanguageFailure)return{layer:'native-language',path:'results.reason',reasonCode:'language_unverified',expected:'Write the explanatory prose in the frozen contentLanguage; keep evidence quotes in the original language.'};
+ return undefined;
 }
 export function nativeAssurance(result,context,{capability,sourceQuotes=[],names=[]}={}){
  const fields=[['reason',result.reason]];

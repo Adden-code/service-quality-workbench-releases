@@ -1,4 +1,4 @@
-import {nativeExecutionContext,nativeProgramResults} from './native-language-execution.mjs';
+import {nativeExecutionContext,nativeProgramResults,nativeValidationFeedback} from './native-language-execution.mjs';
 import {nativeLanguageIssue} from '../public/native-language-validation.mjs';
 import {assertTaskWritable,isInactiveTask,taskHasPendingAI} from '../public/task-lifecycle.mjs';
 import {isBusinessEcommerceBasis} from '../public/ecommerce-business-profile.mjs';
@@ -252,11 +252,11 @@ export async function createAiService(options={}){
     let initial=await store.read(),current=initial.state.tasks.find(t=>t.id===taskId),row=current.aiQueue.rows[index],session=initial.state.sessions.find(s=>s.id===row.sessionId);
     if(!canDispatch()||row.status==='protected'||session.aiExecution?.status==='completed'||human(session)||row.semanticResult)return;
     const nativeBase=current.executionSnapshot?.languageExecution?nativeExecutionContext(current,await store.readNativeMaterial(current)):undefined;
-    let rawRetryFeedback;
+    let rawRetryFeedback,nativeRetryFeedback;
     for(let attempt=1;attempt<=maxAttempts&&canDispatch();attempt++){
      const startedAt=now();await update(taskId,(state,t)=>{const r=t.aiQueue.rows[index],s=state.sessions.find(s=>s.id===r.sessionId);if(human(s)){r.status='protected';return;}r.status='running';r.attempts++;r.startedAt=startedAt;r.completedAt=null;delete r.error;delete r.errorCode;archiveFailedAIDecision(s);if(raw)s.aiResults=[];s.aiExecution={status:'running',runId:job.id,modelId:job.config.model,requestedModel:job.config.model,startedAt,completedAt:null,inputSha256:r.inputSha256,basisSha256:digest(t.basisSnapshot)};refresh(t,state);});
      initial=await store.read();current=initial.state.tasks.find(t=>t.id===taskId);row=current.aiQueue.rows[index];session=initial.state.sessions.find(s=>s.id===row.sessionId);if(row.status==='protected')return;
-     const nativeContext=nativeBase?{...nativeBase,attempt,maxAttempts}:undefined;
+     const nativeContext=nativeBase?{...nativeBase,attempt,maxAttempts,validationFeedback:nativeRetryFeedback}:undefined;
      const checkBasis=inspectionBasis(current.basisSnapshot,current.executionSnapshot);
      const projected=workflowInput(session);delete projected.source;
      const scoped={step:(node,input,operation)=>step(`r${index}-a${attempt}-${node}`,{segmentId:row.batchId,sourceRow:row.sourceRow,attempt:row.attempts,...input},operation)};
@@ -267,7 +267,7 @@ export async function createAiService(options={}){
       localRawOnly=raw&&session.rawTranscript.timePolicy.mode==='unavailable'&&rawTimeRuleIds(checkBasis).length===checkBasis.rules.length;
       result=raw?await client.inspectRaw({config:job.config,session:copy(projected),basis:copy(checkBasis),inspectionAt:current.aiRun.inspectionAt,outputLanguage:current.rawImportOptions.outputLanguage,allowDegraded:attempt===maxAttempts,...(rawRetryFeedback?{retryFeedback:rawRetryFeedback}:{}),signal:job.controller.signal,trace:scoped,sceneSnapshot:current.executionSnapshot,sceneCapabilities,nativeContext}):localUnreplied?{results:unrepliedSemanticResults(),modelId:'local-unreplied',promptVersion:'ec-local-unreplied-v1'}:ecommerce?await client.inspectEcommerceRow({config:job.config,session:copy(projected),basis:{...copy(current.basisSnapshot),rules:copy(current.basisSnapshot.rules.filter(r=>r.id!=='EC-TIME'))},signal:job.controller.signal,trace:scoped,sceneSnapshot:current.executionSnapshot,sceneCapabilities,nativeContext}):await client.inspect({config:job.config,session:copy(projected),basis:copy(checkBasis),signal:job.controller.signal,trace:scoped,sceneSnapshot:current.executionSnapshot,sceneCapabilities,nativeContext});
       if(sceneCapabilities){const before=result.results;result.results=enforceSceneResults(before,current.executionSnapshot,sceneCapabilities,session);if(nativeContext)result.results=nativeProgramResults(before,result.results,nativeContext,current.executionSnapshot,sceneCapabilities);sceneCapabilities=await executeSceneCapabilities({session:isBusinessEcommerceBasis(current.basisSnapshot)?session:projected,snapshot:current.executionSnapshot,nativeContext,client,config:job.config,signal:job.controller.signal,trace:scoped,previous:sceneCapabilities,phase:'post'});}
-     }catch(error){if(String(error?.code||'').toLowerCase().startsWith('trace_'))throw error;failure=safeFailure(error,closing||job.controller.signal.aborted);if(raw)rawRetryFeedback=rawInspectionRetryFeedback(error.diagnostic??error.traceOutput?.diagnostic,checkBasis);if(stopsQueue(failure.errorCode)){job.stopped=true;if(current.executionSnapshot?.configuration.executionMode==='configured')job.paused=true;}}
+     }catch(error){if(String(error?.code||'').toLowerCase().startsWith('trace_'))throw error;failure=safeFailure(error,closing||job.controller.signal.aborted);if(nativeBase)nativeRetryFeedback=nativeValidationFeedback(error);if(raw)rawRetryFeedback=rawInspectionRetryFeedback(error.diagnostic??error.traceOutput?.diagnostic,checkBasis);if(stopsQueue(failure.errorCode)){job.stopped=true;if(current.executionSnapshot?.configuration.executionMode==='configured')job.paused=true;}}
      const completedAt=now();
      const willRetry=failure&&retryable(failure.errorCode)&&attempt<maxAttempts&&canDispatch();
      await step(`r${index}-a${attempt}-persist`,{sessionId:session.id,sourceRow:row.sourceRow,segmentId:row.batchId,attempt:row.attempts,result:result??null,failure:failure??null},async()=>{await update(taskId,(state,t)=>{
@@ -340,11 +340,11 @@ export async function createAiService(options={}){
     if(traceStore)await traceStore.begin({id:traceId,taskId,engine:client.engine||'native-node',kind:'native-language-retry',nodes:[{id:'source',label:'Frozen native input'}],meta:{sessionId,originalRunId:run.id,languageExecution:context.execution}});
     try{
      await step('source',{sessionId,originalRunId:run.id},async()=>({source,languageExecution:context.execution}));
-     let capabilities=await executeSceneCapabilities({session:source,snapshot:task.executionSnapshot,client,config,nativeContext:context,previous:prior,trace:{step},retryDelayMs}),result;
+     let capabilities=await executeSceneCapabilities({session:source,snapshot:task.executionSnapshot,client,config,nativeContext:context,previous:prior,trace:{step},retryDelayMs}),result,validationFeedback;
      for(let attempt=1;attempt<=maxAttempts;attempt++)try{
-      const request={config,session:source,basis,inspectionAt:run.inspectionAt,outputLanguage:context.language,allowDegraded:attempt===maxAttempts,nativeContext:{...context,attempt,maxAttempts},sceneSnapshot:task.executionSnapshot,sceneCapabilities:capabilities,trace:{step:(id,input,op)=>step(`a${attempt}-${id}`,input,op)}};
+      const request={config,session:source,basis,inspectionAt:run.inspectionAt,outputLanguage:context.language,allowDegraded:attempt===maxAttempts,nativeContext:{...context,attempt,maxAttempts,validationFeedback},sceneSnapshot:task.executionSnapshot,sceneCapabilities:capabilities,trace:{step:(id,input,op)=>step(`a${attempt}-${id}`,input,op)}};
       result=await client[session.rawTranscript?'inspectRaw':'inspect'](request);break;
-     }catch(e){if(e.code!=='INVALID_OUTPUT'||attempt===maxAttempts)throw e;}
+     }catch(e){validationFeedback=nativeValidationFeedback(e);if(e.code!=='INVALID_OUTPUT'||attempt===maxAttempts)throw e;}
      result.results=nativeProgramResults(result.results,enforceSceneResults(result.results,task.executionSnapshot,capabilities,session),context,task.executionSnapshot,capabilities);
      capabilities=await executeSceneCapabilities({session:source,snapshot:task.executionSnapshot,client,config,nativeContext:context,previous:capabilities,phase:'post',trace:{step},retryDelayMs});
      let protectedRow=false;
