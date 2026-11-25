@@ -1,5 +1,17 @@
 # 会话质检工作台
 
+## 0.11.23 英文界面与大工作区恢复 · 完整内置候选版
+
+**[免登录下载完整安装包（17条规则＋两场景）](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.23-full/QualityWorkbench-0.11.23-Full-Setup-Windows-x64.exe)**
+
+[发布与验收说明](https://github.com/Adden-code/service-quality-workbench-releases/releases/tag/v0.11.23-full) · [升级指引](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.23-full/Hotfix-Guide-zh.txt) · [SHA256](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.23-full/SHA256.txt)
+
+补齐英文界面标签、标准规则名、错误提示，以及模型理由、摘要、点评、建议和AI草稿的展示翻译，报告/Excel同步覆盖；缺译主区域只显示英文状态，原文留审计。50MB以上工作区保留分片读取，补上活动快照保护、自动重试与解除只读。EC-TARGET v3仅调整好评具体回应和无效评价语义边界，负向口径待仲裁未改，同管理员至少3条重复规则保留。历史任务冻结不变，安装启动自动备份升级仅影响新任务。
+
+桌面忙时关闭确认、取消继续、确认退出和空闲直接关窗已实测；安装首屏可选中文/English。WebView2缺失电脑仍需IT离线部署共享运行时。真实内网模型效果待复测。
+
+安装器98009966字节；SHA256：`37d3fa55c30b18ae3db5322acfb5aaf2275b661a41726d05a12b2cf7062fa2d4`。7附件匿名完整下载核验；[源码](https://github.com/Adden-code/service-quality-workbench-releases/commit/57f91cfa338a0060b39c247f174181a619acdf2e)。含获准规则示例，不含客户批次或凭据。
+
 ## 0.11.22 桌面应用与双语交付 · 完整内置候选版
 
 **[免登录下载完整安装包（17条规则＋两场景）](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.22-full/QualityWorkbench-0.11.22-Full-Setup-Windows-x64.exe)**
