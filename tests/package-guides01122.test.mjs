@@ -13,10 +13,11 @@ const guides={
 
 test('current shipped guides distinguish calibrated administrator groups and fixed timing from historical snapshots',()=>{
  for(const text of guides.en){
-  assert.match(text,/ec-target-calibration-v3/);
-  assert.match(text,/Complaint criteria are unchanged from ec-target-calibration-v2 and remain pending business arbitration/);
-  assert.match(text,/additional information is not mandatory in that case/);
-  assert.match(text,/batch duplicate checks still run and can fail/);
+  assert.match(text,/ec-target-calibration-v2/);
+  assert.match(text,/Business arbitration remains pending/);
+  assert.match(text,/Positive replies must add relevant information/);
+  assert.match(text,/Repeating praise with thanks and wishes.*fails/);
+  assert.doesNotMatch(text,/additional information is not mandatory in that case|New tasks using the limited calibration/);
   assert.match(text,/at least 3 distinct source rows from the same administrator/);
   assert.match(text,/every pair reaching >=85%/);
   assert.match(text,/Two replies are advisory/);
@@ -29,7 +30,8 @@ test('current shipped guides distinguish calibrated administrator groups and fix
   assert.match(text,/Historical tasks keep their frozen policy/);
  }
  for(const text of guides.zh){
-  for(const phrase of ['ec-target-calibration-v3','仍待业务仲裁','不再强制增量信息','批次重复仍独立检查','同一管理员至少3条','组内每对','2条仅作建议','不同管理员不合并','缺管理员不猜测','不强制详细方案或承诺时限','ec-first-reply-fixed24-v1','恰好24小时通过','回复结构（EC-STEPS）','保留固定时效（EC-TIME）原判','历史任务依冻结版本'])assert.ok(text.includes(phrase),phrase);
+  for(const phrase of ['ec-target-calibration-v2','仍待业务仲裁','好评须围绕具体夸赞点','仅复述夸赞＋感谢＋祝福','同一管理员至少3条','组内每对','2条仅作建议','不同管理员不合并','缺管理员不猜测','不强制详细方案或承诺时限','ec-first-reply-fixed24-v1','恰好24小时通过','回复结构（EC-STEPS）','保留固定时效（EC-TIME）原判','历史任务依冻结版本'])assert.ok(text.includes(phrase),phrase);
+  assert.doesNotMatch(text,/不再强制增量信息|使用有限校准版（ec-target-calibration-v3）的新任务/);
  }
 });
 
@@ -81,6 +83,8 @@ test('built-in acceptance checklists describe executable checks rather than clai
   assert.match(zh,/本清单不代表已验收通过/);
   assert.match(en,/does not state that acceptance has passed/);
   assert.match(zh,/同一管理员至少3条/);assert.match(en,/at least 3 distinct rows from the same administrator/);
+  assert.match(zh,/好评必须有与评价相关的增量信息/);assert.match(en,/positive replies require relevant additional information/);
+  assert.doesNotMatch(zh,/好评回应任一具体夸赞点或有相关增量即可/);assert.doesNotMatch(en,/concrete praise repeated in template wording may pass/);
   assert.match(zh,/EC-TIME原判保留/);assert.match(en,/retains EC-TIME/);
   assert.match(zh,/同内容文件可再次导入/);assert.match(en,/Repeat-import the same content/);
   for(const text of [zh,en])for(const phrase of ['QualityWorkbench.exe','WebView2','Chromium','system-upgrade','.sqwb'])assert.ok(text.includes(phrase),phrase);

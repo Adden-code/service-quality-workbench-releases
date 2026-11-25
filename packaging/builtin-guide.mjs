@@ -15,13 +15,13 @@ For a browser fallback, use Start Quality Workbench.exe and Stop Quality Workben
 
 export function ecommerceCurrentPolicyGuide(language='zh'){
  if(language==='en')return `Current ecommerce policy and historical tasks
-New tasks using the limited calibration (ec-target-calibration-v3) pass semantic targeting when a positive reply addresses any specific praised point or supplies relevant additional information. Template wording that explicitly repeats a concrete praised point may pass with writing advice; additional information is not mandatory in that case. A positive reply fails only when it addresses no specific praised point and supplies no relevant additional information. An already completed invalid-review classification makes only the individual semantic targeting subcheck Not applicable; batch duplicate checks still run and can fail. Missing comments or replies remain Unable to determine. Complaint criteria are unchanged from ec-target-calibration-v2 and remain pending business arbitration: a specific explanation, clarification or situation statement plus a usable formal channel qualifies; generic apology plus referral without addressing the issue fails. Detailed solutions or promised deadlines are not mandatory, and channel names such as WhatsApp or a hotline are not automatic failures.
+New tasks use the restored 0.11.22 policy (ec-target-calibration-v2). Positive replies must add relevant information about the specific praise or actual review, such as product explanation, usage advice, personalized handling or follow-up; even a general positive review requires relevant additional information, without inventing product facts or problems. Repeating praise with thanks and wishes, or listing generic selling points without relevant additional information, fails. For complaints or negative requests, a direct response or relevant progress, solution or steps qualifies; acknowledgement/apology plus a specific explanation, clarification or situation statement plus a usable formal channel also qualifies. Generic apology/referral without addressing the issue fails. Detailed solutions or promised deadlines are not mandatory, and channel names such as WhatsApp or a hotline are not automatic failures. High ratings with a negative request follow the negative boundary. Missing comments or replies remain Unable to determine. Business arbitration remains pending. Historical v3 tasks retain their frozen v3 boundaries; this release does not apply those boundaries to new v2 tasks.
 Batch duplicate failure requires at least 3 distinct source rows from the same administrator, with every pair reaching >=85% normalized character-bigram Dice similarity. Two replies are advisory only. Do not combine different administrators, infer missing identities or extend a group through a chain of pairwise matches. A missing administrator leaves the batch subcheck incomplete; an evidenced individual semantic failure is still retained. Retain the original row and pair evidence.
 New tasks using the uniform 24-hour policy (ec-first-reply-fixed24-v1) measure continuous elapsed time from the original comment to the first reply, or to the frozen inspection cutoff if unreplied. Exactly 24 hours passes; more than 24 hours fails. Nights, weekends and holidays count. This policy is independent of site, review type and classification; it has no site/type overrides. Missing, invalid, reversed or conflicting timestamps remain Unable to determine. After correcting classification, re-evaluate reply structure (EC-STEPS); retain the fixed timing (EC-TIME) verdict. In v3, changing to or from an invalid review also requires fresh EC-TARGET review, including independent duplicate evidence. Historical tasks keep their frozen policy, including old two-reply grouping, elapsed/working-hours calendars and classification dependencies where applicable. A new task or explicit reinspection is required to apply new standards.
 
 `;
  return `当前电商口径与历史任务
-使用有限校准版（ec-target-calibration-v3）的新任务：好评回复回应任一具体夸赞点，或有结合实际评价的相关增量信息，即可通过单条针对性。模板措辞中明确复述具体夸赞点可通过或仅给表达建议，不再强制增量信息；只有完全未回应具体夸赞点且无相关增量信息时才不通过。已完成分类为无效评价时，仅单条语义/针对性子项不适用，批次重复仍独立检查并可判不通过；原评论或回复缺失仍为无法判定。投诉/负向口径保持ec-target-calibration-v2，仍待业务仲裁：有具体解释、澄清或情况说明，加可用正式渠道即可通过；泛泛道歉加转渠道、未触及问题则不通过。不强制详细方案或承诺时限，不因出现WhatsApp、热线等渠道词机械判错。
+新任务恢复0.11.22口径（ec-target-calibration-v2）：好评须围绕具体夸赞点或实际评价增加产品解释、使用建议、个性化处理或后续跟进等有效信息；只有笼统好评也须给出相关增量信息，不编造产品事实或问题。仅复述夸赞＋感谢＋祝福，或堆砌卖点、礼貌套话而无相关增量信息，不符合。中差评／负向诉求具体回应问题或提供对应进展、方案、步骤可通过；致歉／承认问题＋具体解释、澄清或情况说明＋可用正式渠道也可通过。泛泛道歉＋转渠道、未触及具体问题则不通过。不强制详细方案或承诺时限，不因出现WhatsApp、热线等渠道词机械判错。高评分含负向诉求适用负向边界，原评论或回复缺失仍为无法判定。最终口径仍待业务仲裁。历史v3任务保持其冻结边界，本包新v2任务不套用v3放宽口径。
 批次模板化不通过须同一管理员至少3条不同源记录，且组内每对归一化字符二元组Dice相似度均≥85%。2条仅作建议；不同管理员不合并，缺管理员不猜测，不沿相似配对链条传递扩组。缺管理员时批次子项无法完成，已有证据的单条语义不通过仍保留。保留源行和成对依据。
 使用统一24小时口径（ec-first-reply-fixed24-v1）的新任务：从原始评价时间算到首次回复，未回复则算到冻结的检核截止时间；按连续自然时间，恰好24小时通过、超过24小时不通过，夜间、周末和节假日均计入。该口径与站点、评价类型和分类无关，不提供站点／类型阈值覆盖；时间缺失、无效、倒序或冲突保留无法判定。纠正分类后重新核对回复结构（EC-STEPS），保留固定时效（EC-TIME）原判。v3分类改为或改出无效评价时，还须重新人工核对EC-TARGET及独立批次重复证据。历史任务依冻结版本，适用时仍保留旧两条相似、自然／工作时间日历及分类依赖；使用新标准须新建任务或显式重检。
 
@@ -33,9 +33,9 @@ export function builtinUsageGuide(version,language='zh'){
 
 Distribution follows the authorization recorded for this release. This complete edition includes approved rule text and examples. It does not include business conversations, evaluation batches or credentials.
 
-New in 0.11.23
+New in 0.11.27
 - The desktop window is the default entry. Startup automatically backs up and publishes newer bundled scenario versions while preserving historical tasks and local maintained settings.
-- New ecommerce tasks use the limited v3 calibration for positive replies and invalid reviews, with complaint criteria unchanged pending business arbitration and the existing uniform 24-hour policy retained. Repeated source content can be imported into separate tasks; lineage is retained and cross-batch statistics separate repeat imports by default.
+- New ecommerce tasks restore the exact 0.11.22 v2 targeting policy; the other four EC criteria and uniform 24-hour policy remain unchanged. Historical tasks retain their frozen versions. Repeated source content can be imported into separate tasks; lineage is retained and cross-batch statistics separate repeat imports by default.
 - Fixed menus switch immediately. AI reasons and ecommerce classification reasons use a display-only translation cache for Chinese/English. A cache miss may call the configured translation model. In English mode, the main reason area shows only English translation status until a verified English translation is available; the original AI text remains in the audit area. A cache hit switches immediately; switching language never reruns inspection or overwrites the original reason, verdict or audit history.
 - Optional sampling-period/report-region labels, saved delivery concurrency and review-pane preferences remain available. Labels do not change row sites or timing calculations.
 
@@ -62,9 +62,9 @@ Retain earlier installers and external data directories. Stop the workbench befo
 
 传播范围以本次发行记录的授权为准。本完整版包含获准的规则原文与案例，不包含真实业务会话、评价批次或凭据。
 
-0.11.23 使用变化
+0.11.27 使用变化
 • 默认从桌面窗口进入。启动时自动备份并发布内置新版，历史任务与本机维护参数保留。
-• 电商新任务仅有限调整好评和无效评价边界；负向口径待业务仲裁、本次保持不变，继续使用统一24小时口径。同内容源文件可再次导入为独立任务，保留来源关联，跨批次统计默认将重复导入分开。
+• 电商新任务逐字恢复0.11.22 v2针对性口径，其他四项EC及统一24小时口径不变；历史任务保持冻结版本。同内容源文件可再次导入为独立任务，保留来源关联，跨批次统计默认将重复导入分开。
 • 固定菜单即时切换；AI判断理由与电商分类理由通过只读展示译文缓存适配中英文。无缓存时可能调用已配置翻译模型；英文模式的理由主区域仅显示英文翻译状态，获得合格英文译文后再展示，原始AI文本仅在审计区保留；命中缓存即时切换。语言切换不重跑质检，不覆盖原理由、判定或审计。
 • 抽检周期／报告地区选填、交付并发与审核分栏记忆继续保留；显示标签不改变源站点或计时。
 
