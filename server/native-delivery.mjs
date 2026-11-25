@@ -27,7 +27,15 @@ export function nativeDisplayProjection(task,frozen,{delivery=false}={}){
  return{schemaVersion:1,taskId:task.id,scene:task.scene,materialRef:task.executionSnapshot.languageMaterialRef,languageExecution:structuredClone(context.execution),rules,policies,terms:[...terms].map(([source,text])=>({source,text})),...(template?{template}:{})};
 }
 
-export function nativeTaskFromDelivery(snapshot){return{id:snapshot.taskId,scene:snapshot.nativeDisplay?.scene,basisSnapshot:snapshot.basis,executionSnapshot:snapshot.executionSnapshot};}
+export function nativeTaskFromDelivery(snapshot){
+ // Older deliveries stored the full display basis here; newer NP deliveries
+ // omit the derived overall rule from their detail-column projection. Recover
+ // the basis that produced the frozen display, then keep all hash checks intact.
+ const displayRules=snapshot.nativeDisplay?.rules||[];
+ const coversDisplay=basis=>Array.isArray(basis?.rules)&&displayRules.every(display=>basis.rules.some(rule=>rule.id===display.id&&String(rule.version)===String(display.version)));
+ const basisSnapshot=coversDisplay(snapshot.basis)?snapshot.basis:snapshot.executionSnapshot?.basis;
+ return{id:snapshot.taskId,scene:snapshot.nativeDisplay?.scene,basisSnapshot,executionSnapshot:snapshot.executionSnapshot};
+}
 export function assertNativeDeliveryLanguage(task,{targetLang,reportLanguage}={}){
  const language=task?.executionSnapshot?.languageExecution?.contentLanguage;if(!language)return;
  if(targetLang!==undefined&&targetLang!==language||reportLanguage!==undefined&&reportLanguage!==language)languageError('NATIVE_LANGUAGE_LOCKED','Report and workbook language must match this task’s frozen native language.');

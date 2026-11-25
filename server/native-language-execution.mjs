@@ -6,6 +6,7 @@ import {languageError} from '../public/workspace-language.mjs';
 export const NATIVE_CONTRACT='native-language-v1';
 export const NATIVE_VERDICTS=Object.freeze({PASS:'符合',FAIL:'不符合',UNKNOWN:'无法判定',NA:'不适用'});
 export const REQUIRED_NATIVE_PROMPTS=['inspection.raw','inspection.structured','context','retry','capability.site','capability.intent','capability.demandSummary','capability.negativeVoice','capability.translation','capability.timing','program.knowledge','program.explicit-failure','program.non-time-failure','program.dependency','program.timing','program.non-time','program.capability-failed','program.site-pending','program.timing-pending','program.site-conflict','program.site-unmapped','program.parent-missing','program.site-low-confidence','program.translation-low-confidence','program.metric-source-unavailable','program.metric-standard-missing','program.metric-calculated'];
+export const REQUIRED_NATIVE_EC_PROMPTS=['inspection.ecommerce','inspection.ecommerce-policy','capability.ecommerceClassification','program.ec-time','program.ec-target','program.ec-unreplied','program.ec-missing-comment','program.ec-duplicate','program.ec-invalid'];
 export function nativeSourceConfiguration(snapshot){
  const configuration=structuredClone(snapshot.configuration);configuration.inspectionLanguage='zh';
  return{configuration,taxonomy:snapshot.taxonomy??null,exceptions:snapshot.exceptions??[]};
@@ -14,9 +15,12 @@ export function nativeExecutionContext(task,frozen){
  validateFrozenLanguageMaterial(frozen);
  const s=task.executionSnapshot,e=s?.languageExecution;
  if(!e||languageHash(e)!==languageHash(frozen.languageExecution)||s.languageMaterialRef!==languageHash(frozen)||e.languageValidatorVersion!==NATIVE_LANGUAGE_VALIDATOR)languageError('NATIVE_MATERIAL_INVALID','The task must reference its exact reviewed language package and supported validator.');
- if(task.scene!=='新品产品咨询')languageError('EC_ARBITRATION_PENDING','EC native execution remains closed pending arbitration and bilingual review.');
+ if(!['新品产品咨询','电商评论回复'].includes(task.scene))languageError('LANGUAGE_SCENE_NOT_READY','This scene is outside the native execution scope.');
+ if(frozen.paired.some(m=>m.scene!==task.scene))languageError('NATIVE_SOURCE_MISMATCH','Frozen material belongs to a different scene.');
+ if(task.scene==='电商评论回复'&&frozen.paired.some(m=>m.review.status!=='pilot-unreviewed'))languageError('EC_ARBITRATION_PENDING','EC currently requires an explicit pilot authorization; no business approval is implied.');
  const prompt=frozen.selected.find(m=>m.id===e.promptBundleRef.id),clauses=Object.fromEntries(prompt.clauses.map(c=>[c.clauseId,c.text]));
  if(REQUIRED_NATIVE_PROMPTS.some(id=>!clauses[id]))languageError('NATIVE_MATERIAL_INCOMPLETE','The native prompt package is missing required execution or program-message clauses.');
+ if(task.scene==='电商评论回复'&&REQUIRED_NATIVE_EC_PROMPTS.some(id=>!clauses[id]))languageError('NATIVE_MATERIAL_INCOMPLETE','EC pilot prompts and program-message clauses are incomplete.');
  const rules=new Map(frozen.selected.filter(m=>m.kind==='rule').map(m=>[m.id,m]));
  for(const rule of task.basisSnapshot.rules.filter(r=>r.ruleKind!=='meta')){const m=rules.get(rule.id);if(!m||m.version!==rule.version||['pass','fail','exception'].some(id=>!m.clauses.some(c=>c.clauseId===id)))languageError('NATIVE_MATERIAL_INCOMPLETE',`Missing exact reviewed rule version: ${rule.id}@${rule.version}`);}
  // Bind the reviewed pair to the original catalog/configuration bytes as well as
@@ -27,11 +31,15 @@ export function nativeExecutionContext(task,frozen){
  }
  for(const [id,p] of Object.entries(s.configuration.ruleExecutionPolicies||{}))if(p.modelCriteria&&['model.pass','model.fail','model.exception'].some(k=>!rules.get(id)?.clauses.some(c=>c.clauseId===k)))languageError('NATIVE_MATERIAL_INCOMPLETE',`Missing reviewed component criteria: ${id}`);
  for(const source of [s.taxonomy,...(s.exceptions||[])].filter(Boolean))if(!frozen.paired.some(m=>m.id===source.id&&m.sourceHash===languageHash(source)))languageError('NATIVE_MATERIAL_INCOMPLETE',`Unreviewed taxonomy or exception table: ${source.id}`);
+ for(const reference of s.configuration.referenceMaterials||[]){
+  const m=frozen.paired.find(m=>m.kind==='policy'&&m.id===reference.id&&m.version===String(reference.version));
+  if(!m||m.sourceHash!==languageHash(reference)||reference.sections.some(s=>!m.clauses.some(c=>c.clauseId===s.id)))languageError('NATIVE_MATERIAL_INCOMPLETE',`Missing task-frozen report reference: ${reference.id}`);
+ }
  const covered=(id,keys)=>{const ids=new Set(frozen.selected.find(m=>m.id===id)?.clauses.map(c=>c.clauseId));if(keys.some(k=>!ids.has(k)))languageError('NATIVE_MATERIAL_INCOMPLETE',`Reviewed clause coverage is incomplete: ${id}`);};
  if(s.taxonomy)covered(s.taxonomy.id,[...s.taxonomy.labels.flatMap(l=>[l.id,...(l.definition?['definition-'+l.id]:[])]),...(s.taxonomy.principles||[]).map((_,i)=>'principle-'+(i+1)),...(s.taxonomy.examples||[]).map((_,i)=>'example-'+(i+1))]);
  for(const table of s.exceptions||[])covered(table.id,table.entries.map(e=>e.id));
  if(frozen.paired.find(m=>m.id==='NATIVE-CONFIG')?.sourceHash!==languageHash(nativeSourceConfiguration(s)))languageError('NATIVE_SOURCE_MISMATCH','Reviewed scene configuration has changed.');
- return{language:e.contentLanguage,execution:e,frozen,clauses,rules,attempt:1,maxAttempts:1};
+ return{language:e.contentLanguage,execution:e,frozen,clauses,rules,scene:task.scene,attempt:1,maxAttempts:1};
 }
 export function nativeMessage(context,key,parameters={}){
  const template=context.clauses[key];if(!template)languageError('NATIVE_MATERIAL_INCOMPLETE',`Missing native message: ${key}`);
@@ -46,12 +54,13 @@ export function nativeRuleBasis(basis,context){
 export function nativeMessages(prepared,basis,context,{kind='inspection.structured',sceneCapabilities,snapshot}={}){
  const data=structuredClone(prepared.input||JSON.parse(prepared.messages[1].content));
  data.basis=nativeRuleBasis({...basis,rules:basis.rules.filter(r=>!data.timeRuleIds?.includes(r.id))},context);
+ if(kind==='inspection.ecommerce'&&basis.businessProfile)data.basis.businessProfile={semanticPolicy:basis.businessProfile.semanticPolicy,similarity:basis.businessProfile.similarity,targetPolicyVersion:basis.businessProfile.targetPolicyVersion};
  // Source blocks/turns are kept byte-for-byte. Only instruction material is selected.
  if(sceneCapabilities)data.sceneContext={outputs:sceneCapabilities.outputs,ruleDependencies:snapshot.configuration.ruleDependencies,ruleExecutionPolicies:Object.fromEntries(Object.entries(snapshot.configuration.ruleExecutionPolicies||{}).map(([id,p])=>[id,{mode:p.mode}])),exceptionTables:(snapshot.exceptions||[]).map(table=>({id:table.id,version:table.version,entries:table.entries.map(entry=>({id:entry.id,condition:context.frozen.selected.find(m=>m.id===table.id).clauses.find(c=>c.clauseId===entry.id).text,result:entry.result==='不适用'?'NA':'CONTINUE',requires:entry.requires,priority:entry.priority}))}))};
  data.contentLanguage=context.language;data.contract=NATIVE_CONTRACT;
  if(context.validationFeedback)data.validationFeedback=structuredClone(context.validationFeedback);
  const glossary=context.frozen.selected.find(m=>m.kind==='glossary');
- const content=nativeMessage(context,kind)+'\n'+nativeMessage(context,'context')+'\n'+glossary.clauses.map(c=>c.text).join('\n')+(context.attempt>1?'\n'+nativeMessage(context,'retry'):'');
+ const content=nativeMessage(context,kind)+(kind==='inspection.ecommerce'?'\n'+nativeMessage(context,'inspection.ecommerce-policy'):'')+'\n'+nativeMessage(context,'context')+'\n'+glossary.clauses.map(c=>c.text).join('\n')+(context.attempt>1?'\n'+nativeMessage(context,'retry'):'');
  return {...prepared,messages:[{role:'system',content},{role:'user',content:JSON.stringify(data)}],input:data,promptVersion:context.execution.promptBundleRef.hash};
 }
 export function nativeCapabilityMessages(input,prepared,context){

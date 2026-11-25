@@ -69,6 +69,12 @@ export async function createWorkbenchServer({dataDir=process.env.DEMO_DATA_DIR||
       openingPath='.';
       builtinUpgrade=automaticBuiltinUpgrade?await upgradeBuiltinOnStartup({store,dataDir:resolvedData,catalogSeed,sceneSeed,productVersion:PRODUCT_VERSION,recovery:startupRecovery}):{status:'current',recovery:startupRecovery};
       if(nativeLanguageStage>=1)await store.enableLanguageGovernance();
+      if(nativeLanguageStage>=4){
+        let pilotBundle;
+        try{pilotBundle=JSON.parse(await fs.readFile(path.join(project,'resources/native-pilot-materials.json'),'utf8'));}
+        catch(error){if(error.code!=='ENOENT')throw error;}
+        if(pilotBundle)await store.installNativePilotMaterials(pilotBundle);
+      }
       if(nativeLanguageStage<2&&workspaceLanguage(store.transportSnapshot().state)?.mode==='native-v1'&&store.transportSnapshot().state.tasks.length)languageError('NATIVE_LANGUAGE_STAGE_PENDING','This stage 1 build cannot execute native tasks from a later-stage workspace. Restore its pre-upgrade backup or use the matching later build.');
       if(nativeLanguageStage>=2)for(const task of store.transportSnapshot().state?.tasks||[])if(task.executionSnapshot?.languageExecution)await store.readNativeMaterial(task);
       importDrafts=await createImportDraftStore({dataDir:resolvedData,workspaceStore:store});config=modelConfig||await createModelConfig({dataDir:resolvedData});ai=await createAiService({store,modelConfig:config,client,traceStore:traces});reportJobs=await createReportJobs({maxAttempts:3,dataDir:resolvedData,store,modelConfig:config,client,traceStore:traces});adminDrafts=await createAdminDraftStore({dataDir:resolvedData});translationJobs=await createTranslationJobs({maxAttempts:3,dataDir:resolvedData,store,modelConfig:config,client,traceStore:traces,reportJobs,adminDrafts});rawStructureJobs=await createRawStructureJobs({dataDir:resolvedData,store,modelConfig:config,client,traceStore:traces});

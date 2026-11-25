@@ -1,4 +1,4 @@
-import {failOnlyAggregate,sceneOverall} from './scene-aggregate.mjs';
+import {aggregateRuleId,failOnlyAggregate,sceneOverall} from './scene-aggregate.mjs';
 import {appendEvidenceSheets} from './evidence-audit.mjs';
 import {sceneDeliverySnapshot,configuredDelivery,buildSceneDeliveryXlsx} from './scene-delivery.mjs';
 import {isProcessedUnknown} from './pending-resolution.mjs';
@@ -98,7 +98,8 @@ export function createConsultationDeliverySnapshot(state,{taskId,conclusionMode=
  if(!isConsultationTask(state,task))fail('请选择具有冻结依据的产品咨询任务。');
  if(!['combined','ai'].includes(conclusionMode)||!['zh','en'].includes(targetLang)||typeof now!=='string'||!Number.isFinite(Date.parse(now)))fail('业务交付口径、目标语种或生成时间无效。');
  if(!object(task.source)||typeof task.source.name!=='string'||!/^[a-f0-9]{64}$/.test(task.source.sha256||'')||!Number.isSafeInteger(task.source.size)||task.source.size<1)fail('缺少可核验的原文件来源，不能承诺全部原始列。');
- const sessions=state.sessions.filter(row=>row.taskId===task.id),frozen=task.basisSnapshot,rules=clone(frozen.rules.filter(isSessionCheckRule)),ruleIds=rules.map(rule=>rule.id),frozenRuleIds=frozen.rules.map(rule=>rule.id),config=consultationConfiguration(task);
+ const derivedId=task.executionSnapshot?.languageExecution?aggregateRuleId(task.executionSnapshot):null;
+ const sessions=state.sessions.filter(row=>row.taskId===task.id),frozen=task.basisSnapshot,rules=clone(frozen.rules.filter(r=>isSessionCheckRule(r)&&r.id!==derivedId)),ruleIds=rules.map(rule=>rule.id),frozenRuleIds=frozen.rules.filter(r=>r.id!==derivedId).map(rule=>rule.id),config=consultationConfiguration(task);
  if(!rules.length)fail('该任务只有交付物要求，没有可导出的会话检核项。请使用会话检核规则新建任务。');
  const evidenceMode=assertRoleEvidenceSupport({deliveryType:'consultation-v1',inputMode:task.inputMode,roleEvidenceMode},config);
  if(ruleIds.some(id=>typeof id!=='string'||!id.trim())||new Set(ruleIds).size!==ruleIds.length||!Array.isArray(frozen.policies))fail('任务冻结规则或资料无效。');

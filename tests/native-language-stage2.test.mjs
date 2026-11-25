@@ -47,7 +47,7 @@ test('R39 step2 language detector does not equate Latin with English; short name
 test('R39 step2 missing or edited source/material and EC remain blocked; legacy verdicts not accepted on native wire',()=>{
  const f=fixture(),task=structuredClone(f.task);task.basisSnapshot.rules[0].failCriteria+=' changed';assert.throws(()=>nativeExecutionContext(task,f.frozen),{code:'NATIVE_SOURCE_MISMATCH'});
  const changed=structuredClone(f.frozen);changed.selected[0].title+=' changed';assert.throws(()=>nativeExecutionContext(f.task,changed));
- assert.throws(()=>nativeExecutionContext({...f.task,scene:'电商评论回复'},f.frozen),{code:'EC_ARBITRATION_PENDING'});
+ assert.throws(()=>nativeExecutionContext({...f.task,scene:'电商评论回复'},f.frozen),{code:'NATIVE_SOURCE_MISMATCH'});
  assert.throws(()=>adaptNativeRuleOutput(JSON.stringify({results:[{verdict:'符合'}]})),{code:'INVALID_OUTPUT'});
  const zh=fixture('zh');assert.notDeepEqual(calibrationScope(f.task),calibrationScope(zh.task));
 });

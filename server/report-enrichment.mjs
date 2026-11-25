@@ -190,18 +190,18 @@ function validateHighlights(value,input,{nativeProse=false}={}){
     seen.add(item.id);return{id:item.id,score:item.score,commentary:item.commentary,quote:item.quote,...(coercion?{coercion}:{}),...(evidenceValidation?{evidenceValidation}:{})};
   }));
 }
-function validateClusters(value,input){
+function validateClusters(value,input,{nativeProse=false}={}){
   if(!keys(value,['clusters'])||!Array.isArray(value.clusters)||value.clusters.length<1||value.clusters.length>input.records.length)invalidResult();
   const expected=new Set(input.records.map(item=>item.id)),seen=new Set();
   const clusters=value.clusters.map(rawItem=>{
     const {item}=normalizeBusinessItem('issueClusters',rawItem);
-    if(!validText(item.label,160)||!han(item.label)||!validText(item.summary,2000)||!han(item.summary)||!validText(item.action,2000)||!han(item.action)||!Array.isArray(item.memberIds)||!item.memberIds.length)invalidResult();
+    if(!validText(item.label,160)||!nativeProse&&!han(item.label)||!validText(item.summary,2000)||!nativeProse&&!han(item.summary)||!validText(item.action,2000)||!nativeProse&&!han(item.action)||!Array.isArray(item.memberIds)||!item.memberIds.length)invalidResult();
     for(const id of item.memberIds){if(!expected.has(id)||seen.has(id))invalidResult();seen.add(id);}
     return{label:item.label,summary:item.summary,memberIds:[...item.memberIds],action:item.action};
   });
   if(seen.size!==expected.size)invalidResult();return{clusters};
 }
-function validateVoc(value,input){
+function validateVoc(value,input,{nativeProse=false}={}){
   if(!keys(value,['items'])||!Array.isArray(value.items)||value.items.length!==input.records.length)invalidResult();
   const expected=new Map(input.records.map(item=>[item.id,item.comment])),seen=new Set();
   return businessResult('items',value.items.map(rawItem=>{
@@ -210,7 +210,7 @@ function validateVoc(value,input){
     const original=expected.get(item.id);
     if(original.trim()?!item.evidenceQuote.trim():item.evidenceQuote!==''||item.valid)invalidResult();
     const evidenceValidation=original.trim()?validateBusinessQuote(original,item.evidenceQuote,'evidenceQuote','comment'):undefined;
-    if(item.valid?!han(item.painPoint):!han(item.reason))invalidResult();
+    if(!nativeProse&&(item.valid?!han(item.painPoint):!han(item.reason)))invalidResult();
     seen.add(item.id);return{id:item.id,valid:item.valid,scene:item.scene,painPoint:item.painPoint,reason:item.reason,evidenceQuote:item.evidenceQuote,...(coercion?{coercion}:{}),...(evidenceValidation?{evidenceValidation}:{})};
   }));
 }

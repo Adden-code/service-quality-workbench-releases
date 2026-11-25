@@ -8,13 +8,14 @@ export function createNativeReportLocale(snapshot,enrichment,{englishValue=v=>v}
  if(!projection||projection.materialRef!==snapshot.executionSnapshot.languageMaterialRef||projection.languageExecution.selectedMaterialHash!==snapshot.executionSnapshot.languageExecution.selectedMaterialHash)throw new Error('Native report display material is missing or does not match the frozen task.');
  const terms=new Map(projection.terms.map(x=>[x.source,x.text])),originals=new Map(),prose=new Map();
  const unavailable=language==='en'?'Native explanation needs language review; the original is retained in the audit.':'原生说明需语言复核，原始输出保留于审计。';
- const sourceQuotes=snapshot.records.flatMap(r=>[r.conversation,...(r.turns||[]).map(t=>t.text)]).filter(Boolean);
- const checked=(text,assurance)=>!String(text||'').trim()?String(text||''):assurance&&assurance.status!=='verified'?unavailable:checkNativeProse(text,language,{sourceQuotes}).status==='verified'?text:unavailable;
+ const sourceQuotes=snapshot.records.flatMap(r=>[r.conversation,r.raw22?.[8],r.raw22?.[9],...(r.turns||[]).map(t=>t.text)]).filter(Boolean);
+ const checked=(text,assurance)=>{if(!String(text||'').trim())return String(text||'');if(assurance&&assurance.status!=='verified')return unavailable;const check=checkNativeProse(text,language,{sourceQuotes});return check.status==='verified'||check.status==='uncertain'&&assurance?.status==='verified'?text:unavailable;};
  for(const r of snapshot.records){
   const entries=enrichment.translations?.[r.id]||{};originals.set(r.conversation,entries.conversation);
+  for(const [index,key]of [[8,'comment'],[9,'reply'],[21,'humanIssue']])if(r.raw22?.[index])originals.set(r.raw22[index],entries[key]);
   for(const t of r.turns||[])originals.set(t.text,entries['excerpt-'+t.id]);
   for(const item of [...(r.ai||[]),...(r.final||[])])if(item.reason)prose.set(item.reason,item.source==='confirmed'?item.reason:checked(item.reason,item.languageValidation));
-  if(r.summary)prose.set(r.summary,(r.final||[]).filter(x=>x.verdict==='Fail').map(x=>`${projection.rules.find(v=>v.id===x.ruleId)?.title||x.ruleId}: ${prose.get(x.reason)||checked(x.reason,x.languageValidation)}`).join('; '));
+  if(r.summary)prose.set(r.summary,(r.final||[]).filter(x=>['Fail','不通过'].includes(x.verdict)).map(x=>`${projection.rules.find(v=>v.id===(x.ruleId||x.id))?.title||x.ruleId||x.id}: ${prose.get(x.reason)||checked(x.reason,x.languageValidation)}`).join('; '));
  }
  for(const row of snapshot.sceneAudit||[])for(const result of row.ai||[]){if(result.reason)prose.set(result.reason,checked(result.reason,result.languageValidation));}
  for(const row of snapshot.sceneAudit||[])for(const value of Object.values(row.capabilities?.outputs||{})){if(value.reason)prose.set(value.reason,checked(value.reason,value.languageValidation));if(value.value?.text)prose.set(value.value.text,checked(value.value.text,value.languageValidation));}

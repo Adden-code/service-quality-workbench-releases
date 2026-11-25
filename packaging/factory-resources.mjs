@@ -63,7 +63,7 @@ function completeBuiltinScenes(seed){
 
 /** Optional build CLI flags; positional runtime/compiler inputs remain unchanged. */
 export function parseFactoryBuildArgs(args=[]){
- const names={'--catalog-seed':'catalogSeedFile','--scene-seed':'sceneSeedFile','--source-dir':'sourceDir','--sample':'sampleFile','--factory-profile':'factoryProfile','--materials-kind':'materialsKind'},options={};
+ const names={'--native-pilot-materials':'nativePilotMaterialsFile','--catalog-seed':'catalogSeedFile','--scene-seed':'sceneSeedFile','--source-dir':'sourceDir','--sample':'sampleFile','--factory-profile':'factoryProfile','--materials-kind':'materialsKind'},options={};
  for(let i=0;i<args.length;i++){
   const flag=args[i],name=flag==='--require-factory-materials'?'requireFactoryMaterials':names[flag];
   if(!name)throw new Error('未知构建参数：'+flag);if(Object.hasOwn(options,name))throw new Error('构建参数重复：'+flag);

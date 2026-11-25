@@ -247,15 +247,16 @@ export function createArkClient({fetchImpl=fetch,timeoutMs=120000,maxResponseByt
         throw error;
       }
     },
-    async inspectEcommerceRow({config,session,basis,signal,trace,sceneSnapshot,sceneCapabilities,ruleIds}={}) {
+    async inspectEcommerceRow({config,session,basis,signal,trace,sceneSnapshot,sceneCapabilities,ruleIds,nativeContext}={}) {
       if(session?.ecommerce){try{validateEcommerceSource(session);}catch{fail('INVALID_INPUT','电商原文或模型字段与来源不一致，未发送请求。',400);}}
       if(ruleIds!==undefined&&(!isBusinessEcommerceBasis(basis)||!Array.isArray(ruleIds)||ruleIds.length!==1||ruleIds[0]!=='EC-STEPS'))fail('INVALID_INPUT','依赖恢复仅允许定向重算EC-STEPS。',400);
       const semanticBasis={...basis,rules:basis.rules.filter(rule=>rule.id!=='EC-TIME'&&(!ruleIds||ruleIds.includes(rule.id)))};
-      const prepared=prepareInspection(session,semanticBasis,{sceneCapabilities});addSceneContext(prepared.messages,sceneSnapshot,sceneCapabilities);
+      let prepared=prepareInspection(session,semanticBasis,{sceneCapabilities});addSceneContext(prepared.messages,sceneSnapshot,sceneCapabilities);
       prepared.messages[0].content+=prepared.ecommerceSemanticPolicy?' 本次只检查EC-TEXT、EC-TARGET、EC-STEPS、EC-PRIVACY。本条ecommercePolicyFacts是程序字符统计与已有评价分类；分类输入仍须结合sceneContext及原文证据，不能自行猜测。针对性仅核对单条实质回应，批次相似度由程序执行。':isBusinessEcommerceBasis(basis)?` 本次只检查EC-TEXT、EC-TARGET、EC-STEPS、EC-PRIVACY。针对性仅核对单条实质回应，批次相似度由程序执行。文本质量必须分别检查拼写、语法、标点/表情、通顺/歧义，理由写明具体类别及原文依据，不添加“明显”等门槛。结构项同时检查步骤编号与按评价类型的回复结构，任一失败即Fail；接受第一步/①/1.等完整顺序编号。少于3步仅免步骤编号要求，不免回复结构。程序字符统计：${JSON.stringify(replyStructureFacts(session.turns.filter(t=>['客服','坐席','agent','assistant'].includes(String(t.role).toLowerCase())).map(t=>t.text).join('\n'),basis))}；closingOptional=true才豁免结束语，其他组成仍需检查；分类未知且结构依赖分类时转无法判定。公开回复中的掩码个人信息同样禁止；仅输入字段含个人信息不能据此判违规。`:' 本次只检查当前一行评论，精确返回EC-TEXT、EC-TARGET、EC-STEPS、EC-PRIVACY四项；EC-TARGET仅检查当前回复的实质针对性，完整业务批次重复检查由独立阶段处理。没有至少3步操作指导时EC-STEPS为符合。';
       if(ruleIds)prepared.messages[0].content=prepared.messages[0].content.replace('本次只检查EC-TEXT、EC-TARGET、EC-STEPS、EC-PRIVACY。','本次是评价归类依赖恢复，仅检查并精确返回EC-STEPS一项；其他项已有冻结判定，不得输出。');
+      if(nativeContext)prepared=nativeMessages(prepared,semanticBasis,nativeContext,{kind:'inspection.ecommerce',sceneCapabilities,snapshot:sceneSnapshot});
       const {content,...meta}=await request(config,prepared.messages,4096,signal,trace);
-      return traced(trace,'validation',{content,expectedSessionId:session.id,expectedRuleIds:semanticBasis.rules.map(r=>r.id)},()=>({results:parseResults(content,prepared),...meta,promptVersion:prepared.ecommerceSemanticPolicy?(prepared.ecommerceTargetPolicy||EC_SEMANTIC_POLICY_VERSION):'ec-row-ark-v1'}));
+      return traced(trace,'validation',{content,expectedSessionId:session.id,expectedRuleIds:semanticBasis.rules.map(r=>r.id)},()=>{let results=parseResults(nativeContext?adaptNativeRuleOutput(content):content,prepared);if(nativeContext)results=assureNativeResults(results,nativeContext,{sourceQuotes:session.turns.map(t=>t.text)});return{results,...meta,promptVersion:nativeContext?nativeContext.execution.promptBundleRef.hash:prepared.ecommerceSemanticPolicy?(prepared.ecommerceTargetPolicy||EC_SEMANTIC_POLICY_VERSION):'ec-row-ark-v1'};});
     },
     async compareEcommerceReplies({config,block,plan,signal,trace,retryFeedback,allowPartial=false}={}) {
       if(block?.oversized)fail('INPUT_TOO_LARGE','本比较块超过输入预算，未截断原文或将未完成比较视为通过。',400);

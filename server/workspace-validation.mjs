@@ -227,7 +227,7 @@ function validateRawReinspection(task,tasks,sessions){
 }
 export function validateWorkspace(state,catalog,previous=null,{authenticateNewSnapshots=false,trustedAI=false,trustedLifecycle=false,trustedCalibration=false,trustedScene=false,trustedReview=false,trustedLanguage=false,allowNativeTaskCreation=false}={}){
   validateLanguageTransition(state,previous,{trustedLanguage,allowNativeTaskCreation});
-  if(!trustedAI)for(const session of state.sessions||[]){const old=previous?.sessions?.find(s=>s.id===session.id);if(!equal(session.nativeLanguageRetryHistory||[],old?.nativeLanguageRetryHistory||[]))fail('Native language retry history is server-owned and append-only.');}validateLanguageRegistry(state,previous,{trustedLanguage});
+  if(previous&&!trustedAI)for(const session of state.sessions||[]){const old=previous.sessions?.find(s=>s.id===session.id);if(!equal(session.nativeLanguageRetryHistory||[],old?.nativeLanguageRetryHistory||[]))fail('Native language retry history is server-owned and append-only.');}validateLanguageRegistry(state,previous,{trustedLanguage});
   const priorSessions=new Map((previous?.sessions||[]).map(s=>[s.id,s]));
   if(trustedReview){
     if(!previous||Object.keys(previous).some(k=>!['tasks','sessions','activity'].includes(k)&&state[k]!==previous[k])||state.tasks.length!==previous.tasks.length||state.sessions.length!==previous.sessions.length)fail('审核命令不能改变工作区范围。');

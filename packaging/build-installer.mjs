@@ -14,11 +14,11 @@ const hashFile=async file=>{const hash=createHash('sha256');for await(const chun
 
 export async function stageInstallerPayload(options={}){return buildPortable({...options,archive:false,split:false});}
 
-export async function buildInstaller({outputDir,compiler,nodeExe,nodeLicense,javaRuntime,jarPath,catalogSeedFile,sceneSeedFile,sourceDir=project,sampleFile,requireFactoryMaterials=false,factoryProfile='all-scenes',materialsKind='unverified',webViewSdkDir=process.env.WEBVIEW2_SDK_DIR}={}){
+export async function buildInstaller({outputDir,compiler,nodeExe,nodeLicense,javaRuntime,jarPath,catalogSeedFile,sceneSeedFile,nativePilotMaterialsFile,sourceDir=project,sampleFile,requireFactoryMaterials=false,factoryProfile='all-scenes',materialsKind='unverified',webViewSdkDir=process.env.WEBVIEW2_SDK_DIR}={}){
  const englishAcceptance=await requireEnglishReleaseGate({projectRoot:project,version:productVersion});
  if(!(await fs.stat(compiler)).isFile())throw new Error('Inno Setup编译器不存在。');
  const output=path.resolve(outputDir);await fs.mkdir(output,{recursive:false});
- const staged=await stageInstallerPayload({outputDir:path.join(output,'_stage'),nodeExe,nodeLicense,javaRuntime,jarPath,catalogSeedFile,sceneSeedFile,sourceDir,sampleFile,requireFactoryMaterials,factoryProfile,materialsKind,desktopShell:true,webViewSdkDir});
+ const staged=await stageInstallerPayload({outputDir:path.join(output,'_stage'),nodeExe,nodeLicense,javaRuntime,jarPath,catalogSeedFile,sceneSeedFile,nativePilotMaterialsFile,sourceDir,sampleFile,requireFactoryMaterials,factoryProfile,materialsKind,desktopShell:true,webViewSdkDir});
  const factory=JSON.parse(await fs.readFile(path.join(staged.root,'portable-info.json'),'utf8'));
  const compilerTemp=path.join(output,'_compiler-temp');await fs.mkdir(compilerTemp);
  let compiled;

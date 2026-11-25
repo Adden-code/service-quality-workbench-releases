@@ -35,19 +35,28 @@ export function validateBilingualMaterial(material,{published=true}={}){
   }
   if(published){
     const r=material.review,h=bilingualHashes(material);
-    keys(r,['status','semanticRevision','zhHash','enHash','sharedHash','reviewer','reason','reviewedAt'],'review');
-    if(r.status!=='approved-pair'||r.semanticRevision!==material.semanticRevision||Object.keys(h).some(k=>r[k]!==h[k]))languageError('BILINGUAL_REVIEW_STALE','Bilingual texts or shared conditions changed. Review both languages again before publishing (zh/en/shared hashes).');
-    for(const k of ['reviewer','reason','reviewedAt'])text(r[k],`review.${k}`);
-    if(!Number.isFinite(Date.parse(r.reviewedAt)))languageError('BILINGUAL_REVIEW_STALE','Invalid bilingual review time.');
+    const pilot=r?.status==='pilot-unreviewed';
+    keys(r,pilot?['status','semanticRevision','zhHash','enHash','sharedHash','actor','reason','authorizedAt','authorizationId']:['status','semanticRevision','zhHash','enHash','sharedHash','reviewer','reason','reviewedAt'],'review');
+    if(!['approved-pair','pilot-unreviewed'].includes(r.status)||r.semanticRevision!==material.semanticRevision||Object.keys(h).some(k=>r[k]!==h[k]))languageError('BILINGUAL_REVIEW_STALE','Bilingual texts or shared conditions changed. Re-authorize the exact paired bytes before execution (zh/en/shared hashes).');
+    for(const k of pilot?['actor','reason','authorizedAt','authorizationId']:['reviewer','reason','reviewedAt'])text(r[k],`review.${k}`);
+    if(!Number.isFinite(Date.parse(pilot?r.authorizedAt:r.reviewedAt)))languageError('BILINGUAL_REVIEW_STALE','Invalid bilingual authorization time.');
     const {contentHash,...body}=material;if(contentHash!==languageHash(body))languageError('BILINGUAL_HASH_MISMATCH','The bilingual package content hash does not match.');
   }
   return material;
 }
-// No caller-supplied override: EC arbitration and bilingual business review
-// are an explicit later delivery gate, not a client checkbox in this stage.
+// Pilot authorization and business approval are distinct immutable states.
+// The approved publication path still requires the original review gates.
 export function assertMaterialReleaseAllowed(material){
+  if(material.review?.status==='pilot-unreviewed'&&['新品产品咨询','电商评论回复'].includes(material.scene))return;
   if(material.scene==='电商评论回复'||material.scene==='ecommerce-comment'||material.scene==='ecommerce'||/^EC-/.test(material.id))languageError('EC_ARBITRATION_PENDING','EC English execution materials are blocked until Chinese arbitration and clause-by-clause bilingual business review are completed.');
   if(material.scene!=='新品产品咨询')languageError('LANGUAGE_SCENE_NOT_READY','Stage 1 release validation currently accepts the NP scene only. Other scenes require a separate approved material scope.');
+}
+// Explicit, auditable trial authorization does not assert bilingual business approval.
+export function authorizePilotMaterial(material,{actor,reason,authorizationId,at=new Date().toISOString()}={}){
+  const candidate=structuredClone(material);delete candidate.review;delete candidate.contentHash;
+  for(const [k,v] of Object.entries({actor,reason,authorizationId,at}))text(v,k);
+  candidate.review={status:'pilot-unreviewed',semanticRevision:candidate.semanticRevision,...bilingualHashes(candidate),actor:actor.trim(),reason:reason.trim(),authorizedAt:at,authorizationId:authorizationId.trim()};
+  candidate.contentHash=languageHash(candidate);validateBilingualMaterial(candidate);assertMaterialReleaseAllowed(candidate);return candidate;
 }
 export function reviewBilingualMaterial(material,{reviewer,reason,confirmedLanguages,expectedHashes,at=new Date().toISOString()}={}){
   const candidate=structuredClone(material);delete candidate.review;delete candidate.contentHash;

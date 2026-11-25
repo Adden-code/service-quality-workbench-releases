@@ -15,7 +15,7 @@ import {acceptanceChecklist} from './self-service-guide.mjs';
 import {builtinUsageGuide} from './builtin-guide.mjs';
 import {prepareFactoryResources,parseFactoryBuildArgs} from './factory-resources.mjs';
 import {buildDesktopShell} from './build-desktop.mjs';
-import {validateNativeReleasePayload,nativeReleaseGuide} from './native-release-gate.mjs';
+import {validateNativeReleasePayload,nativeReleaseGuide,nativePilotReleaseGuide,validateNativePilotBundle} from './native-release-gate.mjs';
 
 const project=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 export const portableVersion=productVersion;
@@ -88,23 +88,25 @@ try {
 }
 `;
 function guide(){return businessUsageGuide(portableVersion);}
-export async function buildPortable({outputDir,nodeExe,nodeLicense,javaRuntime,jarPath,catalogSeedFile,sceneSeedFile,sourceDir=project,sampleFile,requireFactoryMaterials=false,factoryProfile='all-scenes',materialsKind='unverified',desktopShell=false,webViewSdkDir=process.env.WEBVIEW2_SDK_DIR,archive:makeArchive=true,split:makeSplit=true}={}){
+export async function buildPortable({outputDir,nodeExe,nodeLicense,javaRuntime,jarPath,catalogSeedFile,sceneSeedFile,nativePilotMaterialsFile,sourceDir=project,sampleFile,requireFactoryMaterials=false,factoryProfile='all-scenes',materialsKind='unverified',desktopShell=false,webViewSdkDir=process.env.WEBVIEW2_SDK_DIR,archive:makeArchive=true,split:makeSplit=true}={}){
  for(const item of [nodeExe,nodeLicense,jarPath])if(!(await fs.stat(item)).isFile())throw new Error('构建输入不是文件。');
  if(!(await fs.stat(path.join(javaRuntime,'bin/java.exe'))).isFile())throw new Error('Java运行环境缺失。');
  const output=path.resolve(outputDir);await fs.mkdir(output,{recursive:false});
  const root=path.join(output,'会话质检工作台');await fs.mkdir(root);
  const factory=await prepareFactoryResources({root,catalogSeedFile,sceneSeedFile,sourceDir,sampleFile,requireFactoryMaterials,factoryProfile,materialsKind});
+ if(nativePilotMaterialsFile){const bytes=await fs.readFile(nativePilotMaterialsFile);validateNativePilotBundle(JSON.parse(bytes.toString('utf8')));await fs.mkdir(path.join(root,'resources'),{recursive:true});await fs.writeFile(path.join(root,'resources/native-pilot-materials.json'),bytes);}
+ const languageGuide=nativePilotMaterialsFile?nativePilotReleaseGuide:nativeReleaseGuide;
  for(const rel of portableFiles){const target=path.join(root,rel);await fs.mkdir(path.dirname(target),{recursive:true});await fs.copyFile(path.join(project,rel),target);}
  await walk(path.join(project,'public'));await fs.cp(path.join(project,'public'),path.join(root,'public'),{recursive:true,filter:source=>path.basename(source)!=='ecommerce-sample.mjs'});
  await fs.mkdir(path.join(root,'runtime/node'),{recursive:true});await fs.copyFile(nodeExe,path.join(root,'runtime/node/node.exe'));await fs.copyFile(nodeLicense,path.join(root,'runtime/node/LICENSE.txt'));
  await fs.cp(javaRuntime,path.join(root,'runtime/java'),{recursive:true,dereference:true});
  await fs.mkdir(path.join(root,'service'));await fs.copyFile(jarPath,path.join(root,'service/spring-ai-worker.jar'));
- const zhGuide=nativeReleaseGuide('zh')+(factoryProfile==='builtin-two-scenes'?builtinUsageGuide(portableVersion):guide()),enGuide=nativeReleaseGuide('en')+(factoryProfile==='builtin-two-scenes'?builtinUsageGuide(portableVersion,'en'):englishUsageGuide(portableVersion));
+ const zhGuide=languageGuide('zh')+(factoryProfile==='builtin-two-scenes'?builtinUsageGuide(portableVersion):guide()),enGuide=languageGuide('en')+(factoryProfile==='builtin-two-scenes'?builtinUsageGuide(portableVersion,'en'):englishUsageGuide(portableVersion));
  await fs.writeFile(path.join(root,'使用说明.txt'),'\uFEFF'+zhGuide,'utf8');
  await fs.writeFile(path.join(root,'User Guide (English).txt'),'\uFEFF'+enGuide,'utf8');
  await fs.writeFile(path.join(root,'Read Me First.txt'),'\uFEFF'+enGuide+'\n---\n\n'+zhGuide,'utf8');
- await fs.writeFile(path.join(root,'验收自检清单.txt'),'\uFEFF'+nativeReleaseGuide('zh')+acceptanceChecklist('zh',factory),'utf8');
- await fs.writeFile(path.join(root,'Acceptance Checklist.txt'),'\uFEFF'+nativeReleaseGuide('en')+acceptanceChecklist('en',factory),'utf8');
+ await fs.writeFile(path.join(root,'验收自检清单.txt'),'\uFEFF'+languageGuide('zh')+acceptanceChecklist('zh',factory),'utf8');
+ await fs.writeFile(path.join(root,'Acceptance Checklist.txt'),'\uFEFF'+languageGuide('en')+acceptanceChecklist('en',factory),'utf8');
  const csc=path.join(process.env.SystemRoot||'C:/Windows','Microsoft.NET/Framework64/v4.0.30319/csc.exe');
  for(const [name,stop] of [['启动会话质检工作台.exe',false],['停止会话质检工作台.exe',true]])run(csc,['/nologo','/target:winexe','/platform:anycpu','/optimize+','/codepage:65001','/reference:System.Windows.Forms.dll',...(stop?['/define:STOP_BUILD']:[]),'/out:'+path.join(root,name),path.join(project,'packaging/PortableLauncher.cs')]);
  await fs.copyFile(path.join(root,'启动会话质检工作台.exe'),path.join(root,'Start Quality Workbench.exe'));
@@ -112,7 +114,7 @@ export async function buildPortable({outputDir,nodeExe,nodeLicense,javaRuntime,j
  const desktop=desktopShell?await buildDesktopShell({root,sdkDir:webViewSdkDir}):null;
  await fs.writeFile(path.join(root,'portable-info.json'),JSON.stringify({schemaVersion:1,version:portableVersion,engine:'spring-ai',modelProvider:'openai-compatible',platform:'windows-x64',rules:factoryProfile==='builtin-two-scenes'?'NP 17 entities / 16 checks + derived overall; EC criteria follow versioned scene seed and frozen task snapshot; current bundle fixed24 + same administrator >=3 at 85%; historical tasks frozen':'Sheet4 V1; V2.1-A time upgrade / four other checks V1 / configured workingHours or continuous / same agent >=3',modules:portableModules,...factory,desktop,manifestExcludes:['文件校验清单.json']},null,2));
  await writeBuildIdentity({root,sourceDir:project,version:portableVersion});
- const nativeRelease=await validateNativeReleasePayload(root,{requireLegacyCompatibility:factoryProfile==='builtin-two-scenes'&&materialsKind==='approved'});
+ const nativeRelease=await validateNativeReleasePayload(root,{requireLegacyCompatibility:factoryProfile==='builtin-two-scenes'&&materialsKind==='approved',requirePilot:Boolean(nativePilotMaterialsFile)});
  await fs.writeFile(path.join(root,'Native Language Release.json'),JSON.stringify(nativeRelease,null,2)+'\n');
  const files=(await walk(root)).sort((a,b)=>a.relative.localeCompare(b.relative));
  const manifest=[];for(const file of files)manifest.push({path:file.relative,bytes:file.bytes,sha256:await hashFile(file.file)});

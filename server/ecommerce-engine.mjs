@@ -49,7 +49,7 @@ export function validateDuplicateGroups(groups,sessions,basis){
   });
 }
 
-export function mergeEcommerceResults({sessions,semanticResults,duplicateGroups,deterministic,allowPartial=false,basis,inspectionAt,runtime,pendingComparisons={}}){
+export function mergeEcommerceResults({sessions,semanticResults,duplicateGroups,deterministic,allowPartial=false,basis,inspectionAt,runtime,pendingComparisons={},duplicateAssessment}){
   const byId=new Map(sessions.map(s=>[s.id,s]));
   if(!Array.isArray(semanticResults)||(!allowPartial&&semanticResults.length!==sessions.length)||new Set(semanticResults.map(r=>r.sessionId)).size!==semanticResults.length)fail('批次语义结果须完整覆盖全部记录。');
   const semantic=new Map();
@@ -58,8 +58,8 @@ export function mergeEcommerceResults({sessions,semanticResults,duplicateGroups,
     semantic.set(row.sessionId,row.results);
   }
   const business=isBusinessEcommerceBasis(basis);
-  const calibrated=hasTargetCalibrationPolicy(basis),assessment=calibrated?businessDuplicateAssessment(sessions,basis):null;
-  const groups=business?validateBusinessDuplicateGroups([...(deterministic?.duplicateGroups??businessDuplicateGroups(sessions,basis)),...duplicateGroups],sessions,basis):validateDuplicateGroups([...(deterministic?.duplicateGroups??exactDuplicateGroups(sessions)),...validateDuplicateGroups(duplicateGroups,sessions)],sessions);
+  const calibrated=hasTargetCalibrationPolicy(basis),assessment=calibrated?(duplicateAssessment??businessDuplicateAssessment(sessions,basis)):null;
+  const groups=business?validateBusinessDuplicateGroups([...(deterministic?.duplicateGroups??assessment?.duplicateGroups??businessDuplicateGroups(sessions,basis)),...duplicateGroups],sessions,basis):validateDuplicateGroups([...(deterministic?.duplicateGroups??exactDuplicateGroups(sessions)),...validateDuplicateGroups(duplicateGroups,sessions)],sessions);
   const output=new Map();
   for(const s of sessions){
     if(!semantic.has(s.id))continue;

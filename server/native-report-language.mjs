@@ -6,7 +6,10 @@ import {languageError} from '../public/workspace-language.mjs';
 
 export const NATIVE_REPORT_CONTRACT='native-report-v1';
 export const NATIVE_REPORT_KINDS=Object.freeze(['consultationAnalysis','consultationIssues','caseHighlights','scenarioFields']);
+export const NATIVE_EC_REPORT_KINDS=Object.freeze(['issueClusters','voc','caseHighlights','scenarioFields']);
+const allNativeKinds=[...new Set([...NATIVE_REPORT_KINDS,...NATIVE_EC_REPORT_KINDS])];
 export const REQUIRED_NATIVE_REPORT_PROMPTS=Object.freeze(['report.context',...NATIVE_REPORT_KINDS.map(kind=>`report.${kind}`),'report.retry']);
+export const requiredNativeReportPrompts=scene=>['report.context',...(scene==='电商评论回复'?NATIVE_EC_REPORT_KINDS:NATIVE_REPORT_KINDS).map(kind=>`report.${kind}`),'report.retry'];
 export const NATIVE_REPORT_ENUMS=Object.freeze({
  salesStage:Object.freeze({PRE_SALES:'售前',IN_SALES:'售中',AFTER_SALES:'售后',UNKNOWN:'待判定'}),
  sentiment:Object.freeze({POSITIVE:'正向',NEUTRAL:'中性',NEGATIVE:'负向',UNKNOWN:'待判定'}),
@@ -22,20 +25,22 @@ const fail=(path,reasonCode)=>{
 
 // Recheck the selected bytes, rather than trusting a caller-supplied clause map.
 // This is also the report creation gate: Stage 2 bundles cannot authorize Stage 3.
-export function assertNativeReportCoverage(context,kinds=NATIVE_REPORT_KINDS){
+export function assertNativeReportCoverage(context,kinds){
  validateFrozenLanguageMaterial(context?.frozen);
  if(context?.execution?.mode!=='native-v1'||context.language!==context.execution.contentLanguage||languageHash(context.execution)!==languageHash(context.frozen.languageExecution))languageError('NATIVE_MATERIAL_INVALID','The report must use the exact task-frozen native execution package.');
  const prompt=context.frozen.selected.find(material=>material.id===context.execution.promptBundleRef.id&&material.kind==='prompt');
  if(!prompt||languageHash(prompt)!==context.execution.promptBundleRef.hash)languageError('NATIVE_MATERIAL_INVALID','The report prompt hash differs from the task-frozen package.');
  const clauses=Object.fromEntries(prompt.clauses.map(clause=>[clause.clauseId,clause.text]));
  if(languageHash(clauses)!==languageHash(context.clauses))languageError('NATIVE_MATERIAL_INVALID','The report instructions differ from the reviewed selected prompt bytes.');
- if(!Array.isArray(kinds)||kinds.some(kind=>!NATIVE_REPORT_KINDS.includes(kind)))languageError('NATIVE_REPORT_KIND_UNSUPPORTED','Native report analysis is available only for NP consultation report nodes.');
+ const supported=context.frozen.paired[0]?.scene==='电商评论回复'?NATIVE_EC_REPORT_KINDS:NATIVE_REPORT_KINDS;
+ kinds??=supported;
+ if(!Array.isArray(kinds)||kinds.some(kind=>!supported.includes(kind)))languageError('NATIVE_REPORT_KIND_UNSUPPORTED','This report analysis kind is not supported by the task-frozen scene.');
  for(const id of ['report.context','report.retry',...kinds.map(kind=>`report.${kind}`)])if(!clauses[id])languageError('NATIVE_MATERIAL_INCOMPLETE',`Missing reviewed report prompt clause: ${id}`);
  return context;
 }
 function clause(context,id){const value=context.clauses[id];if(!value)languageError('NATIVE_MATERIAL_INCOMPLETE',`Missing reviewed report prompt clause: ${id}`);return value;}
 function localizedPolicy(policy,context){
- const selected=context.frozen.selected.find(material=>material.id===policy.id&&material.version===policy.version&&material.kind==='policy');
+ const selected=context.frozen.selected.find(material=>material.id===policy.id&&material.version===String(policy.version)&&material.kind==='policy');
  if(!selected)languageError('NATIVE_MATERIAL_INCOMPLETE',`Missing reviewed report reference: ${policy.id}@${policy.version}`);
  return{...clone(policy),title:selected.title,sections:policy.sections.map(section=>{
   const c=selected.clauses.find(c=>c.clauseId===section.id);if(!c)languageError('NATIVE_MATERIAL_INCOMPLETE',`Missing reviewed report section: ${policy.id}#${section.id}`);
@@ -57,7 +62,7 @@ function localizedInput(prepared,context){
 // Feedback deliberately contains no provider prose, arbitrary paths or diagnostic
 // messages. The reviewed retry clause supplies the actual repair instructions.
 export function nativeReportRetryFeedback(error,kind){
- if(!NATIVE_REPORT_KINDS.includes(kind)||!error||!['INVALID_OUTPUT','invalid_output'].includes(error.code??error.errorCode))return undefined;
+ if(!allNativeKinds.includes(kind)||!error||!['INVALID_OUTPUT','invalid_output'].includes(error.code??error.errorCode))return undefined;
  return{kind,errorCode:'INVALID_OUTPUT',reasonCode:error.nativeLanguageFailure||error.reasonCode==='language_unverified'?'language_unverified':'invalid_fields'};
 }
 export function nativeReportMessages(prepared,context,{retryFeedback}={}){
@@ -72,6 +77,14 @@ export function nativeReportMessages(prepared,context,{retryFeedback}={}){
 }
 function enumValue(value,map,path){if(!own(map,value))fail(path,'invalid_machine_enum');return map[value];}
 function adaptWire(value,prepared){
+ if(prepared.kind==='voc'){
+  if(!Array.isArray(value?.items))fail('items','invalid_analysis_structure');
+  for(const [index,item]of value.items.entries()){
+   if(!item||typeof item!=='object'||Array.isArray(item))fail(`items[${index}]`,'invalid_analysis_structure');
+   if(own(item,'scene'))item.scene=enumValue(item.scene,NATIVE_REPORT_ENUMS.scene,`items[${index}].scene`);
+  }
+  return value;
+ }
  if(prepared.kind!=='consultationAnalysis')return value;
  if(!Array.isArray(value?.items))fail('items','invalid_analysis_structure');
  for(const [index,item]of value.items.entries()){
@@ -94,6 +107,10 @@ function adaptWire(value,prepared){
 function reportAssurance(value,prepared){
  const context=prepared.nativeContext,fields=[];
  const check=(path,text,sourceQuotes=[])=>fields.push({path,...checkNativeProse(text,context.language,{sourceQuotes})});
+ const unitFields=(prefix,item,keys,sourceQuotes=[])=>{
+  const unit=checkNativeProse(keys.map(key=>item[key]).join('. '),context.language,{sourceQuotes});
+  for(const key of keys){const checked=checkNativeProse(item[key],context.language,{sourceQuotes});fields.push({path:`${prefix}.${key}`,...(checked.status==='uncertain'&&unit.status==='verified'?{status:'verified',reasonCode:'analysis-unit-language-context'}:checked)});}
+ };
  if(prepared.kind==='consultationAnalysis')for(const [i,item]of value.items.entries()){
   const prefix=`items[${i}]`,quotes=[...(item.negativeVoices||[]).map(voice=>voice.quote),item.voc?.evidenceQuote].filter(Boolean);
   for(const key of ['salesSubstage','demandSummary'])if(own(item,key))check(`${prefix}.${key}`,item[key],quotes);
@@ -101,7 +118,15 @@ function reportAssurance(value,prepared){
   // it is not unconstrained model prose and is validated by the taxonomy parser.
   if(item.voc){if(item.voc.valid)check(`${prefix}.voc.painPoint`,item.voc.painPoint,quotes);check(`${prefix}.voc.reason`,item.voc.reason,quotes);}
  }
- if(prepared.kind==='consultationIssues')for(const [i,item]of value.clusters.entries())for(const key of ['label','summary','action'])check(`clusters[${i}].${key}`,item[key]);
+ if(['consultationIssues','issueClusters'].includes(prepared.kind))for(const [i,item]of value.clusters.entries()){
+  // A noun-phrase heading or imperative may contain few function words. Check
+  // its sibling prose as one analysis unit, but never override a foreign-script
+  // or recognized foreign-language mismatch in an individual field.
+  unitFields(`clusters[${i}]`,item,['label','summary','action']);
+ }
+ if(prepared.kind==='voc')for(const [i,item]of value.items.entries()){
+  unitFields(`items[${i}]`,item,[...(item.valid?['painPoint']:[]),...(item.reason?['reason']:[])],[item.evidenceQuote]);
+ }
  if(prepared.kind==='caseHighlights')for(const [i,item]of value.cases.entries())check(`cases[${i}].commentary`,item.commentary,[item.quote]);
  if(prepared.kind==='scenarioFields')for(const [i,item]of value.fields.entries())if(!item.missing&&prepared.input.fields.find(field=>field.id===item.id).type==='text')check(`fields[${i}].value`,item.value);
  // A selected quote/enum-only task generates no human prose. Its source and
@@ -142,5 +167,10 @@ export function nativeReportWireValue(value,kind){
   return item;
  });
  if(kind==='scenarioFields'&&Array.isArray(result.fields))result.fields=result.fields.map(({matches,speakerAttribution,...field})=>field);
+ if(kind==='voc'&&Array.isArray(result.items))result.items=result.items.map(({coercion,evidenceValidation,...item})=>{
+  item.scene=Object.keys(NATIVE_REPORT_ENUMS.scene).find(token=>NATIVE_REPORT_ENUMS.scene[token]===item.scene)??item.scene;
+  for(const change of coercion?.changes||[])if(change.field==='valid'&&change.after===item.valid)item.valid=change.before;
+  return item;
+ });
  return result;
 }

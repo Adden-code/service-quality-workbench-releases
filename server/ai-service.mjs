@@ -1,4 +1,5 @@
 import {nativeExecutionContext,nativeProgramResults,nativeValidationFeedback} from './native-language-execution.mjs';
+import {nativeEcommerceProgramResults,nativeEcommerceBatchFacts} from './native-ecommerce-execution.mjs';
 import {nativeLanguageIssue} from '../public/native-language-validation.mjs';
 import {assertTaskWritable,isInactiveTask,taskHasPendingAI} from '../public/task-lifecycle.mjs';
 import {isBusinessEcommerceBasis} from '../public/ecommerce-business-profile.mjs';
@@ -84,16 +85,17 @@ function createQueue(sessions,basis,settings,previous,runId,ecommerce,modelFinge
  return{version:1,fingerprint,modelConfigFingerprint:modelFingerprint,status:'running',phase:'rows',settings,batches,rows,comparison,updatedAt:now(),resumeCount:0};
 }
 
-function publishEcommerceCheckpoints(state,task){
+function publishEcommerceCheckpointsBase(state,task,nativeContext){
  const q=task.aiQueue;if(!q?.comparison)return;
  const comparison=mergeComparisonGroups(q.comparison,q.comparison.blocks),sessions=state.sessions.filter(s=>s.taskId===task.id);
  q.comparison.groups=comparison.groups;
  const judgmentSessions=sessions.map(s=>{const frozen=s.sceneCapabilities?.judgmentClassificationSnapshot;return frozen&&!hasTargetLimitedPolicy(task.basisSnapshot)?{...s,sceneCapabilities:{...s.sceneCapabilities,outputs:{...s.sceneCapabilities.outputs,ecommerceClassification:frozen.output}}}:s;});
- const merged=mergeEcommerceResults({sessions:judgmentSessions,semanticResults:q.rows.filter(r=>r.semanticResult).map(r=>({sessionId:r.sessionId,results:r.semanticResult.results})),duplicateGroups:comparison.groups,deterministic:{duplicateGroups:[]},allowPartial:true,basis:task.basisSnapshot,inspectionAt:task.aiRun.inspectionAt,runtime:task.executionSnapshot?.runtime,pendingComparisons:comparison.pendingBySession});
- for(const row of q.rows){const s=state.sessions.find(s=>s.id===row.sessionId),results=merged.get(row.sessionId);if(!results||human(s))continue;
+ const batchFacts=nativeContext?nativeEcommerceBatchFacts(sessions,task.basisSnapshot):undefined;
+ const merged=mergeEcommerceResults({sessions:judgmentSessions,semanticResults:q.rows.filter(r=>r.semanticResult).map(r=>({sessionId:r.sessionId,results:r.semanticResult.results})),duplicateGroups:comparison.groups,deterministic:{duplicateGroups:[]},allowPartial:true,basis:task.basisSnapshot,inspectionAt:task.aiRun.inspectionAt,runtime:task.executionSnapshot?.runtime,pendingComparisons:comparison.pendingBySession,duplicateAssessment:batchFacts?.assessment});
+ for(const row of q.rows){const s=state.sessions.find(s=>s.id===row.sessionId),rawResults=merged.get(row.sessionId);if(!rawResults||human(s))continue;const results=nativeEcommerceProgramResults(s,rawResults,nativeContext,task.basisSnapshot,sessions,batchFacts);
   if(s.aiExecution?.status==='completed'&&canonical(s.aiResults)===canonical(results))continue;
   archiveFailedAIDecision(s);s.aiResults=copy(results);const result=row.semanticResult;
-  s.aiExecution={status:'completed',runId:row.semanticRunId||row.runId||task.aiRun.id,modelId:result.modelId||task.aiRun.modelId,requestedModel:row.semanticRequestedModel||task.aiRun.modelId,startedAt:row.startedAt,completedAt:now(),inputSha256:row.inputSha256,basisSha256:digest(task.basisSnapshot),promptVersion:result.promptVersion==='ec-local-unreplied-v1'?result.promptVersion:hasTargetCalibrationPolicy(task.basisSnapshot)?task.basisSnapshot.businessProfile.targetPolicyVersion:isBusinessEcommerceBasis(task.basisSnapshot)?(task.basisSnapshot.businessProfile?.semanticPolicy?.version==='ec-human-aligned-v1'?'ec-human-aligned-v1':'ec-business-v1'):isStageATimeBasis(task.basisSnapshot)?'ec-stage-a-time-v1-content-v1':'ec-row-hybrid-v2',...(result.requestId?{requestId:result.requestId}:{}),...(result.usage?{usage:copy(result.usage)}:{})};row.resultStatus='completed';
+  s.aiExecution={status:'completed',runId:row.semanticRunId||row.runId||task.aiRun.id,modelId:result.modelId||task.aiRun.modelId,requestedModel:row.semanticRequestedModel||task.aiRun.modelId,startedAt:row.startedAt,completedAt:now(),inputSha256:row.inputSha256,basisSha256:digest(task.basisSnapshot),promptVersion:nativeContext?nativeContext.execution.promptBundleRef.hash:result.promptVersion==='ec-local-unreplied-v1'?result.promptVersion:hasTargetCalibrationPolicy(task.basisSnapshot)?task.basisSnapshot.businessProfile.targetPolicyVersion:isBusinessEcommerceBasis(task.basisSnapshot)?(task.basisSnapshot.businessProfile?.semanticPolicy?.version==='ec-human-aligned-v1'?'ec-human-aligned-v1':'ec-business-v1'):isStageATimeBasis(task.basisSnapshot)?'ec-stage-a-time-v1-content-v1':'ec-row-hybrid-v2',...(result.requestId?{requestId:result.requestId}:{}),...(result.usage?{usage:copy(result.usage)}:{})};row.resultStatus='completed';
  }
  refresh(task,state);
 }
@@ -104,7 +106,9 @@ export async function createAiService(options={}){
  if(!Number.isSafeInteger(comparisonMaxAttempts)||comparisonMaxAttempts<1||comparisonMaxAttempts>3)throw new TypeError('Invalid comparison maximum attempts.');
  let closing=false,startQueue=Promise.resolve(),writeError='',cachedState=null,pendingOperations=0;const active=new Map(),cancellations=new Map(),voidOperations=new Map();
  const serialized=operation=>{pendingOperations++;const next=startQueue.then(operation).finally(()=>{pendingOperations--;});startQueue=next.catch(()=>{});return next;};
- const read=async()=>{const doc=await store.read();cachedState=doc.state;return doc;};
+ const nativeContexts=new Map();
+ const read=async()=>{const doc=await store.read();cachedState=doc.state;for(const task of doc.state?.tasks||[])if(task.executionSnapshot?.languageExecution&&!nativeContexts.has(task.id))nativeContexts.set(task.id,nativeExecutionContext(task,await store.readNativeMaterial(task)));return doc;};
+ const publishEcommerceCheckpoints=(state,task)=>publishEcommerceCheckpointsBase(state,task,nativeContexts.get(task.id));
  const eligibleEntry=e=>!isInactiveTask(cachedState?.tasks.find(t=>t.id===e.taskId));
  const pendingTaskEntries=q=>allPendingTaskEntries(q).filter(eligibleEntry);
  const isTaskPause=entry=>entry.status==='paused'&&(['user_task','capability_failure_rate'].includes(entry.blockedReason)||entry.blockedReason==='capability_unavailable'&&!['authentication','permission'].includes(cachedState?.tasks.find(task=>task.id===entry.taskId)?.aiQueue?.stopReason));
@@ -128,9 +132,9 @@ export async function createAiService(options={}){
    if(ruleIds.includes('EC-TIME'))candidateResults.push(timeJudgment({...session,sceneCapabilities:repaired},{basis:task.basisSnapshot,inspectionAt:run.inspectionAt,runtime:task.executionSnapshot.runtime}));
    if(ruleIds.includes('EC-STEPS'))try{
     const projected=workflowInput(session);delete projected.source;
-    const result=await trace.step('targeted-request',{ruleIds:['EC-STEPS'],modelId:config.model},()=>client.inspectEcommerceRow({config,session:projected,basis:{...copy(task.basisSnapshot),rules:copy(task.basisSnapshot.rules.filter(r=>r.id==='EC-STEPS'))},ruleIds:['EC-STEPS'],signal,trace,sceneSnapshot:task.executionSnapshot,sceneCapabilities:repaired}));
+    const result=await trace.step('targeted-request',{ruleIds:['EC-STEPS'],modelId:config.model},()=>client.inspectEcommerceRow({config,session:projected,basis:{...copy(task.basisSnapshot),rules:copy(task.basisSnapshot.rules.filter(r=>r.id==='EC-STEPS'))},ruleIds:['EC-STEPS'],signal,trace,sceneSnapshot:task.executionSnapshot,sceneCapabilities:repaired,nativeContext}));
     if(result.results?.length!==1||result.results[0].ruleId!=='EC-STEPS')throw Object.assign(new Error('依赖重算须精确返回EC-STEPS。'),{code:'INVALID_OUTPUT'});
-    candidateResults.push(...enforceSceneResults(result.results,task.executionSnapshot,repaired,session));
+    const enforced=enforceSceneResults(result.results,task.executionSnapshot,repaired,session);candidateResults.push(...(nativeContext?nativeProgramResults(result.results,enforced,nativeContext,task.executionSnapshot,repaired):enforced));
    }catch(error){if(signal?.aborted||String(error?.code||'').toLowerCase().startsWith('trace_'))throw error;ruleRecoveryError=safeFailure(error);}
    if(targetRecovery&&row.semanticResult?.results){
     const sessions=doc.state.sessions.filter(s=>s.taskId===task.id).map(s=>s.id===session.id?{...s,sceneCapabilities:repaired}:s);
@@ -138,6 +142,7 @@ export async function createAiService(options={}){
     if(corrected)candidateResults.push(corrected);
    }
   }
+  if(nativeContext)candidateResults.splice(0,candidateResults.length,...nativeEcommerceProgramResults({...session,sceneCapabilities:repaired},candidateResults,nativeContext,task.basisSnapshot,doc.state.sessions.filter(s=>s.taskId===task.id)));
   await step(`r${index}-recovery-persist`,{sessionId:session.id,outputs:repaired.outputs,ruleIds,candidateResults,ruleRecoveryError:ruleRecoveryError??null},async()=>{
    await update(taskId,(state,t)=>{
     const r=t.aiQueue.rows[index],s=state.sessions.find(s=>s.id===r.sessionId),at=now();
@@ -218,7 +223,7 @@ export async function createAiService(options={}){
  async function execute(job){
   let traceStarted=false;const traceParts=[];const {taskId}=job;
   try{
-   let doc=await store.read(),task=doc.state.tasks.find(t=>t.id===taskId),q=task.aiQueue;const sessions=doc.state.sessions.filter(s=>s.taskId===taskId),ecommerce=sessions.some(s=>s.ecommerce),raw=task.inputMode===RAW_INPUT_MODE;
+   let doc=await read(),task=doc.state.tasks.find(t=>t.id===taskId),q=task.aiQueue;const sessions=doc.state.sessions.filter(s=>s.taskId===taskId),ecommerce=sessions.some(s=>s.ecommerce),raw=task.inputMode===RAW_INPUT_MODE;
    const nodes=[{id:'source',label:'输入与完整业务批次核对'},{id:'basis',label:'冻结规则与资料版本'}];
    for(const [index,row] of q.rows.entries())if(row.runId===job.id&&!row.semanticResult&&row.status!=='protected')for(let attempt=1;attempt<=maxAttempts;attempt++)for(const node of ['model','validation','persist'])nodes.push({id:`r${index}-a${attempt}-${node}`,label:`${row.batchId} · 原表行${row.sourceRow??index+1} · ${node} · 尝试${attempt}`});
    for(const [index,b] of (q.comparison?.blocks||[]).entries())if(b.status!=='completed')for(let attempt=1;attempt<=comparisonMaxAttempts;attempt++)for(const node of ['model','validation','persist'])nodes.push({id:`c${index}-a${attempt}-${node}`,label:`全批次相似块${index+1} · ${node} · 尝试${attempt}`});
@@ -279,7 +284,7 @@ export async function createAiService(options={}){
        if(raw){delete r.semanticResult;delete r.semanticRunId;delete r.semanticRequestedModel;if(!willRetry&&!closing&&!job.paused)s.aiResults=rawUnavailableResults(s,inspectionBasis(t.basisSnapshot,t.executionSnapshot),{outputLanguage:t.rawImportOptions.outputLanguage,errorCode:failure.errorCode,message:t.rawImportOptions.outputLanguage==='en'?'The model execution failed. Program-generated unable-to-determine placeholders require human review; no valid AI conclusion was produced.':'模型执行失败；程序生成无法判定占位，须人工核对，不是AI有效结论。'});}
       }else{
        r.status='completed';r.semanticResult=copy(result);r.semanticRunId=job.id;r.semanticRequestedModel=job.config.model;
-       if((!ecommerce||localUnreplied)&&!human(s)){s.aiResults=localUnreplied?copy(mergeEcommerceResults({sessions:[s],semanticResults:[{sessionId:s.id,results:result.results}],duplicateGroups:[],basis:t.basisSnapshot,inspectionAt:t.aiRun.inspectionAt,runtime:t.executionSnapshot?.runtime}).get(s.id)):copy(result.results);s.aiExecution={...s.aiExecution,status:'completed',completedAt,modelId:result.modelId||job.config.model,promptVersion:result.promptVersion||(raw?RAW_INSPECTION_PROMPT_VERSION:'qa-ark-v2'),...(result.requestId?{requestId:result.requestId}:{}),...(result.usage?{usage:copy(result.usage)}:{})};}else if(ecommerce&&!human(s)){publishEcommerceCheckpoints(state,t);}
+       if((!ecommerce||localUnreplied)&&!human(s)){s.aiResults=localUnreplied?nativeEcommerceProgramResults(s,copy(mergeEcommerceResults({sessions:[s],semanticResults:[{sessionId:s.id,results:result.results}],duplicateGroups:[],basis:t.basisSnapshot,inspectionAt:t.aiRun.inspectionAt,runtime:t.executionSnapshot?.runtime}).get(s.id)),nativeContext,t.basisSnapshot):copy(result.results);s.aiExecution={...s.aiExecution,status:'completed',completedAt,modelId:result.modelId||job.config.model,promptVersion:result.promptVersion||(raw?RAW_INSPECTION_PROMPT_VERSION:'qa-ark-v2'),...(result.requestId?{requestId:result.requestId}:{}),...(result.usage?{usage:copy(result.usage)}:{})};}else if(ecommerce&&!human(s)){publishEcommerceCheckpoints(state,t);}
       }
       refresh(t,state);
      });return{sessionId:session.id,status:failure?'failed':'completed'};});
@@ -334,24 +339,32 @@ export async function createAiService(options={}){
     const config=resumeConfig(modelConfig.getPrivate(),run),context=nativeExecutionContext(task,await store.readNativeMaterial(task));
     const beforeReview=copy(session.review),beforeResults=copy(session.aiResults),beforeCapabilities=copy(session.sceneCapabilities),prior=copy(session.sceneCapabilities);
     for(const [key,value] of Object.entries(prior?.outputs||{}))if(nativeLanguageIssue(value))delete prior.outputs[key];
-    const source=workflowInput(session);delete source.source;const basis=inspectionBasis(task.basisSnapshot,task.executionSnapshot);
+    const source=workflowInput(session);delete source.source;const basis=inspectionBasis(task.basisSnapshot,task.executionSnapshot),ecommerce=Boolean(session.ecommerce),capabilitySource=isBusinessEcommerceBasis(task.basisSnapshot)?copy(session):source;
+    delete capabilitySource.source;
     const traceId=`native-language-${Date.now()}-${digest([taskId,sessionId,doc.revision]).slice(0,12)}`,nodes=new Set(['source']);
     const step=async(id,input,op)=>{if(!traceStore)return op();if(!nodes.has(id)){await traceStore.appendNodes(traceId,[{id,label:id}]);nodes.add(id);}return traceStore.step(traceId,id,input,op);};
     if(traceStore)await traceStore.begin({id:traceId,taskId,engine:client.engine||'native-node',kind:'native-language-retry',nodes:[{id:'source',label:'Frozen native input'}],meta:{sessionId,originalRunId:run.id,languageExecution:context.execution}});
     try{
      await step('source',{sessionId,originalRunId:run.id},async()=>({source,languageExecution:context.execution}));
-     let capabilities=await executeSceneCapabilities({session:source,snapshot:task.executionSnapshot,client,config,nativeContext:context,previous:prior,trace:{step},retryDelayMs}),result,validationFeedback;
+     let capabilities=await executeSceneCapabilities({session:capabilitySource,snapshot:task.executionSnapshot,client,config,nativeContext:context,previous:prior,trace:{step},retryDelayMs}),result,validationFeedback;
+     const localUnreplied=ecommerce&&(isStageATimeBasis(task.basisSnapshot)||isBusinessEcommerceBasis(task.basisSnapshot))&&computeEcommerceTimeFacts(session,task.basisSnapshot,{inspectionAt:run.inspectionAt,runtime:task.executionSnapshot?.runtime}).replyStatus==='unreplied';
      for(let attempt=1;attempt<=maxAttempts;attempt++)try{
       const request={config,session:source,basis,inspectionAt:run.inspectionAt,outputLanguage:context.language,allowDegraded:attempt===maxAttempts,nativeContext:{...context,attempt,maxAttempts,validationFeedback},sceneSnapshot:task.executionSnapshot,sceneCapabilities:capabilities,trace:{step:(id,input,op)=>step(`a${attempt}-${id}`,input,op)}};
-      result=await client[session.rawTranscript?'inspectRaw':'inspect'](request);break;
+      result=localUnreplied?{results:unrepliedSemanticResults(),modelId:'local-unreplied',promptVersion:'ec-local-unreplied-v1'}:ecommerce?await client.inspectEcommerceRow({...request,basis:{...copy(task.basisSnapshot),rules:copy(task.basisSnapshot.rules.filter(r=>r.id!=='EC-TIME'))}}):await client[session.rawTranscript?'inspectRaw':'inspect'](request);break;
      }catch(e){validationFeedback=nativeValidationFeedback(e);if(e.code!=='INVALID_OUTPUT'||attempt===maxAttempts)throw e;}
      result.results=nativeProgramResults(result.results,enforceSceneResults(result.results,task.executionSnapshot,capabilities,session),context,task.executionSnapshot,capabilities);
-     capabilities=await executeSceneCapabilities({session:source,snapshot:task.executionSnapshot,client,config,nativeContext:context,previous:capabilities,phase:'post',trace:{step},retryDelayMs});
+     capabilities=await executeSceneCapabilities({session:capabilitySource,snapshot:task.executionSnapshot,client,config,nativeContext:context,previous:capabilities,phase:'post',trace:{step},retryDelayMs});
+     const semanticResult=copy(result);
+     if(ecommerce){
+      const sessions=doc.state.sessions.filter(s=>s.taskId===taskId).map(s=>s.id===sessionId?{...s,sceneCapabilities:capabilities}:s),comparison=mergeComparisonGroups(task.aiQueue.comparison,task.aiQueue.comparison.blocks);
+      const batchFacts=nativeEcommerceBatchFacts(sessions,task.basisSnapshot),final=mergeEcommerceResults({sessions,semanticResults:[{sessionId,results:result.results}],duplicateGroups:comparison.groups,deterministic:{duplicateGroups:[]},allowPartial:true,basis:task.basisSnapshot,inspectionAt:run.inspectionAt,runtime:task.executionSnapshot.runtime,pendingComparisons:comparison.pendingBySession,duplicateAssessment:batchFacts.assessment}).get(sessionId);
+      result.results=nativeEcommerceProgramResults({...session,sceneCapabilities:capabilities},final,context,task.basisSnapshot,sessions,batchFacts);
+     }
      let protectedRow=false;
      await update(taskId,(state,t)=>{const s=state.sessions.find(s=>s.id===sessionId),row=t.aiQueue.rows.find(r=>r.sessionId===sessionId);
       protectedRow=human(s)||canonical(s.review)!==canonical(beforeReview)||canonical(s.aiResults)!==canonical(beforeResults);
       const beforeDecision=copy(s.aiDecision??null);
-      if(!protectedRow){s.aiResults=copy(result.results);s.sceneCapabilities=copy(capabilities);row.semanticResult=copy(result);row.sceneCapabilities=copy(capabilities);t.capabilityMonitor=recordCapabilityOutcomes(t.capabilityMonitor,s.id,capabilities,t.executionSnapshot.configuration.failurePolicy);if(s.aiDecision)s.aiDecisionHistory=[...(s.aiDecisionHistory||[]),copy(s.aiDecision)];delete s.aiDecision;applyAIDecisions(state,t);}
+      if(!protectedRow){s.aiResults=copy(result.results);s.sceneCapabilities=copy(capabilities);row.semanticResult=semanticResult;row.sceneCapabilities=copy(capabilities);t.capabilityMonitor=recordCapabilityOutcomes(t.capabilityMonitor,s.id,capabilities,t.executionSnapshot.configuration.failurePolicy);if(s.aiDecision)s.aiDecisionHistory=[...(s.aiDecisionHistory||[]),copy(s.aiDecision)];delete s.aiDecision;applyAIDecisions(state,t);}
       s.nativeLanguageRetryHistory=[...(s.nativeLanguageRetryHistory||[]),{at:now(),traceId,originalRunId:run.id,protected:protectedRow,beforeResults,beforeCapabilities,beforeDecision,afterDecision:copy(s.aiDecision??null),afterResults:copy(result.results),afterCapabilities:copy(capabilities)}];
      });
      if(traceStore)await traceStore.finish(traceId,{status:'completed',summary:{sessionId,protected:protectedRow,languageFindings:result.results.filter(nativeLanguageIssue).length}});return read();

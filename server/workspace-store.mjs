@@ -157,9 +157,13 @@ export async function createWorkspaceStore({dataDir,fsOps=fs,catalogSeed=null,sc
     const value=nativeLanguageReadiness(document.state,document.catalog,await publishedMaterials(),await selectedNativeFreeze());readinessCache={revision:document.revision,value};return clone(value);
   }
   async function selectedNativeFreeze(){
-    const selection=document.state?.languageAudit?.findLast(e=>e.action==='freeze-material'&&e.after?.hash&&!e.after.taskId);if(!selection)return null;
-    const ref=document.state.languageMaterials?.freezes?.find(r=>r.hash===selection.after.hash);if(!ref)languageError('LANGUAGE_FREEZE_INVALID','The explicitly selected release is missing from the frozen registry.');
-    const value=JSON.parse(await fsOps.readFile(path.join(directory,'language-materials',ref.hash+'.json'),'utf8'));if(languageHash(value)!==ref.hash)languageError('LANGUAGE_FREEZE_INVALID','The selected release bytes do not match their immutable reference.');return value;
+    const selected=new Map();
+    for(const selection of [...(document.state?.languageAudit||[])].reverse().filter(e=>e.action==='freeze-material'&&e.after?.hash&&!e.after.taskId)){
+      const ref=document.state.languageMaterials?.freezes?.find(r=>r.hash===selection.after.hash);if(!ref)languageError('LANGUAGE_FREEZE_INVALID','The explicitly selected release is missing from the frozen registry.');
+      const value=JSON.parse(await fsOps.readFile(path.join(directory,'language-materials',ref.hash+'.json'),'utf8'));if(languageHash(value)!==ref.hash)languageError('LANGUAGE_FREEZE_INVALID','The selected release bytes do not match their immutable reference.');
+      const scene=value.paired?.[0]?.scene;if(scene&&value.paired.every(m=>m.scene===scene)&&!selected.has(scene))selected.set(scene,value);
+    }
+    return [...selected.values()];
   }
   async function readNativeMaterial(task){
     const hash=task?.executionSnapshot?.languageMaterialRef;
@@ -232,6 +236,27 @@ export async function createWorkspaceStore({dataDir,fsOps=fs,catalogSeed=null,sc
     return clone({initialized:true,baseRevision:revision,revision:document.revision,patch});
   }
   return {
+    installNativePilotMaterials(bundle){return serial(async()=>{
+      if(nativeLanguageStage<4)languageError('NATIVE_LANGUAGE_STAGE_PENDING','Pilot installation requires the complete native interpreter.');
+      if(workspaceLanguage(document.state)?.mode==='legacy-display-v1')return read();
+      if(!object(bundle)||bundle.schemaVersion!==1||!['id','version'].every(k=>typeof bundle[k]==='string'&&bundle[k].trim())||!Array.isArray(bundle.materials)||!bundle.materials.length||!object(bundle.authorization))languageError('BILINGUAL_INVALID','Invalid shipped pilot material bundle.');
+      const fingerprint=languageHash(bundle),id=`install-pilot-${bundle.id}-${bundle.version}`,prior=document.state.languageAudit?.find(e=>e.id===id);
+      if(prior){if(prior.after?.bundleHash!==fingerprint)languageError('LANGUAGE_OPERATION_CONFLICT','Installed pilot version bytes changed; issue a new bundle version.');return read();}
+      const state=clone(document.state),registry=state.languageMaterials||{schemaVersion:1,releases:[],freezes:[]},seen=new Set();
+      for(const m of bundle.materials){
+        validateBilingualMaterial(m);assertMaterialReleaseAllowed(m);
+        if(m.review.status!=='pilot-unreviewed'||m.review.authorizationId!==bundle.authorization.authorizationId||m.review.actor!==bundle.authorization.actor||m.review.reason!==bundle.authorization.reason)languageError('BILINGUAL_INVALID','Pilot material authorization must match the shipped bundle.');
+        const key=m.scene+'::'+m.id+'@'+m.version;if(seen.has(key))languageError('BILINGUAL_INVALID','Duplicate pilot material version.');seen.add(key);
+        const previous=registry.releases.find(r=>r.contentHash===m.contentHash);
+        // Source rule versions stay exact. A new explicitly versioned pilot
+        // bundle may append new paired text bytes, retaining every old hash.
+        if(!previous)registry.releases.push({id:m.id,version:m.version,scene:m.scene,contentHash:m.contentHash});
+      }
+      state.languageMaterials=registry;state.languageAudit=[...(state.languageAudit||[]),{id,action:'install-pilot-materials',actor:bundle.authorization.actor,at:new Date().toISOString(),reason:bundle.authorization.reason,before:null,after:{id:bundle.id,version:bundle.version,bundleHash:fingerprint,materialStatus:'pilot-unreviewed',scenes:[...new Set(bundle.materials.map(m=>m.scene))],materialHashes:bundle.materials.map(m=>m.contentHash)}}];
+      validateWorkspace(state,document.catalog,document.state,{trustedLanguage:true});
+      for(const m of bundle.materials)if(registry.releases.some(r=>r.contentHash===m.contentHash))await writeLanguageArtifact(m.contentHash,m);
+      return persist({...document,state,revision:document.revision+1});
+    });},
     enableLanguageGovernance(){return serial(async()=>{
       if(workspaceLanguage(document.state))return read();
       const externalHistory=await diskLanguageHistory(directory),at=new Date().toISOString(),id=`language-bootstrap-${randomBytes(12).toString('hex')}`;
@@ -256,9 +281,10 @@ export async function createWorkspaceStore({dataDir,fsOps=fs,catalogSeed=null,sc
       if(input.baseRevision!==document.revision)languageError('LANGUAGE_REVISION_CONFLICT','Reload the current workspace before publishing.');
       if(!workspaceLanguage(document.state))languageError('LANGUAGE_SELECTION_REQUIRED','Language governance has not been initialized.');
       validateBilingualMaterial(input.material);assertMaterialReleaseAllowed(input.material);
+      if(input.material.review.status!=='approved-pair')languageError('BILINGUAL_REVIEW_REQUIRED','Business publication requires approved-pair review. Pilot materials use the separate audited bundle installation.');
       const state=clone(document.state),m=clone(input.material),registry=state.languageMaterials||{schemaVersion:1,releases:[],freezes:[]};
-      if(registry.releases.some(r=>r.id===m.id&&r.version===m.version))languageError('BILINGUAL_VERSION_EXISTS','This material version is already published; create a new version.');
-      const oldRef=registry.releases.filter(r=>r.id===m.id).at(-1),before=oldRef?JSON.parse(await fsOps.readFile(path.join(directory,'language-materials',oldRef.contentHash+'.json'),'utf8')):null;
+      if(registry.releases.some(r=>r.scene===m.scene&&r.id===m.id&&r.version===m.version))languageError('BILINGUAL_VERSION_EXISTS','This material version is already published; create a new version.');
+      const oldRef=registry.releases.filter(r=>r.scene===m.scene&&r.id===m.id).at(-1),before=oldRef?JSON.parse(await fsOps.readFile(path.join(directory,'language-materials',oldRef.contentHash+'.json'),'utf8')):null;
       registry.releases.push({id:m.id,version:m.version,scene:m.scene,contentHash:m.contentHash});state.languageMaterials=registry;
       state.languageAudit.push({id:input.operationId,action:'publish-material',actor:m.review.reviewer,at:new Date().toISOString(),reason:m.review.reason,before,after:m,diff:languageDiff(before,m)});
       validateWorkspace(state,document.catalog,document.state,{trustedLanguage:true});
@@ -378,7 +404,7 @@ export async function createWorkspaceStore({dataDir,fsOps=fs,catalogSeed=null,sc
             const registry=request.state.languageMaterials||{schemaVersion:1,releases:[],freezes:[]};
             if(!registry.freezes.some(r=>r.hash===prepared.hash)){registry.freezes.push({hash:prepared.hash,languageExecution:prepared.frozen.languageExecution});newFreezes.push(prepared);}
             request.state.languageMaterials=registry;
-            request.state.languageAudit.push({id:`freeze-task-${request.mutationId}-${i}`,action:'freeze-material',actor:'local-operator',at:new Date().toISOString(),reason:'Freeze exact previously reviewed material for the new task.',before:null,after:{taskId:task.id,hash:prepared.hash,languageExecution:prepared.frozen.languageExecution}});
+            request.state.languageAudit.push({id:`freeze-task-${request.mutationId}-${i}`,action:'freeze-material',actor:'local-operator',at:new Date().toISOString(),reason:prepared.frozen.paired.some(m=>m.review.status==='pilot-unreviewed')?'Freeze exact authorized pilot materials; bilingual business review remains pending.':'Freeze exact previously reviewed material for the new task.',before:null,after:{taskId:task.id,hash:prepared.hash,languageExecution:prepared.frozen.languageExecution}});
           }
         }
         validateWorkspace(request.state,request.catalog,document.state,{authenticateNewSnapshots:true,allowNativeTaskCreation:nativeLanguageStage>=2,trustedLanguage:nativeLanguageStage>=4});

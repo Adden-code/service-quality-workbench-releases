@@ -1,14 +1,15 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
+import {validateBilingualMaterial,languageHash} from '../server/native-language-materials.mjs';
 
 export const LEGACY_RELEASE_SEEDS=Object.freeze({
  'catalog-seed.json':'59b733917c9c2345f5a9143f6559661c73dfa7e43f5be7d84487850e23c54d55',
  'scene-seed.json':'51e71a94b16c410a9b3b0f0eb0caf7058d2adee42002185806bd3d642f539351'
 });
 
-/** Stage 4 ships the interpreter, never the still-unreviewed native business drafts. */
-export async function validateNativeReleasePayload(root,{expectedSeeds=LEGACY_RELEASE_SEEDS,requireLegacyCompatibility=false}={}){
+/** Compatibility packages omit drafts; pilot packages require explicit, hash-bound authorization. */
+export async function validateNativeReleasePayload(root,{expectedSeeds=LEGACY_RELEASE_SEEDS,requireLegacyCompatibility=false,requirePilot=false}={}){
  const rejected=[];
  async function walk(directory,relative=''){
   for(const entry of await fs.readdir(directory,{withFileTypes:true})){
@@ -28,7 +29,38 @@ export async function validateNativeReleasePayload(root,{expectedSeeds=LEGACY_RE
  }
  const legacySeedCompatibility=legacySeeds.length>0&&legacySeeds.every(seed=>seed.matches);
  if(requireLegacyCompatibility&&!legacySeedCompatibility)throw new Error('Legacy seeds differ from the approved 0.11.24 baseline; native draft publication is not authorized.');
- return {stage:4,reviewGate:'required',nativeBusinessMaterialCount:0,legacySeedCompatibility,legacySeeds,npBilingualReview:'pending',reportPromptV12Review:'pending',ecEnglishArbitration:'pending'};
+ let pilot=null;try{pilot=JSON.parse(await fs.readFile(path.join(root,'resources/native-pilot-materials.json'),'utf8'));}catch(error){if(error.code!=='ENOENT')throw error;}
+ if(requirePilot&&!pilot)throw new Error('The complete native pilot bundle is required.');
+ if(pilot)validateNativePilotBundle(pilot);
+ return {stage:4,reviewGate:pilot?'explicit-user-authorized-pilot':'required',nativeBusinessMaterialCount:pilot?.materials.length||0,...(pilot?{pilotId:pilot.id,pilotVersion:pilot.version,pilotHash:languageHash(pilot),materialStatus:'pilot-unreviewed',authorizationId:pilot.authorization.authorizationId}:{}),legacySeedCompatibility,legacySeeds,npBilingualReview:'pending',reportPromptV12Review:'pending',ecEnglishArbitration:'pending'};
+}
+
+export function validateNativePilotBundle(bundle){
+ if(bundle?.schemaVersion!==1||!bundle.id||!bundle.version||!bundle.authorization?.authorizationId||!Array.isArray(bundle.materials)||!bundle.materials.length)throw new Error('Invalid native pilot bundle.');
+ const seen=new Set();
+ for(const m of bundle.materials){validateBilingualMaterial(m);const key=m.scene+'::'+m.id;if(seen.has(key))throw new Error('Duplicate pilot material: '+key);seen.add(key);if(m.review.status!=='pilot-unreviewed'||['actor','reason','authorizationId'].some(k=>m.review[k]!==bundle.authorization[k]))throw new Error('Pilot authorization mismatch.');}
+ for(const [scene,count]of [['新品产品咨询',17],['电商评论回复',5]]){const items=bundle.materials.filter(m=>m.scene===scene);if(items.filter(m=>m.kind==='rule').length!==count||['template','prompt','glossary'].some(kind=>items.filter(m=>m.kind===kind).length!==1)||!items.some(m=>m.id==='NATIVE-CONFIG'))throw new Error('Incomplete pilot scene: '+scene);}
+ return bundle;
+}
+
+export function nativePilotReleaseGuide(language='zh'){
+ return language==='en'?`Native-language pilot (0.11.26)
+
+New workspaces can select Chinese or English and immediately use the built-in NP and EC scenes. Paired criteria, prompts and report templates are supplied under the user's explicit pilot authorization. Business review and EC arbitration are still pending; this package does not claim they are complete. The current Chinese criteria have not been recalibrated in this release. Please report incorrect or awkward wording with the task and rule IDs.
+
+The workspace language is locked. AI explanations are generated directly in that language. Original source text is preserved, and review/reply translations are generated automatically with the delivery. Existing workspaces and historical task snapshots retain their original behavior.
+
+English native tasks cannot reuse Chinese B6 calibration. They initially require human confirmation until each rule reaches the existing 30-pair / 80% agreement criteria in the English scope. Before upgrading, keep a full workspace backup outside the program directory. Reverting to 0.11.24 requires the pre-upgrade backup.
+
+`:`原生语言试用版（0.11.26）
+
+全新工作区选择中文或English后，即可使用内置新品、电商两场景。中英文判据、提示词与报告模板按用户明确授权作为试用材料随包提供；业务逐条核对和EC仲裁仍待完成，不标为正式复核通过。本版不增加新的电商判定口径调整。发现判定或措辞问题时，请记录任务编号、规则编号反馈。
+
+工作区语言选定后锁定，AI理由直接以该语言生成；原始内容保留，评价/回复译文仍在交付时自动生成。旧工作区和历史任务继续原有行为，不重写冻结依据。
+
+英文原生任务不能复用中文B6标定，初期均需人工确认；各规则在英文范围积累至少30对独立样本、一致率达到80%后再逐步启用免审。升级前请完整备份到程序目录之外。回退0.11.24须使用升级前备份。
+
+`;
 }
 
 export function nativeReleaseGuide(language='zh'){
