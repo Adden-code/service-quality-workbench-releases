@@ -13,7 +13,8 @@ import {OPERATIONS0105_EN} from './operations0105-locale-en.mjs';
 import {PENDING0105_EN} from './pending0105-locale-en.mjs';
 import {WORKFLOW0107_EN} from './workflow0107-locale-en.mjs';
 import {OPERATOR01122_EN} from './operator01122-locale-en.mjs';
-const UI_EN=Object.freeze({...BASE_UI_EN,...UI_EXTRA_EN,...ONBOARDING_EN,...TRIAGE_EN,...WORKFLOW096_EN,...WORKFLOW097_EN,...IMPORT098_EN,...RAW_EN,...RULE0104_EN,...TASK0104_EN,...REVIEW0105_EN,...OPERATIONS0105_EN,...PENDING0105_EN,...WORKFLOW0107_EN,...OPERATOR01122_EN});
+import {OPERATOR01123_EN} from './operator01123-locale-en.mjs';
+const UI_EN=Object.freeze({...BASE_UI_EN,...UI_EXTRA_EN,...ONBOARDING_EN,...TRIAGE_EN,...WORKFLOW096_EN,...WORKFLOW097_EN,...IMPORT098_EN,...RAW_EN,...RULE0104_EN,...TASK0104_EN,...REVIEW0105_EN,...OPERATIONS0105_EN,...PENDING0105_EN,...WORKFLOW0107_EN,...OPERATOR01122_EN,...OPERATOR01123_EN});
 
 export const LOCALE_STORAGE_KEY='service-quality-workbench:locale';
 const browserStorage=()=>{try{return globalThis.localStorage;}catch{return undefined;}};
@@ -80,8 +81,10 @@ export function translateError(error){
   if(!source)return '';
   if(locale==='zh')return source;
   const translated=t(source);
-  if(!/[\u3400-\u9fff]/u.test(translated))return translated||'The operation could not be completed.';
-  return `The operation could not be completed. Original message: ${source}`;
+  // Unknown Latin-script errors may be Spanish/French as well as English.
+  // Only our mapped messages are trusted English; raw diagnostics stay in logs.
+  if(!/[^\p{Script=Latin}\P{L}]/u.test(translated)&&(translated!==source||Object.values(UI_EN).includes(source)))return translated||'The operation could not be completed.';
+  return 'The operation could not be completed. Check the current settings and retry; technical details remain in the original diagnostic log.';
 }
 export const uiLabel=value=>String(value??'').split(' · ').map(part=>t(part)).join(' · ');
 export function formatDateTime(value){

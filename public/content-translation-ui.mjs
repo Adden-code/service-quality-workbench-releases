@@ -1,5 +1,7 @@
 import {getLocale,t,translateError} from './i18n.mjs';
 import {createTranslationClient} from './content-translation-client.mjs';
+import {builtinDisplayName,BUNDLED_DISPLAY_EN} from './builtin-display-en.mjs';
+import {englishDisplayText} from './translation-language.mjs';
 
 const e=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const chinese=value=>/[\u3400-\u9fff]/u.test(String(value??''));
@@ -10,7 +12,7 @@ export function clearBusinessTranslations(){translatedFields.clear();jobViews.cl
 export function applyBusinessTranslations(result){
   for(const item of result?.translations||[]){
     if(typeof item.sourceText!=='string'||!['same','translated','failed','pending'].includes(item.status))continue;
-    translatedFields.set(item.sourceText,{...item});
+    translatedFields.set(item.sourceText,['translated','same'].includes(item.status)&&!englishDisplayText(item.text)?{...item,text:'',status:'failed'}:{...item});
   }
 }
 /** Read-only display projection. Never use this for form values, IDs, source
@@ -18,21 +20,27 @@ export function applyBusinessTranslations(result){
 export function d(value){
   const source=String(value??'');if(getLocale()!=='en'||!source)return source;
   const item=translatedFields.get(source);
-  if(item&&['translated','same'].includes(item.status)&&typeof item.text==='string'&&item.text.trim())return item.text;
+  if(item&&['translated','same'].includes(item.status)&&englishDisplayText(item.text))return item.text;
+  if(BUNDLED_DISPLAY_EN[source])return BUNDLED_DISPLAY_EN[source];
   return chinese(source)?`[Original · English missing] ${source}`:source;
 }
 export function scenarioName(value){
   const source=String(value??'');
   return ['新品产品咨询','电商评论回复'].includes(source)?t(source):d(source);
 }
+export function ruleDisplayName(record){
+ const name=record?.title||record?.name||record?.id||'';
+ return getLocale()==='en'?(builtinDisplayName(record)||d(name)):name;
+}
 /** Long-form content keeps the original visible or available beside its derived
  * translation. Original data is escaped and never assigned back into state. */
 export function businessContent(value,{quote=false}={}){
   const source=String(value??'');if(getLocale()!=='en'||!source)return e(source);
-  const item=translatedFields.get(source),complete=item&&['translated','same'].includes(item.status)&&item.text?.trim();
-  if(complete&&item.status==='translated')return `<span class="business-content translated"><small class="business-language-label">English translation</small><span>${e(item.text)}</span><details class="business-original"><summary>Original${quote?' quote':''}</summary><span>${e(source)}</span></details></span>`;
-  if(complete)return `<span class="business-content"><small class="business-language-label">Original${quote?' quote':''} · Language verified</small><span>${e(source)}</span></span>`;
-  return `<span class="business-content original"><small class="business-language-label">Original${quote?' quote':''}${chinese(source)?' · English missing':''}</small><span>${e(source)}</span></span>`;
+  const item=translatedFields.get(source),complete=item&&['translated','same'].includes(item.status)&&englishDisplayText(item.text);
+  if(!complete&&BUNDLED_DISPLAY_EN[source])return `<span class="business-content translated"><small class="business-language-label">English translation</small><span>${e(BUNDLED_DISPLAY_EN[source])}</span><details class="business-original"><summary>Original</summary><span data-business-original>${e(source)}</span></details></span>`;
+  if(complete&&item.status==='translated')return `<span class="business-content translated"><small class="business-language-label">English translation</small><span>${e(item.text)}</span><details class="business-original"><summary>Original${quote?' quote':''}</summary><span data-business-original>${e(source)}</span></details></span>`;
+  if(complete)return `<span class="business-content"><small class="business-language-label">Original${quote?' quote':''} · Language verified</small><span data-business-original>${e(source)}</span></span>`;
+  return `<span class="business-content original"><small class="business-language-label">Original${quote?' quote':''}${chinese(source)?' · English missing':''}</small><span data-business-original>${e(source)}</span></span>`;
 }
 const jobLabel=job=>({running:label('翻译进行中','Translation running'),paused:label('翻译已暂停','Translation paused'),completed:label('翻译已完成','Translation complete'),completed_with_warnings:label('翻译已完成，部分内容缺译','Translation complete with missing content')})[job?.status]||label('尚未翻译','Not translated');
 export function translationControls(source){
@@ -103,5 +111,5 @@ export function createContentTranslationController({client,getToken,fetchImpl,on
 
 export function applyBundledRuleEnglish(catalog,state={}){
  const records=[...(catalog?.rules||[]),...(state.tasks||[]).flatMap(t=>t.basisSnapshot?.rules||[])];
- applyBusinessTranslations({translations:records.filter(r=>r.english).flatMap(r=>['title','scope'].map(k=>({sourceText:r[k],text:r.english[k],status:'translated'})))});
+ applyBusinessTranslations({translations:records.filter(r=>r.english).flatMap(r=>['title','summary','scope'].map(k=>({sourceText:r[k],text:r.english[k],status:'translated'})))});
 }

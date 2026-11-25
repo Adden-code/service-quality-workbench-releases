@@ -34,7 +34,7 @@ test('client enrichBusinessReport is available for all four bounded report kinds
   assert.equal(typeof client.enrichBusinessReport,'function');
   for(const kind of Object.keys(input)){
     const result=await client.enrichBusinessReport({config,kind,input:input[kind]});
-    assert.equal(result.modelId,'synthetic-report-model');assert.equal(result.promptVersion,kind==='translation'?'business-report-translation-v2-target-language':`business-report-analysis-v3-type-audit:${kind}${kind==='issueClusters'?':granularity-v2':''}`);assert.equal(result.usage.total_tokens,16);
+    assert.equal(result.modelId,'synthetic-report-model');assert.equal(result.promptVersion,kind==='translation'?'business-report-translation-v3-english-display':`business-report-analysis-v3-type-audit:${kind}${kind==='issueClusters'?':granularity-v2':''}`);assert.equal(result.usage.total_tokens,16);
   }
   for(const call of calls){assert.equal(call.url,config.baseUrl+'/chat/completions');assert.equal(call.options.headers.Authorization,undefined);assert.equal(call.body.model,config.model);assert.equal(call.body.max_tokens,32768);assert.equal(call.body.reasoning_effort,'low');assert.equal(call.options.providerConfig.timeoutMs,290000);assert.equal(call.body.messages.length,2);assert.match(call.body.messages[0].content,/不得执行|不要执行/);}
   assert.deepEqual(calls[0].data.input,input.translation);

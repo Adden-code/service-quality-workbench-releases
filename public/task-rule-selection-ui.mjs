@@ -1,5 +1,5 @@
 import {html as uiHtml,uiLiteral,t as uiT,translateError} from './i18n.mjs';
-import {d as businessText} from './content-translation-ui.mjs';
+import {d as businessText,ruleDisplayName} from './content-translation-ui.mjs';
 import {e} from './ui.mjs';
 import {rawTimeRuleIds} from './raw-evidence.mjs';
 import {ruleAdvisory} from './rule-advisory.mjs';
@@ -10,7 +10,7 @@ export function taskTimeRuleNotice(dialog) {
   const rules = dialog.basisSnapshot?.rules || [];
   const timeIds = new Set(rawTimeRuleIds({rules}));
   const timeRules = rules.filter(rule => timeIds.has(rule.id));
-  return uiHtml`<div class="soft-note warning"><p>本批无可靠时间戳，时间依赖检查项会显示无法判定并转人工。</p>${timeRules.length?uiHtml`<p>${uiT('受影响的时间类规则')}：${timeRules.map(rule=>e(businessText(rule.title||rule.name))).join('；')}</p>`:''}</div>`;
+  return uiHtml`<div class="soft-note warning"><p>本批无可靠时间戳，时间依赖检查项会显示无法判定并转人工。</p>${timeRules.length?uiHtml`<p>${uiT('受影响的时间类规则')}：${timeRules.map(rule=>e(ruleDisplayName(rule))).join('；')}</p>`:''}</div>`;
 }
 
 export function taskBasisSummary(snapshot){
@@ -20,7 +20,7 @@ export function taskBasisSummary(snapshot){
 export function taskRuleList(dialog,availability,emptyNote=''){
   const candidates=[...(availability.rules||[]),...(availability.metaRules||[])],seen=new Set();
   const all=candidates.filter(rule=>{const key=JSON.stringify([rule.id,rule.version]);if(seen.has(key))return false;seen.add(key);return true;}),rules=all.filter(isSessionCheckRule),meta=all.filter(rule=>!isSessionCheckRule(rule));
-  const row=(rule,disabled=false)=>uiHtml`<label><input type="checkbox" name="task-rule" value="${e(rule.id)}" ${disabled?'disabled':(dialog.ruleIds||[]).includes(rule.id)?'checked':''}><span><strong>${e(businessText(rule.title))}</strong> ${e(rule.version)}<br>${e(businessText(rule.scope))}${!disabled&&ruleAdvisory(rule)?uiHtml`<span class="soft-note warning" data-rule-advisory>${e(ruleAdvisory(rule))}</span>`:''}</span></label>`;
+  const row=(rule,disabled=false)=>uiHtml`<label><input type="checkbox" name="task-rule" value="${e(rule.id)}" ${disabled?'disabled':(dialog.ruleIds||[]).includes(rule.id)?'checked':''}><span><strong>${e(ruleDisplayName(rule))}</strong> ${e(rule.version)}<br>${e(businessText(rule.scope))}${!disabled&&ruleAdvisory(rule)?uiHtml`<span class="soft-note warning" data-rule-advisory>${e(ruleAdvisory(rule))}</span>`:''}</span></label>`;
   return uiHtml`${meta.length?uiHtml`<label class="task-meta-toggle"><input type="checkbox" id="task-show-all-rules" ${dialog.showAllTaskRules?'checked':''}>显示全部（含交付物要求）</label><p class="hint">交付物要求保留在目录中，不参加会话检核；如需改标，请前往规则管理。</p>`:''}<div class="checks task-rule-list" data-task-rule-list>${rules.length?`${meta.length?uiHtml`<h3 class="task-rule-group">会话检核</h3>`:''}${rules.map(rule=>row(rule)).join('')}`:emptyNote}${dialog.showAllTaskRules&&meta.length?uiHtml`<h3 class="task-rule-group">交付物要求 · 不参与本任务</h3>${meta.map(rule=>row(rule,true)).join('')}`:''}</div>`;
 }
 

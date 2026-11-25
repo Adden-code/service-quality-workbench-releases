@@ -1,4 +1,6 @@
+import {createAdminDraftTranslationController} from './admin-draft-translation.mjs';
 import {createReasonTranslationController} from './reason-translation.mjs';
+import {workspaceRecoveryDelay} from './workspace-read-budget.mjs';
 import {rawInlineKeyboard} from './raw-inline-review.mjs';
 import {installReadingControls} from './raw-review-layout.mjs';
 installReadingControls();
@@ -68,6 +70,7 @@ import {captureCleaningViewport,restoreCleaningViewport} from './cleaning-viewpo
 
 const navigation=[['overview','工作概览'],['tasks','质检任务'],['review','人工审核'],['rules','质检规则'],['knowledge','政策与知识'],['exports','结果导出']];
 let storageWarning='',persistenceBlocked=false,saving=false,toastTimer,dialog=null,previousFocus=null,pollTimer;
+let workspaceLoadFailed=false,workspaceReadFailures=0;
 let composingInput=null,suspendedTaskDraft=null;
 let lastPage=null,lastSession=null,keyboardInput=false;
 let overlayEpoch=0,closingOverlay=false,finishOverlayClose=null,backdropPress=null;
@@ -75,6 +78,7 @@ const searchKeys={'task-search':'taskQuery','review-search':'reviewQuery','catal
 const ui={dataMode:'manual',page:'overview',period:'month',dashboardTaskId:INITIAL_TASK_ID,taskStatus:'全部',taskQuery:'',catalogQuery:'',reviewTaskId:INITIAL_TASK_ID,reviewStatus:'待确认',reviewQuery:'',selectedId:'',openRules:[],highlightedTurns:[],resultFilter:'全部',exportTaskId:INITIAL_TASK_ID,includePending:false,reportPeriod:'month',reportTaskId:INITIAL_TASK_ID};
 const workspace=createWorkspaceClient({structuralSharing:true,storage:{getItem:key=>localStorage.getItem(key)}});
 const reasonTranslations=createReasonTranslationController({getToken:()=>workspace.token,onChange:()=>redrawLocalized()});
+const adminDraftTranslations=createAdminDraftTranslationController({getToken:()=>workspace.token,onChange:()=>redrawLocalized()});
 const contentTranslations=createContentTranslationController({getToken:()=>workspace.token,onChange:()=>redrawLocalized()});
 const workflowManager=createWorkflowManager({getToken:()=>workspace.token,openModal:openDialog,closeModal:()=>closeDialog({force:true}),onChange:()=>{if(dialog?.type==='workflow')renderDialog();},toast,download});
 let state=createBusinessState(),catalog=createBusinessCatalog();
@@ -89,12 +93,12 @@ async function businessExportApi(url,{method='GET',body,signal}={}){
   const value=await response.json();if(!response.ok)throw Object.assign(new Error(value.error||'交付任务请求失败。'),{status:response.status});if(method==='POST'&&url==='/api/report-jobs'&&!workspace.hasPending&&!workspace.conflicted)adoptWorkspace(await workspace.refresh());return value;
 }
 try{const loaded=await workspace.load();state=loaded.state;catalog=loaded.catalog;applyBundledRuleEnglish(catalog,state);}
-catch(error){storageWarning=`工作区未加载：${error.message} 当前工作区只读，请检查本地服务后重试。`;persistenceBlocked=true;}
+catch(error){storageWarning=getLocale()==='en'?'Workspace loading is delayed. Retrying automatically; editing will unlock when loading succeeds.':`工作区暂未加载：${error.message} 正在自动重试，恢复后自动解除只读。`;persistenceBlocked=true;workspaceLoadFailed=true;}
 try{const response=await fetch('/api/build-info',{cache:'no-store'});if(response.ok)ui.buildInfo=await response.json();}catch{}
 const reviewRoutingController=createReviewRoutingController({getState:()=>scoped(),getUI:()=>ui,getDialog:()=>dialog,getRoot:()=>document.getElementById('overlay-root'),openDialog,closeDialog,commit,render,renderDialog,navigate:()=>go('review'),selectSession,now:reviewNow});
 const qualityInsightsManager=createQualityInsightsManager({getState:()=>state,getDialog:()=>dialog,openDialog,renderDialog,download,beforeAuditDownload:async({taskIds})=>{const ids=taskIds.filter(id=>!isVoidedTask(state.tasks.find(task=>task.id===id)));await registerAuditDelivery(ids,'review-audit');}});
 const diagnosticManager=createDiagnosticManager({getToken:()=>workspace.token,getDialog:()=>dialog,openDialog,renderDialog,download});
-const workspaceBackupManager=createWorkspaceBackupManager({getToken:()=>workspace.token,getDialog:()=>dialog,openDialog,renderDialog,download,reload:()=>location.reload(),getStatus:()=>({saving,hasPending:workspace.hasPending,conflicted:workspace.conflicted,readOnly:persistenceBlocked,revision:workspace.revision,editing:Boolean(dialog&&!['workspace-backup','workspace-usage','shortcuts-help','help'].includes(dialog.type)),suspendedDraft:Boolean(suspendedTaskDraft),composing:Boolean(composingInput),timerPending:rawReviewTimer.pendingCount>0}),onReloadRequired:()=>{clearTimeout(pollTimer);persistenceBlocked=true;contentTranslations.stop();workflowManager.stop();rawWorkbenchManager.stop();businessExportManager.setActive(false);}});
+const workspaceBackupManager=createWorkspaceBackupManager({getToken:()=>workspace.token,getDialog:()=>dialog,openDialog,renderDialog,download,reload:()=>location.reload(),getStatus:()=>({saving,hasPending:workspace.hasPending,conflicted:workspace.conflicted,readOnly:persistenceBlocked,revision:workspace.revision,editing:Boolean(dialog&&!['workspace-backup','workspace-usage','shortcuts-help','help'].includes(dialog.type)),suspendedDraft:Boolean(suspendedTaskDraft),composing:Boolean(composingInput),timerPending:rawReviewTimer.pendingCount>0}),onReloadRequired:()=>{clearTimeout(pollTimer);persistenceBlocked=true;adminDraftTranslations.stop();contentTranslations.stop();workflowManager.stop();rawWorkbenchManager.stop();businessExportManager.setActive(false);}});
 const pendingResolutionManager=createPendingResolutionManager({getState:()=>scoped(),getUI:()=>ui,getDialog:()=>dialog,openDialog,closeDialog,renderDialog,render,commit,selectSession,now:reviewNow});
 const cleaningManager=createConversationCleaningManager({configureModel:origin=>openModelSettings({returnDialog:origin}),getState:()=>state,getDialog:()=>dialog,getModelConfig:()=>ui.modelConfig,openDialog,closeDialog:()=>closeDialog({force:true}),renderDialog,toast,
   prepareConversationCleaning:(input,options)=>workspace.prepareConversationCleaning(input,options),uploadSource:file=>workspace.uploadSource(file),
@@ -183,7 +187,7 @@ function setMode(mode){
   Object.assign(ui,{reviewStatus:'待确认',reviewQuery:'',taskQuery:'',taskStatus:'全部',showReviewRecords:false,selectedId:'',openRules:[],highlightedTurns:[]});
   const session=scoped().sessions[0];if(session)selectSession(session.id,false);
 }
-function adoptWorkspace(value){state=value.state;catalog=value.catalog;applyBundledRuleEnglish(catalog,state);ui.aiRuntime=value.aiRuntime||ui.aiRuntime;catalogManager.replaceCatalog(catalog);storageWarning=value.aiRuntime?.error||'';persistenceBlocked=false;}
+function adoptWorkspace(value){state=value.state;catalog=value.catalog;applyBundledRuleEnglish(catalog,state);ui.aiRuntime=value.aiRuntime||ui.aiRuntime;catalogManager.replaceCatalog(catalog);storageWarning=value.aiRuntime?.error||'';persistenceBlocked=false;workspaceLoadFailed=false;workspaceReadFailures=0;}
 function lockSaving(value){
   saving=value;document.body.classList.toggle('workspace-saving',value);
   for(const el of document.querySelectorAll('button,input,select,textarea')){
@@ -273,7 +277,8 @@ function render(){
   renderDialog(false);
   businessExportManager.setActive(page[0]==='exports'&&businessAvailable);
   rawReviewTimer.sync();
-  if(ui.page==='review'&&current())reasonTranslations.ensure(current());
+  if(ui.page==='review'&&current())reasonTranslations.ensure(current(),{task:state.tasks.find(task=>task.id===current().taskId)});
+  if(ui.page==='exports')for(const session of exportSessions(scoped(),ui).slice(0,7))reasonTranslations.ensure(session,{task:state.tasks.find(task=>task.id===session.taskId)});
 }
 function redrawLocalized(){
   // Rendering a translated view must not replace unsaved user input with a
@@ -296,6 +301,7 @@ function renderDialog(force=true){
   const root=document.getElementById('overlay-root');
   importDraftManager.schedule();
   if(!dialog){if(!closingOverlay)root.replaceChildren();return;}
+  adminDraftTranslations.ensure(dialog);
   if(!force&&root.firstElementChild){refreshDialogRecovery();return;}
   root.inert=false;root.removeAttribute('aria-hidden');delete root.dataset.closing;
   const taskRuleViewport=dialog.type==='new-task'&&dialog.mode==='manual'&&dialog.step===3?captureTaskRuleViewport(root):null;
@@ -527,14 +533,18 @@ async function runAiTask(taskId){
 }
 function scheduleWorkspacePoll(){
   clearTimeout(pollTimer);pollTimer=setTimeout(async()=>{
+    if(workspaceLoadFailed&&!workspaceBackupManager.requiresReload&&!workspaceBackupManager.blocksWorkspaceWrites&&!saving&&!dialog&&!composingInput&&!workspace.hasPending&&!workspace.conflicted){
+      try{adoptWorkspace(await workspace.load());render();}
+      catch{workspaceReadFailures++;storageWarning=getLocale()==='en'?'Workspace loading is delayed. Retrying automatically; saved records are retained. Editing unlocks after recovery.':'工作区读取暂时未完成，正在自动重试；已保存记录保留，恢复后自动解除只读。';renderStorageWarning();}
+    }
     if(!persistenceBlocked&&!workspaceBackupManager.requiresReload&&!saving&&!dialog&&!composingInput&&!workspace.hasPending&&!workspace.conflicted){
       try{
         const revision=workspace.revision,value=await workspace.refresh(()=>!saving&&!dialog&&!composingInput);
-        if(value){adoptWorkspace(value);if(value.revision!==revision||value.aiRuntime?.error)render();}
-      }catch(error){if(state.tasks.some(t=>t.aiStatus==='running')){storageWarning='暂时无法读取AI进度，已保存的记录保留；请检查本机服务。';renderStorageWarning();}}
+        if(value){const hadWarning=Boolean(storageWarning);adoptWorkspace(value);if(value.revision!==revision||value.aiRuntime?.error)render();else if(hadWarning)renderStorageWarning();}
+      }catch(error){workspaceReadFailures++;storageWarning=getLocale()==='en'?'Progress refresh is delayed. Retrying automatically; saved records and current inputs are retained.':'进度刷新暂时延迟，正在自动重试；已保存记录与当前输入保留。';renderStorageWarning();}
     }
     scheduleWorkspacePoll();
-  },1500);
+  },workspaceRecoveryDelay(workspaceReadFailures));
 }
 
 document.addEventListener('click',async event=>{
@@ -564,7 +574,8 @@ document.addEventListener('click',async event=>{
     }
     if(action==='reload-build'){location.reload();return;}
     if(action==='task-problem-summary'){const task=state.tasks.find(t=>t.id===id);if(task){const text=taskProblemSummary(task,ui.buildInfo||{version:workspace.snapshot?.productVersion});try{await navigator.clipboard.writeText(text);toast(getLocale()==='en'?'Problem summary copied':'问题摘要已复制');}catch{download(text,'quality-problem-summary.json','application/json');}}return;}
-    if(action==='reason-translation-retry'){if(current())reasonTranslations.ensure(current(),{retry:true});return;}
+    if(action==='admin-draft-translation-retry'){adminDraftTranslations.ensure(dialog,{retry:true});return;}
+    if(action==='reason-translation-retry'){const session=button.dataset.session?state.sessions.find(s=>s.id===button.dataset.session):current();if(session)reasonTranslations.ensure(session,{retry:true,task:state.tasks.find(task=>task.id===session.taskId)});return;}
     if(action==='ui-locale'){setLocale(button.dataset.locale);document.title=uiT('会话质检工作台');redrawLocalized();return;}
     if(await ecommerceConversionManager.action(action,button))return;
     if(await importDraftManager.action(action,button))return;
@@ -842,7 +853,7 @@ window.addEventListener('beforeunload',event=>{if(workspaceBackupManager.isBusy)
 matchMedia('(prefers-reduced-motion: reduce)').addEventListener('change',event=>{if(event.matches){cancelAllMotion();if(closingOverlay)finishOverlayClose?.();}});
 if(navigation.some(n=>n[0]===location.hash.slice(1)))ui.page=location.hash.slice(1);
 setLocale(getLocale());document.title=uiT('会话质检工作台');
-window.addEventListener('pagehide',()=>{contentTranslations.stop();reasonTranslations.stop();});
+window.addEventListener('pagehide',()=>{adminDraftTranslations.stop();contentTranslations.stop();reasonTranslations.stop();});
 setMode('manual');
 try{ui.modelConfig=await workspace.readModelConfig();}catch{ui.modelConfig={configured:false,keyConfigured:false,model:'glm-5.3-flash'};}
 render();

@@ -1,0 +1,29 @@
+import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs/promises';import path from 'node:path';
+import {languageNeutralLiteral,reusableEnglishBaseTranslation} from '../public/translation-language.mjs';
+import {prepareReportEnrichment,parseReportEnrichment} from '../server/report-enrichment.mjs';
+import {createTranslationJobs} from '../server/translation-jobs.mjs';
+import {translationHash} from '../server/translation-source.mjs';
+const literals=['12345','🙂🔋','USB-C 123','P70','EC-TARGET','v1.2','0xFF','2026-11-25','— + /'],prose=['El cliente solicita ayuda.','El cliente solicita ayuda','The customer needs help.','Le client demande de l’aide.','El cliente P70','USB-C requiere ayuda','客服需要帮助。'];
+const parse=(source,targetLang='en')=>parseReportEnrichment(JSON.stringify({items:[{id:'t',translation:source,isTargetLanguage:false,detectedLanguage:'und'}]}),prepareReportEnrichment('translation',{targetLang,items:[{id:'t',text:source}]}));
+
+test('und accepts neutral literals and explicit code tokens, never Latin prose',()=>{
+ for(const source of literals){assert.equal(languageNeutralLiteral(source),true,source);assert.equal(reusableEnglishBaseTranslation(source,{status:'translated',text:source,detectedLanguage:'und'}),true,source);for(const target of ['en','zh'])assert.equal(parse(source,target).items[0].translation,source);}
+ for(const source of prose){assert.equal(languageNeutralLiteral(source),false,source);assert.equal(reusableEnglishBaseTranslation(source,{status:'translated',text:source,detectedLanguage:'und'}),false,source);for(const target of ['en','zh'])assert.throws(()=>parse(source,target),source);}
+ assert.equal(reusableEnglishBaseTranslation('12345',{status:'translated',text:'12346',detectedLanguage:'und'}),false);
+ assert.equal(reusableEnglishBaseTranslation('The customer needs help.',{status:'same',text:'The customer needs help.',detectedLanguage:'en'}),true);
+ assert.equal(reusableEnglishBaseTranslation(prose[0],{status:'translated',text:'The customer asks for help.',detectedLanguage:'es'}),true);
+});
+
+test('actual jobs reject Spanish und, retain literal results and reject poisoned saved/cache und on restart',async t=>{
+ const base=path.resolve('../outputs/service01123-20261125/translation-und/tests');await fs.mkdir(base,{recursive:true});const dir=await fs.mkdtemp(path.join(base,'case-'));
+ const spanish=prose[0],english='The customer asks for help.',sources=[spanish,'12345','🙂🔋','USB-C 123'],doc={revision:23,catalog:{},state:{tasks:[{id:'T'}],sessions:[{id:'S',taskId:'T',aiResults:sources.map((reason,i)=>({ruleId:'R'+i,reason}))}]}},before=JSON.stringify(doc),source={kind:'session-display',taskId:'T',sessionId:'S'},calls=[];let valid=false;
+ const options={dataDir:dir,store:{read:async()=>structuredClone(doc)},modelConfig:{getPrivate:()=>({configured:true,baseUrl:'http://127.0.0.1:1',model:'synthetic',authMode:'none'})},maxAttempts:1,retryDelayMs:0,client:{async enrichBusinessReport({input}){calls.push(structuredClone(input));return{items:input.items.map(item=>({id:item.id,translation:valid&&item.text===spanish?english:item.text,isTargetLanguage:false,detectedLanguage:valid&&item.text===spanish?'es':'und'}))};}}};
+ let service=await createTranslationJobs(options);t.after(async()=>{await service.close();assert.ok(path.resolve(dir).startsWith(base+path.sep));await fs.rm(dir,{recursive:true,force:true});});
+ await service.create({jobId:'und-gate',source,targetLang:'en'});await service.waitForIdle();let result=await service.getResult('und-gate');assert.equal(result.job.status,'completed_with_warnings');assert.equal(result.translations.find(item=>item.sourceText===spanish).status,'failed');for(const literal of sources.slice(1))assert.equal(result.translations.find(item=>item.sourceText===literal).text,literal);
+ valid=true;await service.retry('und-gate');await service.waitForIdle();result=await service.getResult('und-gate');assert.equal(result.job.status,'completed');assert.deepEqual(calls.at(-1).items.map(item=>item.text),[spanish]);assert.equal(result.translations.find(item=>item.sourceText===spanish).text,english);await service.close();
+ const jobDir=path.join(dir,'content-translations','und-gate'),jobFile=path.join(jobDir,'job.json'),job=JSON.parse(await fs.readFile(jobFile,'utf8'));
+ for(const unit of job.units){const file=path.join(jobDir,unit.id+'.json'),saved=JSON.parse(await fs.readFile(file,'utf8'));for(const item of saved.value.items)if(item.translation===english){item.translation=spanish;item.detectedLanguage='und';}saved.sha256=translationHash(saved.value);unit.resultSha256=saved.sha256;await fs.writeFile(file,JSON.stringify(saved));}await fs.writeFile(jobFile,JSON.stringify(job));
+ for(const name of await fs.readdir(path.join(dir,'translation-cache'))){const file=path.join(dir,'translation-cache',name),cache=JSON.parse(await fs.readFile(file,'utf8'));if(cache.value.translation===english){cache.value.translation=spanish;cache.value.detectedLanguage='und';cache.sha256=translationHash(cache.value);await fs.writeFile(file,JSON.stringify(cache));}}
+ const priorCalls=calls.length;service=await createTranslationJobs(options);result=await service.getResult('und-gate');assert.equal(result.job.status,'completed_with_warnings');assert.equal(result.translations.find(item=>item.sourceText===spanish).status,'failed');assert.equal(calls.length,priorCalls);
+ await service.retry('und-gate');await service.waitForIdle();result=await service.getResult('und-gate');assert.equal(result.job.status,'completed');assert.deepEqual(calls.at(-1).items.map(item=>item.text),[spanish]);assert.equal(result.translations.find(item=>item.sourceText===spanish).text,english);for(const literal of sources.slice(1))assert.equal(result.translations.find(item=>item.sourceText===literal).text,literal);assert.equal(JSON.stringify(doc),before);
+});

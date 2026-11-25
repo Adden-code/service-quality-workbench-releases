@@ -73,10 +73,10 @@ test('Chinese-only, product-code padded, und and forged same base translations s
  }
 });
 
-test('English base reuse accepts grounded retained brand names, verified exact English and und literals',async()=>{
+test('English base reuse accepts transliterated brand names, verified exact English and und literals',async()=>{
  const {collectReportTranslationFields,createReportLocale}=await implementation();
  for(const[source,entry]of[
-  ['华为 P70屏幕清晰，支持无线充电。',{status:'translated',text:'The 华为 P70 has a clear display and supports wireless charging.',detectedLanguage:'zh'}],
+  ['华为 P70屏幕清晰，支持无线充电。',{status:'translated',text:'The Huawei P70 has a clear display and supports wireless charging.',detectedLanguage:'zh'}],
   ['The customer needs product information.',{status:'same',text:'The customer needs product information.',detectedLanguage:'en'}],
   ['12345',{status:'translated',text:'12345',detectedLanguage:'und'}],
  ]){const {snapshot,enrichment}=reportFixture();snapshot.targetLang='en';snapshot.records[0].raw22[8]=source;enrichment.translations['case-good'].comment=entry;assert.ok(!collectReportTranslationFields(snapshot,enrichment).some(field=>field.id==='record.case-good.comment'));assert.equal(createReportLocale(snapshot,enrichment,{language:'en'}).display(source),entry.text);}

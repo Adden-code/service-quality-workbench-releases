@@ -29,7 +29,7 @@ test('English static templates preserve raw interpolation and canonical option v
     const result=html`<label title="人工结论">人工结论<select><option value="符合">符合</option></select>${e(raw)}</label>`;
     assert.match(result,/Human verdict/);assert.match(result,/value="符合"/);assert.match(result,/>Pass<\/option>/);
     assert.ok(result.includes(e(raw)));assert.equal(e(raw),'原始业务事实：符合，客户原话 &lt;script&gt;');
-    assert.equal(translateError(''),'');assert.match(translateError(new Error('未知内部中文错误')),/original|Original/);assert.doesNotMatch(translateError(new Error('未知内部中文错误')),/^未知/);
+    assert.equal(translateError(''),'');assert.doesNotMatch(translateError(new Error('未知内部中文错误')),/[\u3400-\u9fff]/u);assert.doesNotMatch(translateError(new Error('未知内部中文错误')),/^未知/);
   }finally{setLocale('zh');}
 });
 

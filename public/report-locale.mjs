@@ -110,11 +110,11 @@ export function collectReportTranslationFields(snapshot,enrichment={}){
    if(entry?.status==='completed')for(const field of customFields){const item=array(entry.fields).find(item=>item.id===field.id);if(item&&!item.missing&&(field.type!=='quote'||groundedReportQuote(record,item.value,item.turnId)))add([...prefix,'field',field.id],item.value);}
   }
  }
+ if(sections.includes('cases'))array(enrichment.excellentCases).forEach((item,index)=>{const record=array(snapshot?.records).find(record=>record.id===item.id);if(!record)return;add(['excellent',index,'commentary'],item.commentary);if(readable(item.quote)&&(record.raw22?.[9]?.includes(item.quote)||record.conversation?.includes(item.quote)||array(record.turns).some(turn=>turn.text?.includes(item.quote))))add(['excellent',index,'quote'],item.quote);});
  if(!consultation){
-  array(enrichment.excellentCases).forEach((item,index)=>{const record=array(snapshot?.records).find(record=>record.id===item.id);if(!record)return;add(['excellent',index,'commentary'],item.commentary);if(readable(item.quote)&&record.raw22?.[9]?.includes(item.quote))add(['excellent',index,'quote'],item.quote);});
   array(enrichment.vocItems).forEach((item,index)=>{if(!array(snapshot?.records).some(record=>record.id===item.id))return;for(const key of ['scene','painPoint','reason','evidenceQuote'])add(['voc',index,key],item[key]);});
  }
- if(!consultation||sections.includes('improvements'))visibleReportClusters(snapshot,enrichment).forEach(({item,index})=>{for(const key of ['label','summary','action'])add(['cluster',index,key],item[key]);if(hasReportClusterPolicy(snapshot)){add(['cluster',index,'primaryLabel'],item.primaryLabel);for(const key of ['summary','action'])reportClusterTextParts(item,key).forEach((part,partIndex)=>add(['cluster',index,key,'part',partIndex],part));}});
+ if(!consultation||sections.includes('improvements'))visibleReportClusters(snapshot,enrichment).forEach(({item,index})=>{for(const key of ['label','summary','action'])add(['cluster',index,key],item[key]);for(const [key,plural]of[['summary','summaries'],['action','actions']]){array(item[plural]).forEach((part,partIndex)=>add(['cluster',index,key,'part',partIndex],part));add(['cluster',index,key,'joined'],array(item[plural]).join('\n'));}if(hasReportClusterPolicy(snapshot)){add(['cluster',index,'primaryLabel'],item.primaryLabel);for(const key of ['summary','action'])reportClusterTextParts(item,key).forEach((part,partIndex)=>add(['cluster',index,key,'part',partIndex],part));}});
  return fields;
 }
 
@@ -130,7 +130,7 @@ export function createReportLocale(snapshot,enrichment={},options={}){
  // source-bound same result still passes the shared Latin-source check.
  const state=(id,source)=>{const reusedValue=reused.get(id);if(reusedValue?.source===source)return reusedValue;const field=byId.get(id),entry=entries.get(id);if(!field||field.text!==source)return{status:'missing',text:''};const checked=entry?.status==='same'&&entry.detectedLanguage===undefined?{...entry,detectedLanguage:'en'}:entry;if(reusableEnglishBaseTranslation(source,checked))return{status:entry.status,text:entry.status==='same'?source:entry.text};return{status:entry?.status==='failed'?'failed':entry?.status==='pending'?'pending':'missing',text:''};};
  const lookup=source=>{const ids=byText.get(source)||[];return ids.map(id=>state(id,source)).find(value=>['same','translated'].includes(value.status))||reusedByText.get(source)||ids.map(id=>state(id,source)).find(value=>value.status==='failed')||ids.map(id=>state(id,source)).find(value=>value.status==='pending')||{status:'missing',text:''};};
- const fallback=(value,source)=>`${source} [Untranslated: ${value.status==='failed'?'translation failed':value.status==='pending'?'translation pending':'English translation unavailable'}]`;
+ const fallback=value=>`[Untranslated: ${value.status==='failed'?'translation failed':value.status==='pending'?'translation pending':'English translation unavailable'}]`;
  const text=(id,source)=>{source=String(source??'');if(language==='zh'||!source.trim())return source;const value=state(id,source);return value.text||fallback(value,source);};
  const display=source=>{source=String(source??'');if(language==='zh'||!source.trim())return source;const value=lookup(source);return value.text||fallback(value,source);};
  const sourceLabel=source=>{source=String(source??'');if(language==='zh'||!source.trim())return source;const value=lookup(source);return value.text?value.text===source?source:`${value.text} [Original: ${source}]`:`[Original: ${source}]`;};

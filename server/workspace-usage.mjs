@@ -9,7 +9,7 @@ function group(name){
  if(['report-jobs','raw-structure-jobs'].includes(name))return 'reports';
  if(name==='content-translations')return 'translations';
  if(['report-cache','translation-cache'].includes(name))return 'cache';
- if(name==='import-drafts')return 'drafts';
+ if(['import-drafts','admin-drafts'].includes(name))return 'drafts';
  if(name==='backups')return 'backups';
  if(name==='.secrets')return 'settings';
  return 'other';

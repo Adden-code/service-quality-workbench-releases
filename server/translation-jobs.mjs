@@ -7,7 +7,7 @@ import {createTranslationJobStore,translationStorageError} from './translation-j
 import {TranslationJobError,translationJobId,translationSource,freezeTranslationSource,translationHash} from './translation-source.mjs';
 import {modelConfigSnapshot,modelConfigFingerprint} from './model-config.mjs';
 import {prepareReportEnrichment,parseReportEnrichment,REPORT_ENRICHMENT_PROMPT_VERSION,REPORT_TRANSLATION_PROMPT_VERSION} from './report-enrichment.mjs';
-import {plausibleEnglishTranslation} from '../public/translation-language.mjs';
+import {plausibleEnglishTranslation,languageNeutralLiteral} from '../public/translation-language.mjs';
 
 export const CONTENT_TRANSLATION_PROMPT_VERSION=`content-translation-v2:${REPORT_ENRICHMENT_PROMPT_VERSION}:translation`;
 // Persisted job/plan identity stays load-compatible; only reusable cache entries
@@ -42,7 +42,7 @@ function invalidOutput(){throw Object.assign(new Error(messages.invalid_output),
 function validateOutput(value,input){
  const prepared=prepareReportEnrichment('translation',input),output=parseReportEnrichment(JSON.stringify({items:value?.items}),prepared),originals=new Map(input.items.map(item=>[item.id,item.text]));
  for(const item of output.items){const raw=value.items.find(raw=>raw.id===item.id),original=originals.get(item.id);if(item.isTargetLanguage&&raw.translation!==original)invalidOutput();
-  if(item.detectedLanguage==='und'&&(item.translation!==original||[...original].some(character=>/\p{L}/u.test(character)&&!/[\p{Script=Latin}]/u.test(character))))invalidOutput();
+  if(item.detectedLanguage==='und'&&(item.translation!==original||!languageNeutralLiteral(original)))invalidOutput();
   if(!item.isTargetLanguage&&item.detectedLanguage!=='und'&&/\p{L}/u.test(original)){
    if(input.targetLang==='en'&&!plausibleEnglishTranslation(item.translation,original))invalidOutput();
    if(input.targetLang==='zh'&&!/\p{Script=Han}/u.test(item.translation))invalidOutput();
@@ -51,7 +51,7 @@ function validateOutput(value,input){
 async function abortable(operation,signal){if(signal.aborted)throw Object.assign(new Error('interrupted'),{code:'INTERRUPTED'});let cancel;try{return await Promise.race([Promise.resolve().then(operation),new Promise((_,reject)=>{cancel=()=>reject(Object.assign(new Error('interrupted'),{code:'INTERRUPTED'}));signal.addEventListener('abort',cancel,{once:true});})]);}finally{if(cancel)signal.removeEventListener('abort',cancel);}}
 
 // New-job defaults never migrate the concurrency of an existing saved job.
-export async function createTranslationJobs({dataDir,store,modelConfig,client,traceStore,reportJobs,collectReportFields,fsOps,maxAttempts=2,retryDelayMs=500,concurrency=4,onError=()=>{}}={}){
+export async function createTranslationJobs({dataDir,store,modelConfig,client,traceStore,reportJobs,collectReportFields,adminDrafts,fsOps,maxAttempts=2,retryDelayMs=500,concurrency=4,onError=()=>{}}={}){
  if(!Number.isSafeInteger(maxAttempts)||maxAttempts<1||maxAttempts>3||!Number.isSafeInteger(retryDelayMs)||retryDelayMs<0||retryDelayMs>60000)throw new TypeError('Invalid translation retry budget.');
  if(!validJobConcurrency(concurrency))throw new TypeError('Translation concurrency must be an integer from 2 to 4.');
  const files=await createTranslationJobStore({dataDir,...(fsOps?{fsOps}:{})}),jobs=new Map(),snapshots=new Map(),outputs=new Map(),active=new Map();let closing=false,closePromise,serialTail=Promise.resolve(),pendingOperations=0;
@@ -163,7 +163,7 @@ export async function createTranslationJobs({dataDir,store,modelConfig,client,tr
   create(input){return serial(async()=>{
    if(closing)throw new TranslationJobError('服务正在关闭，无法创建翻译任务。',503);
    if(!input||typeof input!=='object'||Array.isArray(input)||Object.keys(input).some(key=>!['jobId','source','targetLang','concurrency'].includes(key))||(input.concurrency!==undefined&&!validJobConcurrency(input.concurrency))||!['zh','en'].includes(input.targetLang))throw new TranslationJobError('翻译任务参数无效。');
-   const id=translationJobId(input.jobId),source=translationSource(input.source),{snapshot,sourceFingerprint}=await freezeTranslationSource({source,store,reportJobs,collectReportFields});if(closing)throw new TranslationJobError('服务正在关闭，无法创建翻译任务。',503);
+   const id=translationJobId(input.jobId),source=translationSource(input.source),{snapshot,sourceFingerprint}=await freezeTranslationSource({source,store,reportJobs,collectReportFields,adminDrafts});if(closing)throw new TranslationJobError('服务正在关闭，无法创建翻译任务。',503);
    const config=modelConfig.getPrivate(),model=modelConfigSnapshot(config),fingerprint=modelConfigFingerprint(model);
    if(jobs.has(id)){const old=find(id);if(old.sourceFingerprint!==sourceFingerprint||old.targetLang!==input.targetLang||old.modelConfigFingerprint!==fingerprint)throw new TranslationJobError('相同翻译任务标识对应不同来源、语种或模型设置，不能覆盖。',409);return summary(await visibleJob(old));}
    const createdAt=now(),job={schemaVersion:1,id,status:'running',source,concurrency:input.concurrency??concurrency,targetLang:input.targetLang,sourceFingerprint,createdAt,updatedAt:createdAt,modelConfig:model,modelConfigFingerprint:fingerprint,promptVersion:CONTENT_TRANSLATION_PROMPT_VERSION,units:plan(snapshot,input.targetLang,fingerprint).units,traceRunIds:[],round:1,resumeCount:0};

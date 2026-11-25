@@ -1,3 +1,4 @@
+import {reportOriginalAuditSheet} from './report-original-audit.mjs';
 import {hasReportClusterPolicy,reportClusterTextParts} from './report-issue-clusters.mjs';
 import {appendEvidenceSheets} from './evidence-audit.mjs';
 import {workbook} from './io.mjs';
@@ -60,7 +61,7 @@ export function englishMethodologyRows(snapshot,enrichment,locale,options={}){
   const sectionLabels={overview:'Overall quality',breakdown:'Quality by frozen group',dimensions:'Actual rule categories',cases:'Error cases',improvements:'Issue clusters and improvements',voc:unverifiedRoleEvidence(snapshot)?'Conversation concern leads — Roles unverified':'Negative and neutral VOC'},fieldLabels=unverifiedRoleEvidence(snapshot)?{salesStage:'Sales stage / substage',intent:'Conversation intent lead — Roles unverified',demandSummary:'Conversation concern lead — Roles unverified',negativeVoice:'Conversation evidence — Roles unverified'}:{salesStage:'Sales stage / substage',intent:'Customer intent',demandSummary:'Customer demand summary',negativeVoice:'Negative customer voice'};
   rows.push(['Scenario ID',scenario.id],['Scenario name — English view',locale.display(scenario.name)],['Scenario version',scenario.version],['Report title — English view',locale.display(scenario.report?.title||'')],['Report group label — English view',locale.display(scenario.report?.groupLabel||'')],['Report grouping key',scenario.report?.groupBy||''],['Report grouping source field',scenario.report?.groupField||''],['Enabled report modules',array(scenario.report?.sections).map(key=>sectionLabels[key]||key).join('; ')],['Selected analysis fields',[...array(scenario.analysisFields).map(key=>fieldLabels[key]||key),...array(scenario.customFields).map(field=>locale.display(field.label))].join('; ')||'None']);
  }
- for(const warning of array(enrichment.warnings))rows.push(['Base analysis warning — Original',typeof warning==='string'?warning:String(warning.message||warning.error||warning.kind||'Auxiliary analysis warning')]);
+ if(array(enrichment.warnings).length)rows.push(['Base analysis warnings',String(enrichment.warnings.length)+' saved warnings; see Original AI Audit.']);
  return rows;
 }
 function safeSheetName(value,used){const base=String(value).replace(/[\\/?*\[\]:]/g,'_').slice(0,31)||'Original';let name=base,index=2;while(used.has(name))name=base.slice(0,27)+'_'+index++;used.add(name);return name;}
@@ -107,7 +108,8 @@ export async function buildEnglishDeliveryXlsx(snapshot,enrichment={},options={}
   sheets.push({name:'Source Column Map',headers:['Source physical column','Output column','Original header','Column type','Mapping basis'],rows:ecommerceSourceMappingRows(snapshot).map(row=>[...row.slice(0,4),row[4]==='user-reviewed-mapping'?'User-reviewed source mapping (fields and original sample confirmed separately)':row[4]==='legacy-relative-core-order'?'All 22 identified core fields retain their legacy relative order (including overlapping Region aliases)':row[4]==='unique-header'?'Unique header identification':'Original relative extension order'])});
  }
  if(consultation)sheets.push({name:'Frozen Rules',headers:['Rule ID','Original title','English title','Original category','English category','Version'],rows:snapshot.basis.rules.map(rule=>[rule.id,rule.title||rule.name||rule.id,locale.display(rule.title||rule.name||rule.id),rule.category||'',rule.category?locale.display(rule.category):'',rule.version||''])});
- const analysis=analysisRows(snapshot,enrichment,locale,config);if(analysis.length)sheets.push({name:'Business Analysis',headers:['Analysis kind','Record or cluster ID','Field','English view','Original'],rows:analysis});
+ sheets.push(reportOriginalAuditSheet(snapshot,enrichment));
+ const analysis=analysisRows(snapshot,enrichment,locale,config);if(analysis.length)sheets.push({name:'Business Analysis',headers:['Analysis kind','Record or cluster ID','Field','English view'],rows:analysis.map(row=>row.slice(0,4))});
  const provenance=resultProvenanceSheet(snapshot,'en');if(provenance)sheets.push(provenance);
  const used=new Set(sheets.map(sheet=>sheet.name));
  for(const extra of array(snapshot.original?.additionalSheets))sheets.push({name:safeSheetName(`Original_${extra.sheetName}`,used),headers:[...extra.headers],rows:[...extra.rows].sort((a,b)=>a.sourceRow-b.sourceRow).map(row=>Array.from({length:extra.headers.length},(_,index)=>row.values[index]??'')),rowNumbers:[...extra.rows].sort((a,b)=>a.sourceRow-b.sourceRow).map(row=>row.sourceRow)});

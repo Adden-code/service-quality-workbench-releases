@@ -8,7 +8,7 @@ import {WorkspaceError,validateWorkspace} from './workspace-validation.mjs';
 const MAGIC=Buffer.from('SQWB0001');
 export const MAX_BACKUP_BYTES=512*1024*1024;
 const MAX_MANIFEST=8*1024*1024,MAX_FILE=64*1024*1024,MAX_FILES=20000;
-const roots=new Set(['sources','workflow-runs','report-jobs','raw-structure','content-translations','report-cache','translation-cache','import-drafts','backups']);
+const roots=new Set(['sources','workflow-runs','report-jobs','raw-structure','content-translations','report-cache','translation-cache','import-drafts','admin-drafts','backups']);
 const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
 const fail=message=>{throw new WorkspaceError(message,400);};
 const transient=name=>/^\..*\.tmp$/.test(name)||/^\.(workspace|workflow)\.lock(?:\.recovery)?$/.test(name);

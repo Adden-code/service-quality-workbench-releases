@@ -1,27 +1,20 @@
-/** A bounded target-language check, not a translation-quality or meaning check.
- * English must dominate; retained source-script names must be short and grounded.
- * Shared by the translation job service and legacy report-cache reuse.
- */
+/** Script gate for an English display value, not semantic language detection.
+ * Source-language names and quotations stay in Original/audit fields. */
+export function englishDisplayText(text){return typeof text==='string'&&Boolean(text.trim())&&![...text].some(character=>/\p{L}/u.test(character)&&!/\p{Script=Latin}/u.test(character));}
 export function plausibleEnglishTranslation(text,original){
- if(typeof text!=='string'||typeof original!=='string')return false;
- const letters=[...text].filter(character=>/\p{L}/u.test(character)),latin=letters.filter(character=>/\p{Script=Latin}/u.test(character)).length;
- if(!letters.length||latin/letters.length<0.6)return false;
- const retained=text.match(/[^\p{Script=Latin}\P{L}](?:[^\p{Script=Latin}\P{L}]|\p{M})*/gu)||[];
- if(!retained.every(value=>[...value].length<=32&&original.includes(value)))return false;
- // Bounded name exception, not a semantic language detector: every line with
- // CJK text needs English prose (>=60% Latin letters). An isolated CJK line is
- // explicitly missing, even if it could be a legitimate company name.
- const cjk=/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
- for(const line of text.split(/\r\n|[\n\r\u2028\u2029]/u))if(cjk.test(line)){
-  const script=[...line].filter(character=>/\p{L}/u.test(character));
-  if(script.filter(character=>/\p{Script=Latin}/u.test(character)).length/script.length<0.6)return false;
- }
- // Punctuation, digits and whitespace cannot split a copied paragraph into
- // separate names. In each such CJK cluster allow <=2 distinct grounded names,
- // <=32 code points after deduplication. Repeats do not consume another budget;
- // real English words separate clusters, so conversations have no global cap.
- const clusters=text.match(/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}][\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{M}\p{N}\p{P}\p{Z}\s]*/gu)||[];
- return clusters.every(cluster=>{const names=[...new Set(cluster.match(/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}](?:[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]|\p{M})*/gu)||[])];return names.length<=2&&names.reduce((count,name)=>count+[...name].length,0)<=32;});
+ return typeof original==='string'&&englishDisplayText(text)&&/\p{L}/u.test(text);
+}
+
+/** A bounded lexical exception for und, not language detection. Each token
+ * containing letters must have an explicit code shape; prose still needs a
+ * verified language result even when all its letters use the Latin script. */
+export function languageNeutralLiteral(text){
+ if(typeof text!=='string'||!text.trim())return false;
+ return text.trim().split(/\s+/u).every(token=>{
+  if(!/\p{L}/u.test(token))return true;
+  if(!/^[A-Za-z0-9]+(?:[-_./:+][A-Za-z0-9]+)*$/.test(token))return false;
+  return /[0-9]/.test(token)||/^[A-Z0-9]+(?:[-_./:+][A-Z0-9]+)+$/.test(token);
+ });
 }
 
 export function reusableEnglishBaseTranslation(source,entry){
@@ -31,9 +24,8 @@ export function reusableEnglishBaseTranslation(source,entry){
  // parser's English detection permits Latin-script letters only for same=true.
  if(entry.status==='same')return entry.detectedLanguage==='en'&&entry.text===source&&sourceLetters.length>0&&onlyLatin;
  if(entry.status!=='translated')return false;
- // "und" is reserved for unchanged literals; it cannot bypass translation of
- // Chinese or other non-Latin source text, even with an English-looking output.
- if(entry.detectedLanguage==='und')return entry.text===source&&onlyLatin;
+ // "und" cannot bypass language confirmation for Latin-script prose either.
+ if(entry.detectedLanguage==='und')return entry.text===source&&languageNeutralLiteral(source);
  if(!sourceLetters.length)return entry.text===source;
  return plausibleEnglishTranslation(entry.text,source);
 }

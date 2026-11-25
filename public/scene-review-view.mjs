@@ -1,9 +1,9 @@
-import {reasonText} from './reason-translation.mjs';
+import {reasonText,reasonContent} from './reason-translation.mjs';
 import {hasUnverifiedEvidence} from './evidence-status.mjs';
 import {capabilityHelpActions,capabilityName} from './task-diagnostics.mjs';
 import {classificationReviewForm} from './ecommerce-classification-review.mjs';
 import {e} from './ui.mjs';
-import {getLocale} from './i18n.mjs';
+import {getLocale,t} from './i18n.mjs';
 import {derivedOverall} from './scene-aggregate.mjs';
 export function sceneAggregateNotice(state,session,results){
  const task=state.tasks.find(t=>t.id===session.taskId),summary=derivedOverall(task?.executionSnapshot,results.map(r=>({...r,verdict:r.final?.verdict||r.verdict})));if(!summary)return'';
@@ -25,14 +25,15 @@ const businessTerms={
 };
 export function reviewBusinessText(value,english=getLocale()==='en'){
  const text=typeof value==='string'?value:'',known=businessTerms[text];if(known)return known[english?1:0];
+ if(['符合','不符合','不适用','无法判定','未执行','无补充说明','No additional note'].includes(text))return english?t(text):text;
  let result=text;for(const [key,labels]of Object.entries(businessTerms))result=result.replaceAll(key,labels[english?1:0]);
  // Unknown machine identifiers/JSON belong in the existing run diagnostics, never in the business review view.
  return /[{}]|\b[A-Za-z]+[._][A-Za-z]+\b/.test(result)?(english?'See run details for technical information.':'详细技术信息请在运行记录中查看。'):reasonText(text,english?'en':'zh');
 }
 export function sceneReviewEvidence(session,ruleId,classificationDraft){
  const outputs=session.sceneCapabilities?.outputs;if(!outputs)return ruleId==='EC-TIME'?classificationReviewForm(session,classificationDraft):'';const english=getLocale()==='en',metrics=outputs.timing?.metrics||[],L=(zh,en)=>english?en:zh,T=v=>e(reviewBusinessText(v,english));
- const rows=Object.entries(outputs).map(([key,value])=>`<tr><td>${e(capabilityName(key))}</td><td>${hasUnverifiedEvidence(value)?L('已产出 · 依据未核验','Produced · evidence unverified'):T(value.status||'未执行')}</td><td>${T(value.origin==='configuration-pending'||value.origin==='configuration.pending'?'configuration-pending':value.fallbackReason||value.reason||value.origin||L('无补充说明','No additional note'))}</td></tr>`).join('');
- return`${ruleId==='EC-TIME'?classificationReviewForm(session,classificationDraft):''}<details class="scene-review-evidence"><summary>${L('辅助判定与站点时效依据','Auxiliary evidence and site timing')}</summary><div class="table-wrap"><table><thead><tr>${[L('能力','Capability'),L('状态','Status'),L('说明','Explanation')].map(x=>`<th>${x}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table></div>${metrics.length?`<div class="table-wrap"><table><thead><tr>${(english?['Metric','Site','Standard','Actual values','Time source','Result']:['指标','站点','适用阈值','实际值','时间来源','判定']).map(x=>`<th>${x}</th>`).join('')}</tr></thead><tbody>${metrics.map(m=>`<tr><td>${T(m.metric)}</td><td>${T(m.siteId)}</td><td>${m.standard?`${e(m.standard.value)} ${T(m.standard.unit)}`:'—'}</td><td>${e((m.actual||[]).map(x=>`${x.topic||''}: ${x.value??'?'}`).join('；'))}</td><td>${T(m.timeSource||'—')}</td><td>${T(m.verdict||'无法判定')}</td></tr>`).join('')}</tbody></table></div>`:''}</details>`;
+ const rows=Object.entries(outputs).map(([key,value])=>`<tr><td>${e(capabilityName(key))}</td><td>${hasUnverifiedEvidence(value)?L('已产出 · 依据未核验','Produced · evidence unverified'):T(value.status||'未执行')}</td><td>${value.fallbackReason||value.reason?(businessTerms[value.fallbackReason||value.reason]?T(value.fallbackReason||value.reason):reasonContent(value.fallbackReason||value.reason)):T(value.origin==='configuration-pending'||value.origin==='configuration.pending'?'configuration-pending':value.origin||L('无补充说明','No additional note'))}</td></tr>`).join('');
+ return`${ruleId==='EC-TIME'?classificationReviewForm(session,classificationDraft):''}<details class="scene-review-evidence"><summary>${L('辅助判定与站点时效依据','Auxiliary evidence and site timing')}</summary><div class="table-wrap"><table><thead><tr>${[L('能力','Capability'),L('状态','Status'),L('说明','Explanation')].map(x=>`<th>${x}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table></div>${metrics.length?`<div class="table-wrap"><table><thead><tr>${(english?['Metric','Site','Standard','Actual values','Time source','Result']:['指标','站点','适用阈值','实际值','时间来源','判定']).map(x=>`<th>${x}</th>`).join('')}</tr></thead><tbody>${metrics.map(m=>`<tr><td>${T(m.metric)}</td><td>${e(m.siteId)}</td><td>${m.standard?`${e(m.standard.value)} ${T(m.standard.unit)}`:'—'}</td><td>${e((m.actual||[]).map(x=>`${reasonText(x.topic||'')}: ${x.value??'?'}`).join('；'))}</td><td>${T(m.timeSource||'—')}</td><td>${T(m.verdict||'无法判定')}</td></tr>`).join('')}</tbody></table></div>`:''}</details>`;
 }
 
 export function sceneCapabilityMonitor(task){

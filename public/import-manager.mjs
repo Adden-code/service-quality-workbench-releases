@@ -1,3 +1,5 @@
+import {rulePreparationFields} from './admin-draft-fields.mjs';
+import {refreshAdminDraftPreview} from './admin-draft-translation.mjs';
 import {html as uiHtml,uiLiteral,uiAttributes,t as uiT,translateError as uiError} from './i18n.mjs';
 import {createDraft} from './catalog.mjs';
 import {catalogRecordMatchesScene} from './catalog-scenes.mjs';
@@ -44,7 +46,7 @@ export function createImportManager(ctx){
   }
   const removePreview=selector=>{if(typeof document!=='undefined')for(const node of document.querySelectorAll?.(selector)||[])node.remove();};
   const invalidate=d=>{d.preview=null;d.error='';removePreview('#overlay-root .import-preview,#overlay-root [data-act="input-begin"]');};
-  const invalidateRules=d=>{d.prepared=null;d.candidates=[];d.savedSource=null;d.expectedSavedRules=null;d.saveConflict=false;d.error='';removePreview('#overlay-root .rule-import-candidates,#overlay-root .rule-import-meta,#overlay-root [data-act="rule-import-save"]');};
+  const invalidateRules=d=>{d.prepared=null;d.preparedEditorFields=null;d.candidates=[];d.savedSource=null;d.expectedSavedRules=null;d.saveConflict=false;d.error='';removePreview('#overlay-root [data-admin-draft-preview],#overlay-root details[data-dialog-disclosure="admin-draft-original"],#overlay-root .rule-import-candidates,#overlay-root .rule-import-meta,#overlay-root [data-act="rule-import-save"]');};
   function openMapping(profile=null,businessScene=''){
     const config=businessScene||profile?.scene?findScenario(ctx.getState(),businessScene||profile.scene,{includeDisabled:!businessScene}):null;
     if(businessScene&&(!config||config.engine!=='conversation'))throw new Error('场景未注册、已停用或需要专用导入入口，请重新选择。');
@@ -176,7 +178,7 @@ export function createImportManager(ctx){
         busy(d,true);d.error='';
         const result=await ctx.prepareRules({text:d.sourceText,scene:d.scene,sourceName});if(getDialog()!==d)return true;
         if(!Array.isArray(result.candidates)||!result.candidates.length||result.candidates.length>30)throw new Error('未取得有效候选，请核对原文后再整理。');
-        d.prepared=result;d.preparedAt=new Date().toISOString();d.candidates=prepareRuleCandidates(result.candidates,ctx.getCatalog(),d.scene,ctx.getState());d.loading=false;render();
+        d.prepared=result;d.preparedAt=new Date().toISOString();d.candidates=prepareRuleCandidates(result.candidates,ctx.getCatalog(),d.scene,ctx.getState());d.preparedEditorFields=rulePreparationFields({candidates:d.candidates});d.loading=false;render();
       }else if(act==='rule-import-save'){busy(d,true);await saveRules(d);}
       else return false;
     }catch(error){if(d&&getDialog()===d)feedback(d,error.message);else ctx.toast(error.message,true);}
@@ -208,7 +210,7 @@ export function createImportManager(ctx){
       invalidate(d);return true;
     }
     if(d.type==='rule-import'){
-      if(data.candidateIndex!==undefined&&data.candidateKey){const candidate=d.candidates[Number(data.candidateIndex)];if(!candidate)return false;candidate[data.candidateKey]=target.type==='checkbox'?target.checked:target.value;if(!['confirmed','included','id','category'].includes(data.candidateKey)){candidate.confirmed=false;candidate.confirmationInvalidated=true;const confirm=typeof document!=='undefined'?document.querySelector(`[data-candidate-index="${Number(data.candidateIndex)}"][data-candidate-key="confirmed"]`):null;if(confirm)confirm.checked=false;const note=typeof document!=='undefined'?document.querySelector(`[data-candidate-confirmation-note="${Number(data.candidateIndex)}"]`):null;if(note)note.textContent=uiT('本项口径或作用域已修改，请核对后重新确认。');}else if(data.candidateKey==='confirmed'){candidate.confirmationInvalidated=false;const note=typeof document!=='undefined'?document.querySelector(`[data-candidate-confirmation-note="${Number(data.candidateIndex)}"]`):null;if(note)note.textContent='';}}
+      if(data.candidateIndex!==undefined&&data.candidateKey){const candidate=d.candidates[Number(data.candidateIndex)];if(!candidate)return false;candidate[data.candidateKey]=target.type==='checkbox'?target.checked:target.value;refreshAdminDraftPreview(d);if(!['confirmed','included','id','category'].includes(data.candidateKey)){candidate.confirmed=false;candidate.confirmationInvalidated=true;const confirm=typeof document!=='undefined'?document.querySelector(`[data-candidate-index="${Number(data.candidateIndex)}"][data-candidate-key="confirmed"]`):null;if(confirm)confirm.checked=false;const note=typeof document!=='undefined'?document.querySelector(`[data-candidate-confirmation-note="${Number(data.candidateIndex)}"]`):null;if(note)note.textContent=uiT('本项口径或作用域已修改，请核对后重新确认。');}else if(data.candidateKey==='confirmed'){candidate.confirmationInvalidated=false;const note=typeof document!=='undefined'?document.querySelector(`[data-candidate-confirmation-note="${Number(data.candidateIndex)}"]`):null;if(note)note.textContent='';}}
       else if(data.ruleImportPolicy)d.policyIds=target.checked?[...new Set([...(d.policyIds||[]),data.ruleImportPolicy])]:d.policyIds.filter(id=>id!==data.ruleImportPolicy);
       else{
         const key={'rule-import-source-name':'sourceName','rule-import-text':'sourceText','rule-import-scene':'scene','rule-import-mode':'mode','rule-import-owner':'owner','rule-import-effective-at':'effectiveAt'}[id];if(!key)return false;

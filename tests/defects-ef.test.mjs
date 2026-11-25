@@ -58,7 +58,8 @@ test('E prepared English parser rejects added Chinese and und bypass; same-Engli
  for(const detectedLanguage of ['mixed','de','und'])await t.test(detectedLanguage,()=>assert.throws(()=>parseTranslation('Please repair the battery.',{translation:mixedBad,isTargetLanguage:false,detectedLanguage}),invalid));
  assert.equal(parseTranslation('  Exact English source 🙂  ',{translation:'An invented replacement',isTargetLanguage:true,detectedLanguage:'en-US'}).items[0].translation,'  Exact English source 🙂  ');
  for(const source of ['12345','🙂🔋','USB-C 123'])assert.equal(parseTranslation(source,{translation:source,isTargetLanguage:false,detectedLanguage:'und'}).items[0].translation,source);
- assert.equal(parseTranslation('请联系张三确认。',{translation:'Please contact 张三 to confirm.',isTargetLanguage:false,detectedLanguage:'zh'}).items[0].translation,'Please contact 张三 to confirm.');
+ assert.throws(()=>parseTranslation('请联系张三确认。',{translation:'Please contact 张三 to confirm.',isTargetLanguage:false,detectedLanguage:'zh'}),invalid);
+ assert.equal(parseTranslation('请联系张三确认。',{translation:'Please contact Zhang San to confirm.',isTargetLanguage:false,detectedLanguage:'zh'}).items[0].translation,'Please contact Zhang San to confirm.');
  assert.throws(()=>parseTranslation('请联系张三确认。',{translation:'Please contact 李四 to confirm.',isTargetLanguage:false,detectedLanguage:'zh'}),invalid);
  assert.equal(parseTranslation('Hello',{translation:'你好',isTargetLanguage:false,detectedLanguage:'en'},'zh').items[0].translation,'你好');
  const prompt=prepareReportEnrichment('translation',{targetLang:'en',items:[{id:'t',text:'Hello'}]});assert.match(prompt.messages[0].content,/分析|analysis/);assert.notEqual(prompt.promptVersion,'business-report-enrichment-v1:translation');
@@ -77,7 +78,7 @@ test('E grounded Chinese prose appended to English is not treated as retained pr
  const source='客服未回答用户关于电池续航的问题。需要进一步确认使用环境，再说明可操作的排查步骤。';
  const english='The agent did not answer the question about battery life. They need to confirm the environment and describe concrete troubleshooting steps before closing the conversation.';
  for(const paragraph of [source,source.replaceAll('。','；')])assert.throws(()=>parseTranslation(source,{translation:english+'\n'+paragraph,isTargetLanguage:false,detectedLanguage:'zh'}),invalid);
- for(const [original,translation]of [['华为 P70屏幕清晰，支持无线充电。','The 华为 P70 has a clear display and supports wireless charging.'],['服务代表 محمد 已回复。','The agent محمد has replied.'],['客服 Иван 已回复。','Agent Иван has replied.'],['产品 α 已准备好。','The α product is ready.']])assert.equal(parseTranslation(original,{translation,isTargetLanguage:false,detectedLanguage:'mixed'}).items[0].translation,translation);
+ for(const [original,translation]of [['华为 P70屏幕清晰，支持无线充电。','The 华为 P70 has a clear display and supports wireless charging.'],['服务代表 محمد 已回复。','The agent محمد has replied.'],['客服 Иван 已回复。','Agent Иван has replied.'],['产品 α 已准备好。','The α product is ready.']])assert.throws(()=>parseTranslation(original,{translation,isTargetLanguage:false,detectedLanguage:'mixed'}),invalid);
 });
 
 test('E injected report client cannot cache mixed English; exhausted jobs export explicit missing then retry only translation',async t=>{
@@ -85,7 +86,7 @@ test('E injected report client cannot cache mixed English; exhausted jobs export
  const f=await setup(t,{rawClient:client});await f.service.create({jobId:'english-missing',taskId:f.task.id,targetLang:'en'});await f.service.waitForIdle();const result=await f.service.getResult('english-missing');
  assert.equal(result.job.status,'completed_with_warnings');assert.equal(result.enrichment.translationStats.failedTexts,3);assert.equal(result.enrichment.translationStats.missingCells,3);assert.equal(result.enrichment.translationStats.missingRecords,1);assert.ok(result.enrichment.warnings.some(w=>w.code==='invalid_output'));assert.deepEqual(await fs.readdir(path.join(f.dir,'report-cache')),[]);
  const native=await readXlsx(await buildBusinessDeliveryXlsx(result.snapshot,result.enrichment)),english=await readXlsx(await buildBusinessDeliveryXlsx(result.snapshot,result.enrichment,{language:'en'}));
- const nativeRow=native['检核明细'].find(row=>row[XLSX_ROW_NUMBER]===3),englishRow=english['Inspection Details'].find(row=>row[XLSX_ROW_NUMBER]===3);assert.equal(nativeRow[22],'');assert.equal(englishRow[22],result.snapshot.records[0].raw22[8]+' [Untranslated: English translation unavailable]');assert.equal(englishRow[8],result.snapshot.records[0].raw22[8]);
+ const nativeRow=native['检核明细'].find(row=>row[XLSX_ROW_NUMBER]===3),englishRow=english['Inspection Details'].find(row=>row[XLSX_ROW_NUMBER]===3);assert.equal(nativeRow[22],'');assert.equal(englishRow[22],'[Untranslated: English translation unavailable]');assert.equal(englishRow[8],result.snapshot.records[0].raw22[8]);
  for(const options of [{},{language:'en'}]){const html=buildBusinessReportHtml(result.snapshot,result.enrichment,options);assert.ok(!html.includes(mixedBad));assert.match(html,/缺失|Translation (failed|missing)/);}
  const nonTranslation=calls.filter(call=>call.kind!=='translation').length,snapshot=JSON.stringify(result.snapshot);healthy=true;await f.service.retry('english-missing');await f.service.waitForIdle();assert.equal((await f.service.get('english-missing')).status,'completed');assert.equal(calls.filter(call=>call.kind!=='translation').length,nonTranslation);assert.equal(JSON.stringify((await f.service.getResult('english-missing')).snapshot),snapshot);
 });
@@ -107,7 +108,7 @@ test('E direct legacy render inputs cannot bypass native or derived English tran
  for(const field of ['comment','reply','humanIssue'])enrichment.translations[record.id][field]={status:'translated',text:mixedBad,detectedLanguage:'mixed'};
  const derived=collectReportTranslationFields(snapshot,enrichment).map(field=>({id:field.id,sourceText:field.text,status:'translated',text:mixedBad,detectedLanguage:'mixed'}));
  for(const options of [{},{language:'en',translations:derived}]){
-  const tables=await readXlsx(await buildBusinessDeliveryXlsx(snapshot,enrichment,options)),main=tables[options.language?'Inspection Details':'检核明细'],row=main.find(row=>row[XLSX_ROW_NUMBER]===record.sourceRow);assert.ok(!row[22].includes('新增中文'));if(options.language)assert.equal(row[22],record.raw22[8]+' [Untranslated: English translation unavailable]');else assert.ok(!row[22].includes(record.raw22[8]));
+  const tables=await readXlsx(await buildBusinessDeliveryXlsx(snapshot,enrichment,options)),main=tables[options.language?'Inspection Details':'检核明细'],row=main.find(row=>row[XLSX_ROW_NUMBER]===record.sourceRow);assert.ok(!row[22].includes('新增中文'));if(options.language)assert.equal(row[22],'[Untranslated: English translation unavailable]');else assert.ok(!row[22].includes(record.raw22[8]));
   const html=buildBusinessReportHtml(snapshot,enrichment,options),slots=[...html.matchAll(/<p class="translation"[^>]*>([\s\S]*?)<\/p>/g)].map(match=>match[1]);assert.ok(slots.every(text=>!text.includes('新增中文结论')));assert.ok(html.includes(record.raw22[8]));
  }
 });

@@ -128,5 +128,5 @@ test('01117 translation validation and retry behavior remain outside business sc
  assert.deepEqual(parse('translation',input,{items:[item]}),{items:[item]});
  assert.throws(()=>parse('translation',input,{items:[{...item,isTargetLanguage:'true'}]}),invalid);
  const prepared=prepareReportEnrichment('translation',input,{kind:'translation',errorCode:'invalid_output',message:'PRIVATE_MESSAGE'});
- assert.equal(prepared.promptVersion,'business-report-translation-v2-target-language');assert.equal(JSON.parse(prepared.messages[1].content).validationFeedback,undefined);
+ assert.equal(prepared.promptVersion,'business-report-translation-v3-english-display');assert.equal(JSON.parse(prepared.messages[1].content).validationFeedback,undefined);
 });

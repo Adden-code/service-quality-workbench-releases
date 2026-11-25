@@ -16,6 +16,7 @@ import {createWorkflowTraceStore} from './server/workflow-traces.mjs';
 import {createSpringAiFetch} from './server/spring-ai-bridge.mjs';
 import {createReportJobs} from './server/report-jobs.mjs';
 import {createTranslationJobs} from './server/translation-jobs.mjs';
+import {createAdminDraftStore} from './server/admin-draft-store.mjs';
 import {findScenario,isSceneKey} from './public/scenarios.mjs';
 import {loadBundledCatalogSeed} from './server/catalog-seed.mjs';
 import {loadBundledSceneSeed} from './server/scene-seed.mjs';
@@ -51,11 +52,11 @@ export async function createWorkbenchServer({dataDir=process.env.DEMO_DATA_DIR||
   const recovery=await createWorkspaceRestore({dataDir:resolvedData});
   let store,builtinUpgrade={status:'current'},token=randomBytes(32).toString('hex');
   const readWorkspaceUsage=createWorkspaceUsageReader(resolvedData);
-  let config,ai,traces,reportJobs,translationJobs,importDrafts,rawStructureJobs,serverClosing=false,maintenance=false,unavailable=false,inflight=0,mutationEpoch=0,preview=null;const connectionTests=new Set();
-  async function closeServices(){await Promise.all([ai?.close(),reportJobs?.close(),translationJobs?.close(),rawStructureJobs?.close()]);await importDrafts?.close();await traces?.close();await store?.close();}
+  let config,ai,traces,reportJobs,translationJobs,importDrafts,adminDrafts,rawStructureJobs,serverClosing=false,maintenance=false,unavailable=false,inflight=0,mutationEpoch=0,preview=null;const connectionTests=new Set();
+  async function closeServices(){await Promise.all([ai?.close(),reportJobs?.close(),translationJobs?.close(),rawStructureJobs?.close()]);await adminDrafts?.close();await importDrafts?.close();await traces?.close();await store?.close();}
   async function openServices(){
-    transport.clear();store=null;config=null;ai=null;traces=null;reportJobs=null;translationJobs=null;importDrafts=null;rawStructureJobs=null;
-    try{store=await createWorkspaceStore({dataDir:resolvedData,catalogSeed,sceneSeed,storageMode,...(fsOps?{fsOps}:{})});builtinUpgrade=automaticBuiltinUpgrade?await upgradeBuiltinOnStartup({store,dataDir:resolvedData,catalogSeed,sceneSeed,productVersion:PRODUCT_VERSION}):{status:'current'};importDrafts=await createImportDraftStore({dataDir:resolvedData,workspaceStore:store});traces=await createWorkflowTraceStore({dataDir:resolvedData});config=modelConfig||await createModelConfig({dataDir:resolvedData});ai=await createAiService({store,modelConfig:config,client,traceStore:traces});reportJobs=await createReportJobs({maxAttempts:3,dataDir:resolvedData,store,modelConfig:config,client,traceStore:traces});translationJobs=await createTranslationJobs({maxAttempts:3,dataDir:resolvedData,store,modelConfig:config,client,traceStore:traces,reportJobs});rawStructureJobs=await createRawStructureJobs({dataDir:resolvedData,store,modelConfig:config,client,traceStore:traces});}
+    transport.clear();store=null;config=null;ai=null;traces=null;reportJobs=null;translationJobs=null;adminDrafts=null;importDrafts=null;rawStructureJobs=null;
+    try{store=await createWorkspaceStore({dataDir:resolvedData,catalogSeed,sceneSeed,storageMode,...(fsOps?{fsOps}:{})});builtinUpgrade=automaticBuiltinUpgrade?await upgradeBuiltinOnStartup({store,dataDir:resolvedData,catalogSeed,sceneSeed,productVersion:PRODUCT_VERSION}):{status:'current'};importDrafts=await createImportDraftStore({dataDir:resolvedData,workspaceStore:store});traces=await createWorkflowTraceStore({dataDir:resolvedData});config=modelConfig||await createModelConfig({dataDir:resolvedData});ai=await createAiService({store,modelConfig:config,client,traceStore:traces});reportJobs=await createReportJobs({maxAttempts:3,dataDir:resolvedData,store,modelConfig:config,client,traceStore:traces});adminDrafts=await createAdminDraftStore({dataDir:resolvedData});translationJobs=await createTranslationJobs({maxAttempts:3,dataDir:resolvedData,store,modelConfig:config,client,traceStore:traces,reportJobs,adminDrafts});rawStructureJobs=await createRawStructureJobs({dataDir:resolvedData,store,modelConfig:config,client,traceStore:traces});}
     catch(error){await closeServices();throw error;}
   }
   try{await openServices();}catch(error){await recovery.close();throw error;}
@@ -323,7 +324,7 @@ export async function createWorkbenchServer({dataDir=process.env.DEMO_DATA_DIR||
         const privateConfig=config.getPrivate();if(privateConfig.authMode!=='none'&&!privateConfig.apiKey)throw new WorkspaceError('请先保存当前模型服务的 API Key。');
         if(typeof client.prepareRules!=='function')throw new WorkspaceError('当前模型服务未提供规则整理能力。',503);
         const controller=new AbortController(),cancel=()=>controller.abort();connectionTests.add(controller);res.once('close',cancel);
-        try{await json(res,200,await client.prepareRules({config:privateConfig,input,signal:controller.signal}));}
+        try{const result=await client.prepareRules({config:privateConfig,input,signal:controller.signal});if(controller.signal.aborted)throw new WorkspaceError('规则起草已取消。',409);const saved=await adminDrafts.saveRulePreparation(input,result);await json(res,200,{...result,...(saved?{preparationId:saved.id}:{})});}
         finally{connectionTests.delete(controller);res.off('close',cancel);}return;
       }
       if(pathname==='/api/imports/prepare-mapping'){

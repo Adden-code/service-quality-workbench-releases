@@ -48,10 +48,10 @@ test('configured English workbook plans exact composed summaries, translates sib
  assert.ok(tables['Capability audit'].flat().includes(translated(snapshot.sceneAudit[0].capabilities.outputs.demandSummary.reason)));
  assert.ok(tables['Original data 1'].flat().includes(snapshot.records[0].conversation));assert.deepEqual({snapshot,enrichment},before);assert.ok(!Object.values(tables).flat(2).some(value=>String(value).includes('[Translation missing]')));
 });
-test('missing, failed and stale English translations preserve readable source and explicit English status',async()=>{
+test('missing, failed and stale English translations show English status and preserve source in audit',async()=>{
  const {snapshot,enrichment,fields}=translatedFixture(),locale=createReportLocale(snapshot,enrichment,{language:'en',translations:[{id:fields[0].id,sourceText:fields[0].text,status:'failed',text:'DO NOT USE'}]});
- assert.equal(locale.display(fields[0].text),fields[0].text+' [Untranslated: translation failed]');assert.equal(locale.text(fields[0].id,'updated source'),'updated source [Untranslated: English translation unavailable]');
- const tables=await readXlsx(await buildSceneDeliveryXlsx(snapshot,enrichment,{language:'en'})),all=tables['All business columns'],summary=all[1].find(value=>value.includes('未回答用户关于保修'));assert.match(summary,/Untranslated: English translation unavailable/);assert.ok(!summary.includes('[Translation missing]'));
+ assert.equal(locale.display(fields[0].text),'[Untranslated: translation failed]');assert.equal(locale.text(fields[0].id,'updated source'),'[Untranslated: English translation unavailable]');
+ const tables=await readXlsx(await buildSceneDeliveryXlsx(snapshot,enrichment,{language:'en'})),all=tables['All business columns'],summary=all[1].find(value=>value.includes('Untranslated: English translation unavailable'));assert.ok(summary);assert.ok(!all.flat().some(value=>value.includes('未回答用户关于保修')));assert.ok(tables['Original AI Audit'].flat().some(value=>value.includes('未回答用户关于保修')));assert.ok(!summary.includes('[Translation missing]'));
 });
 test('report cases show one merged reply quotation, covered rules and references, while audit quotes remain intact',()=>{
  const {snapshot,enrichment}=sceneReportFixture('ecommerce',1),record=snapshot.records[0],audit=snapshot.sceneAudit[0];record.raw22[9]='abcdefghijk';

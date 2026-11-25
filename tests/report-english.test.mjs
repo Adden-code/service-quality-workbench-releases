@@ -18,7 +18,7 @@ test('explicit English ecommerce output keeps43 columns, source values and spars
  assert.ok(main,'English sheet names must be explicit export options');
  assert.equal(main[0].length,43);assert.deepEqual(main[0].slice(0,22),snapshot.headers22);assert.deepEqual(main[1].slice(0,22),snapshot.standards22);
  for(const record of snapshot.records){const row=main.find(row=>row[XLSX_ROW_NUMBER]===record.sourceRow);assert.deepEqual(row.slice(0,22),record.raw22);}
- assert.equal(main[2][24],'Pass');assert.equal(main[3][41],'Fail');assert.equal(main[3][42],snapshot.records[1].summary+' [Untranslated: English translation unavailable]');
+ assert.equal(main[2][24],'Pass');assert.equal(main[3][41],'Fail');assert.equal(main[3][42],'[Untranslated: English translation unavailable]');
  assert.ok(tables['Field Guide']);assert.equal(tables['Field Guide'].length,23);assert.ok(tables.Methodology);
  const zip=await JSZip.loadAsync(bytes),xml=await zip.file('xl/worksheets/sheet1.xml').async('string');assert.deepEqual([...xml.matchAll(/<row r="(\d+)"/g)].map(m=>Number(m[1])),[1,2,3,4,7,9]);
  assert.equal(JSON.stringify({snapshot,enrichment}),before);
@@ -45,7 +45,7 @@ test('custom English report respects selected modules and fields and keeps canon
 test('wrong-language and changed-source report translations fall back explicitly without borrowing base text',async()=>{
  const {snapshot,enrichment}=reportFixture(),translations=translateAll(snapshot,enrichment),html=buildBusinessReportHtml(snapshot,enrichment,{language:'en',translations,translationJob:{targetLang:'zh'}});
  assert.ok(html.includes('Translation missing'));assert.ok(!html.includes(translations[0].text));
- const stale=structuredClone(snapshot);stale.records[1].summary='新的人工理由';const tables=await readXlsx(await buildBusinessDeliveryXlsx(stale,enrichment,{language:'en',translations}));assert.equal(tables['Inspection Details'][3][42],stale.records[1].summary+' [Untranslated: English translation unavailable]');assert.equal(stale.records[1].summary,'新的人工理由');assert.deepEqual(tables['Inspection Details'][3].slice(0,22),stale.records[1].raw22);
+ const stale=structuredClone(snapshot);stale.records[1].summary='新的人工理由';const tables=await readXlsx(await buildBusinessDeliveryXlsx(stale,enrichment,{language:'en',translations}));assert.equal(tables['Inspection Details'][3][42],'[Untranslated: English translation unavailable]');assert.equal(stale.records[1].summary,'新的人工理由');assert.deepEqual(tables['Inspection Details'][3].slice(0,22),stale.records[1].raw22);
 });
 
 test('English long text remains complete in an English continuation sheet with intact source columns',async()=>{
@@ -73,7 +73,7 @@ test('legacy Chinese-only base cache is retranslated or marked missing in both E
  assert.throws(()=>parseReportEnrichment(JSON.stringify({items:[accepted]}),prepareReportEnrichment('translation',{targetLang:'en',items:[{id:'legacy',text:source}]})),error=>error.code==='INVALID_OUTPUT');
  enrichment.translations['case-good'].comment={status:'translated',text:accepted.translation,detectedLanguage:accepted.detectedLanguage};
  const translations=translateAll(snapshot,enrichment).filter(entry=>entry.id!=='record.case-good.comment'),options={language:'en',translations},tables=await readXlsx(await buildBusinessDeliveryXlsx(snapshot,enrichment,options)),html=buildBusinessReportHtml(snapshot,enrichment,options);
- assert.equal(tables['Inspection Details'][2][22],snapshot.records[0].raw22[8]+' [Untranslated: English translation unavailable]');assert.ok(!tables['Inspection Details'][2][22].includes(bad));assert.ok(html.includes(' [Untranslated: English translation unavailable]</p>'));assert.ok(!html.includes(`<p class="translation"><span class="translation-label">Translation: </span>${bad}</p>`));assert.ok(!html.includes('0 failed; 0 pending; 0 missing'));
+ assert.equal(tables['Inspection Details'][2][22],'[Untranslated: English translation unavailable]');assert.ok(!tables['Inspection Details'][2][22].includes(bad));assert.ok(html.includes('[Untranslated: English translation unavailable]</p>'));assert.ok(!html.includes(`<p class="translation"><span class="translation-label">Translation: </span>${bad}</p>`));assert.ok(!html.includes('0 failed; 0 pending; 0 missing'));
  const field=collectReportTranslationFields(snapshot,enrichment).find(field=>field.id==='record.case-good.comment');options.translations.push({id:field.id,sourceText:field.text,status:'translated',text:'Derived English customer review.'});const fixed=await readXlsx(await buildBusinessDeliveryXlsx(snapshot,enrichment,options));assert.equal(fixed['Inspection Details'][2][22],'Derived English customer review.');
 });
 
