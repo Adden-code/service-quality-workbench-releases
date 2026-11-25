@@ -1,5 +1,17 @@
 # 会话质检工作台
 
+## 0.11.27 · 桌面缓存与 EC-TARGET v2 回退修复
+
+**[免登录下载完整 EXE 安装包](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.27-hotfix/QualityWorkbench-0.11.27-Full-Setup-Windows-x64.exe)** · [发布与验收说明](https://github.com/Adden-code/service-quality-workbench-releases/releases/tag/v0.11.27-hotfix)
+
+本版单独补齐0.11.26拒收项：WebView2 profile移出业务数据目录，旧缓存保留且不阻塞备份/升级；EC-TARGET逐字回退0.11.22 v2，新seed触发备份、发布与审计。其余EC/NP判据和52项材料内容不改，历史任务冻结。
+
+**试用材料改为默认不注入，须本机维护人显式确认。**旧版自动装入的材料也需补确认才能用于新任务。NP匹配材料可试用；EC双语材料仍绑定v3，与本版v2不匹配，新原生EC任务暂不能使用这些材料。既有legacy工作区可正常创建v2 EC任务，旧原生任务保持原冻结材料。
+
+实际EXE安装、旧库升级前备份、默认阻断/显式启用、重启与卸载保留数据验证通过；文件校验清单530项零缺失。仅合成资料、本地脚本模型验证，内网复测待回传。安装器98098072字节；SHA256 `fb8822aa93ad07fad53b3bde64776667bd83e22299f837a8c30b43e4e57215b3`；buildId `0.11.27-2f41846075b5ef23`；[源码](https://github.com/Adden-code/service-quality-workbench-releases/commit/93b17168a7b51e8943d50be4d5a02ffb05f0df38)。6附件均无登录完整下载核SHA通过。
+
+以下保留旧版本交付记录。**0.11.26后续被业务拒收，请使用上方0.11.27修复包；其自动试用注入策略已被本次显式确认要求替代。**
+
 ## 0.11.26 · 中英文原生两场景试用完整版
 
 **[免登录下载完整安装包](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.26-native-pilot/QualityWorkbench-0.11.26-Native-Pilot-Full-Setup-Windows-x64.exe)** · [发布说明](https://github.com/Adden-code/service-quality-workbench-releases/releases/tag/v0.11.26-native-pilot)
