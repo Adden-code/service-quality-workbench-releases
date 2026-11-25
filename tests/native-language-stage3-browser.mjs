@@ -38,7 +38,7 @@ try{
  for(const language of ['en','zh']){
   const dataDir=path.join(root,language),metadata=await seedStage3Workspace({dataDir,language}),requests=[];
   const running=await serveStage3Workspace({dataDir,requests});servers.push(running.server);let origin=running.origin,page=await context.newPage();
-  let current=await read(origin,'/api/workspace');assert.equal(current.nativeLanguageStage,3);assert.equal(current.productVersion,'0.11.24');
+  let current=await read(origin,'/api/workspace');assert.equal(current.nativeLanguageStage,process.env.R39_RUNTIME_ROOT?4:3);assert.equal(current.productVersion,process.env.R39_RUNTIME_ROOT?JSON.parse(await fs.readFile(path.join(process.env.R39_RUNTIME_ROOT,'packaging','build-identity.json'),'utf8')).version:'0.11.24');
   const originalTask=current.state.tasks.find(t=>t.id===metadata.taskId),originalSessions=current.state.sessions.filter(s=>s.taskId===metadata.taskId);
   const frozen=JSON.parse(await fs.readFile(path.join(dataDir,'language-materials',metadata.materialRef+'.json'),'utf8'));
   const projected=(await read(origin,`/api/tasks/${metadata.taskId}/native-material`)).material;assert.deepEqual(projected,nativeDisplayProjection(originalTask,frozen));
