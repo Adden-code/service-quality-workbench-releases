@@ -1,4 +1,5 @@
 import {createWorkspaceDecoder} from './workspace-decoder.mjs';
+import {workspaceReadBudget} from './workspace-read-budget.mjs';
 import {mergeWorkspacePatch,workspacePatch} from './workspace-patch.mjs';
 import {createBusinessState} from './domain.mjs';
 import {createBusinessCatalog,validateCatalog} from './catalog.mjs';
@@ -41,12 +42,13 @@ export function createWorkspaceClient({fetchImpl=globalThis.fetch,storage=null,t
     return view(acknowledged);
   }
   async function request(url,options={},timeLimit=timeoutMs){
+    if(url.startsWith('/api/workspace?'))timeLimit=Math.max(timeLimit,30000);
     const controller=new AbortController(),timer=setTimer(()=>controller.abort(),timeLimit);
     const outerSignal=options.signal,cancel=()=>controller.abort();if(outerSignal?.aborted)controller.abort();outerSignal?.addEventListener('abort',cancel,{once:true});
     try{
       const response=await fetchImpl(url,{...options,headers:{...options.headers,...(incrementalTransport?{'X-Workspace-Sync':'records-v1','X-Workspace-Revision':String(acknowledged?.revision??-1),'X-Workspace-Epoch':acknowledged?.token||''}:{})},signal:controller.signal,credentials:'same-origin'});
       let value;
-      try{value=decoder?await decoder.decode(await response.arrayBuffer(),{baseRevision:acknowledged?.revision,deadline:Date.now()+timeLimit}):await response.json();}catch(error){throw failure(decoder&&/工作区|后台数据/.test(error.message)?error.message:'本地服务返回了无法识别的结果，请检查服务版本。',response.ok?undefined:response.status);}
+      try{value=decoder?await decoder.decode(await response.arrayBuffer(),{baseRevision:acknowledged?.revision,deadline:Date.now()+workspaceReadBudget(response.headers?.get('X-Workspace-Bytes'),timeLimit)}):await response.json();}catch(error){throw failure(decoder&&/工作区|后台数据/.test(error.message)?error.message:'本地服务返回了无法识别的结果，请检查服务版本。',response.ok?undefined:response.status);}
       if(!response.ok)throw failure(value?.error||`工作区请求失败（${response.status}）`,response.status);
       return value;
     }finally{clearTimer(timer);outerSignal?.removeEventListener('abort',cancel);}

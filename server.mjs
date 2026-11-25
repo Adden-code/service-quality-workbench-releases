@@ -34,7 +34,7 @@ import {dependencyStaleness} from './public/scene-dependency-staleness.mjs';
 const project=path.dirname(fileURLToPath(import.meta.url));
 const types={'.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8','.mjs':'text/javascript; charset=utf-8','.js':'text/javascript; charset=utf-8','.json':'application/json; charset=utf-8','.svg':'image/svg+xml','.xlsx':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'};
 const safeHeaders={'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'};
-async function json(res,status,value){if(res.workspaceEnvelope)value=await res.workspaceEnvelope(value);let bytes=Buffer.from(JSON.stringify(value));const logicalBytes=bytes.length;if(bytes.length>1024*1024&&res.paginateLarge){value=res.paginateLarge(value);bytes=Buffer.from(JSON.stringify(value));}res.writeHead(status,{...safeHeaders,'Content-Type':'application/json; charset=utf-8','Content-Length':bytes.length,'X-Response-Bytes':String(bytes.length),'X-Logical-Response-Bytes':String(logicalBytes),'X-Response-Budget':String(2*1024*1024),...(logicalBytes>=2*1024*1024?{'X-Response-Warning':bytes.length===logicalBytes?'over-2mb':'paged-over-2mb'}:{})});res.end(bytes);}
+async function json(res,status,value){if(res.workspaceEnvelope)value=await res.workspaceEnvelope(value);let bytes=Buffer.from(JSON.stringify(value));const logicalBytes=bytes.length;if(bytes.length>1024*1024&&res.paginateLarge){value=res.paginateLarge(value);bytes=Buffer.from(JSON.stringify(value));}res.writeHead(status,{...safeHeaders,...(value?.totalBytes?{'X-Workspace-Bytes':String(value.totalBytes)}:{}),'Content-Type':'application/json; charset=utf-8','Content-Length':bytes.length,'X-Response-Bytes':String(bytes.length),'X-Logical-Response-Bytes':String(logicalBytes),'X-Response-Budget':String(2*1024*1024),...(logicalBytes>=2*1024*1024?{'X-Response-Warning':bytes.length===logicalBytes?'over-2mb':'paged-over-2mb'}:{})});res.end(bytes);}
 async function body(req,max){
   const declared=Number(req.headers['content-length']);if(Number.isFinite(declared)&&declared>max){req.resume();throw new WorkspaceError('请求内容超过大小限制。',413);}
   const parts=[];let size=0;
@@ -82,9 +82,10 @@ export async function createWorkbenchServer({dataDir=process.env.DEMO_DATA_DIR||
       };
 
       backupRequest=pathname.startsWith('/api/workspace-backup/');
+      const releasePart=pathname.match(/^\/api\/workspace\/parts\/([a-f0-9]{32})\/release$/);
       if(pathname.startsWith('/api/')){
         if(maintenance||unavailable||serverClosing)throw backupError('工作区正在维护或关闭，请稍后刷新页面。',503,'WORKSPACE_MAINTENANCE');
-        if(!pathname.startsWith('/api/workspace-backup/')){inflight++;counted=true;if(!['GET','HEAD','OPTIONS'].includes(req.method))mutationEpoch++;}
+        if(!pathname.startsWith('/api/workspace-backup/')){inflight++;counted=true;if(!['GET','HEAD','OPTIONS'].includes(req.method)&&!(releasePart&&req.method==='POST'))mutationEpoch++;}
       }
       const requireMutation=type=>{
         if(req.headers.origin!==origin)throw new WorkspaceError('修改操作必须来自当前页面。',403);
@@ -93,6 +94,7 @@ export async function createWorkbenchServer({dataDir=process.env.DEMO_DATA_DIR||
         if((req.headers['content-type']||'').split(';')[0].trim().toLowerCase()!==type)throw new WorkspaceError(`请求类型须为 ${type}。`,415);
       };
       const parseJson=async limit=>{const bytes=await body(req,limit);try{return JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(bytes));}catch{throw new WorkspaceError('请求不是有效 JSON。');}};
+      if(releasePart&&req.method==='POST'){if(req.headers.origin!==origin)throw new WorkspaceError('修改操作必须来自当前页面。',403);transport.release(releasePart[1]);res.writeHead(204,safeHeaders);res.end();return;}
       const part=pathname.match(/^\/api\/workspace\/parts\/([a-f0-9]{32})\/([a-f0-9]{64})\/(\d+)$/);
       if(part&&req.method==='GET'){const bytes=transport.page(part[1],part[2],Number(part[3]));res.writeHead(200,{...safeHeaders,'Content-Type':'application/octet-stream','Content-Length':bytes.length,'X-Response-Bytes':String(bytes.length),'X-Response-Budget':String(2*1024*1024)});res.end(bytes);return;}
       const executionPage=pathname.match(/^\/api\/tasks\/([^/]+)\/execution$/);

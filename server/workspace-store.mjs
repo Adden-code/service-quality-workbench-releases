@@ -170,6 +170,14 @@ export async function createWorkspaceStore({dataDir,fsOps=fs,catalogSeed=null,sc
   }
   async function persist(next,{snapshot=true}={}){
     const patch=workspacePatch(document,next),baseRevision=document.revision;
+    // AI updaters receive defensive clones. Reuse equal committed records after
+    // validation so disk and HTTP shard caches do not re-encode the whole batch.
+    const shared={...next.state};
+    for(const key of ['tasks','sessions']){
+      const old=new Map((document.state?.[key]||[]).map(row=>[row.id,row])),changed=new Set(patch[key].map(row=>row.id));
+      shared[key]=next.state[key].map(row=>!changed.has(row.id)&&old.has(row.id)?old.get(row.id):row);
+    }
+    next={...next,state:shared,catalog:patch.catalog?next.catalog:document.catalog};
     try{if(split)await writeRecords(next);else{const bytes=JSON.stringify(next);if(Buffer.byteLength(bytes)>MAX_WORKSPACE_BYTES)throw new WorkspaceError('工作区大小超出保存限制。',413);await atomicWrite(file,bytes);}}
     catch(error){throw new WorkspaceError(`工作区未保存，原记录保留：${error.message}`,500);}
     document=next;changes.push({baseRevision,revision:next.revision,patch});while(changes.length>32)changes.shift();return snapshot?read():{revision:next.revision};

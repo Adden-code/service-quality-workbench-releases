@@ -87,6 +87,17 @@ test('preview rejects later workspace revisions and requires a fresh preview bef
  const fresh=await previewBackup(f,bytes),restored=await jsonRequest(f,'/api/workspace-backup/restore',{previewId:fresh.previewId,baseRevision:fresh.baseRevision});assert.equal(restored.status,200,JSON.stringify(restored.value));
 });
 
+test('read-only workspace lease release after preview does not invalidate restore',async t=>{
+ const f=await fixture(t),before=await snapshot(f),bytes=await exportBackup(f),preview=await previewBackup(f,bytes);
+ const response=await fetch(f.origin+'/api/workspace?since=0',{headers:{...f.headers,'X-Workspace-Sync':'records-v1','X-Workspace-Revision':'-1'}});
+ assert.equal(response.status,200);const packet=await response.json();assert.equal(packet.workspaceTransport,'records-v1');
+ const part=await fetch(f.origin+`/api/workspace/parts/${packet.lease}/${packet.manifest.hash}/0`);assert.equal(part.status,200);await part.arrayBuffer();
+ const released=await fetch(f.origin+`/api/workspace/parts/${packet.lease}/release`,{method:'POST',headers:{Origin:f.origin}});assert.equal(released.status,204);
+ assert.equal((await snapshot(f)).revision,preview.baseRevision,'pure reads must not advance the workspace');
+ const restored=await jsonRequest(f,'/api/workspace-backup/restore',{previewId:preview.previewId,baseRevision:preview.baseRevision});
+ assert.equal(restored.status,200,JSON.stringify(restored.value));assert.equal(restored.value.restored,true);assert.deepEqual((await snapshot(f)).state,before.state);
+});
+
 test('preview also rejects source and import-draft writes that do not advance workspace revision',async t=>{
  const f=await fixture(t),bytes=await exportBackup(f),before=await snapshot(f);let preview=await previewBackup(f,bytes);
  const source=await upload(f,'synthetic post-preview content','post-preview.txt');assert.equal((await snapshot(f)).revision,before.revision);
