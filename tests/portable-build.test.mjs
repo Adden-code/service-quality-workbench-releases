@@ -6,6 +6,7 @@ import crypto from 'node:crypto';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 const moduleUrl=new URL('../packaging/build-portable.mjs',import.meta.url);
+const releaseVersion=JSON.parse(await fs.readFile(new URL('../package.json',import.meta.url),'utf8')).version;
 test('portable allowlist includes only required runtime modules with no developer startup scripts',async()=>{
  assert.ok(existsSync(moduleUrl),'缺少便携打包模块');const{portableFiles,portableModules}=await import(moduleUrl);
  for(const name of ['server.mjs','server/ecommerce-engine.mjs','server/ecommerce-comparison.mjs','server/ecommerce-comparison-wire.mjs','server/workflow-traces.mjs','server/spring-ai-bridge.mjs','packaging/portable-runtime.mjs','packaging/portable-launch.mjs','packaging/version.mjs'])assert.ok(portableFiles.includes(name),`缺少运行模块 ${name}`);
@@ -16,7 +17,7 @@ test('portable allowlist includes only required runtime modules with no develope
 test('business package product version is shared without changing the control schema',async()=>{
  const packageJson=JSON.parse(await fs.readFile(new URL('../package.json',import.meta.url),'utf8'));
  const {portableVersion}=await import(moduleUrl);
- assert.equal(packageJson.version,'0.11.24');assert.equal(portableVersion,packageJson.version);
+ assert.match(packageJson.version,/^\d+\.\d+\.\d+$/);assert.equal(portableVersion,packageJson.version);
  const versionUrl=new URL('../packaging/version.mjs',import.meta.url);
  assert.ok(existsSync(versionUrl),'产品版本应有共享来源');
  const {productVersion}=await import(versionUrl);assert.equal(productVersion,packageJson.version);
@@ -46,11 +47,11 @@ test('stage-only build creates complete manifest without a ZIP or transfer parts
  assert.equal(info.archive,null);assert.equal(info.parts,undefined);
  assert.deepEqual((await fs.readdir(outputDir)).sort(),['package-info.json','会话质检工作台'].sort());
  const metadata=JSON.parse(await fs.readFile(path.join(info.root,'portable-info.json'),'utf8'));
- assert.equal(metadata.version,'0.11.24');assert.equal(metadata.schemaVersion,1);assert.equal(metadata.sourceDataIncluded,false);assert.equal(metadata.credentialsIncluded,false);
+ assert.equal(metadata.version,releaseVersion);assert.equal(metadata.schemaVersion,1);assert.equal(metadata.sourceDataIncluded,false);assert.equal(metadata.credentialsIncluded,false);
  const manifest=JSON.parse(await fs.readFile(path.join(info.root,'文件校验清单.json'),'utf8'));
- assert.equal(manifest.version,'0.11.24');assert.equal(manifest.schemaVersion,1);
+ assert.equal(manifest.version,releaseVersion);assert.equal(manifest.schemaVersion,1);
  const build=JSON.parse(await fs.readFile(path.join(info.root,'packaging/build-identity.json'),'utf8'));
- assert.equal(build.version,metadata.version);assert.match(build.buildId,/^0\.11\.24-[a-f0-9]{16}$/);assert.match(build.sourceCommit,/^[a-f0-9]{40}$/);
+ assert.equal(build.version,metadata.version);assert.ok(build.buildId.startsWith(releaseVersion+'-'));assert.match(build.buildId.slice(releaseVersion.length+1),/^[a-f0-9]{16}$/);assert.match(build.sourceCommit,/^[a-f0-9]{40}$/);
  assert.match(await fs.readFile(path.join(info.root,'public/build-identity.mjs'),'utf8'),new RegExp(build.buildId));
  assert.ok(manifest.files.some(file=>file.path==='packaging/build-identity.json'));
  assert.ok(manifest.files.some(file=>file.path==='server/ecommerce-comparison.mjs'));

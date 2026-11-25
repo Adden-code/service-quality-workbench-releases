@@ -47,14 +47,14 @@ async function body(req,max){
   return Buffer.concat(parts,size);
 }
 export async function createWorkbenchServer({dataDir=process.env.DEMO_DATA_DIR||path.join(project,'data'),publicDir=path.join(project,'public'),maxBodyBytes=32*1024*1024,fsOps,modelConfig,arkClient,catalogSeed=()=>loadBundledCatalogSeed(path.join(project,'resources')),sceneSeed=()=>loadBundledSceneSeed(path.join(project,'resources')),executionEngine=process.env.QA_AI_ENGINE||'native-node',bridgeToken=process.env.WORKBENCH_BRIDGE_TOKEN,workerPort=process.env.WORKBENCH_WORKER_PORT||4192,storageMode='single',automaticBuiltinUpgrade=true,nativeLanguageStage=Number(process.env.WORKBENCH_NATIVE_LANGUAGE_STAGE||0)}={}){
-  if(![0,1,2,3].includes(nativeLanguageStage))throw new WorkspaceError('Unsupported native language implementation stage.');
+  if(![0,1,2,3,4].includes(nativeLanguageStage))throw new WorkspaceError('Unsupported native language implementation stage.');
   if(!['native-node','spring-ai'].includes(executionEngine))throw new WorkspaceError('不支持的模型执行引擎。');
   const client=arkClient||createArkClient(executionEngine==='spring-ai'?{fetchImpl:createSpringAiFetch({bridgeToken,workerPort})}:{});
   const transport=createWorkspaceTransport();
   const root=path.resolve(publicDir),resolvedData=path.resolve(dataDir);
   const guardedRoot=process.platform==='win32'?root.toLowerCase():root,guardedData=process.platform==='win32'?resolvedData.toLowerCase():resolvedData;
   if(guardedData===guardedRoot||guardedData.startsWith(guardedRoot+path.sep))throw new WorkspaceError('工作区数据目录必须位于 public 目录之外。');
-  let recovery;try{recovery=await createWorkspaceRestore({dataDir:resolvedData});}catch(error){error.path??='.workspace-control.lock';throw await auditStartupRefusal(resolvedData,error);}
+  let recovery;try{recovery=await createWorkspaceRestore({dataDir:resolvedData,nativeLanguageStage});}catch(error){error.path??='.workspace-control.lock';throw await auditStartupRefusal(resolvedData,error);}
   let store,builtinUpgrade={status:'current'},token=randomBytes(32).toString('hex'),startupMaintenancePending=true;
   const readWorkspaceUsage=createWorkspaceUsageReader(resolvedData);
   let config,ai,traces,reportJobs,translationJobs,importDrafts,adminDrafts,rawStructureJobs,serverClosing=false,maintenance=false,unavailable=false,inflight=0,mutationEpoch=0,preview=null;const connectionTests=new Set();
@@ -88,10 +88,11 @@ export async function createWorkbenchServer({dataDir=process.env.DEMO_DATA_DIR||
       if(req.headers.host!==expectedHost)throw new WorkspaceError('仅允许本机同源请求。',403);
       const url=new URL(req.url,origin),pathname=decodeURIComponent(url.pathname);
       if(req.headers['x-workspace-sync']==='records-v1')res.paginateLarge=value=>transport.prepareValue(value);
-      if(req.headers['x-workspace-sync']==='records-v1')res.workspaceEnvelope=async value=>{
+      res.workspaceEnvelope=async value=>{
         if(!value||!(value.patch||value.unchanged||typeof value.initialized==='boolean'))return value;
         const {state:ignoredState,catalog:ignoredCatalog,patch:ignoredPatch,baseRevision:ignoredBase,revision:ignoredRevision,initialized:ignoredInit,unchanged:ignoredUnchanged,...extra}=value;
-        const current=store.transportSnapshot(),meta={...extra,token,aiRuntime:ai.runtime(),reviewCommands:true,productVersion:PRODUCT_VERSION,builtinUpgrade,nativeLanguageStage};
+        const current=store.transportSnapshot(),meta={...extra,token,aiRuntime:ai.runtime(),reviewCommands:true,productVersion:PRODUCT_VERSION,builtinUpgrade,nativeLanguageStage,...(nativeLanguageStage>=4?{nativeLanguageReadiness:await store.nativeReadiness()}:{})};
+        if(req.headers['x-workspace-sync']!=='records-v1')return{...value,...meta};
         if(!current.initialized)return{...current,...meta};
         const since=Number(req.headers['x-workspace-revision']);
         if(Number.isSafeInteger(since)&&since===current.revision&&req.headers['x-workspace-epoch']===token)return{initialized:true,revision:since,unchanged:true,...meta};
@@ -119,7 +120,7 @@ export async function createWorkbenchServer({dataDir=process.env.DEMO_DATA_DIR||
         if(pathname==='/api/workspace-language/material/review'){await json(res,200,{material:reviewBilingualMaterial(input.material,input.review)});return;}
         const method={'/api/workspace-language/select':'selectLanguage','/api/workspace-language/material/publish':'publishLanguageMaterial','/api/workspace-language/material/freeze':'freezeLanguageMaterial'}[pathname];
         if(!method)throw new WorkspaceError('Resource unavailable',404);
-        await json(res,200,{...await store[method](input),token});return;
+        await json(res,200,{...await store[method](input),token,nativeLanguageStage,...(nativeLanguageStage>=4?{nativeLanguageReadiness:await store.nativeReadiness()}:{})});return;
       }
       // Stage 1 deliberately has no native execution. A stale tab or direct API
       // cannot bypass the acceptance boundary. Legacy workspaces keep working.
@@ -428,7 +429,7 @@ export async function createWorkbenchServer({dataDir=process.env.DEMO_DATA_DIR||
       }
       if(pathname==='/api/workspace'){
         if(req.method==='GET'&&req.headers['x-workspace-sync']==='records-v1'){await json(res,200,{initialized:true});return;}
-        if(req.method==='GET'){const since=url.searchParams.get('since');await json(res,200,{...await(since!==null?store.changesSince(Number(since)):store.read()),token,aiRuntime:ai.runtime(),reviewCommands:true,productVersion:PRODUCT_VERSION,builtinUpgrade,nativeLanguageStage});return;}
+        if(req.method==='GET'){const since=url.searchParams.get('since');await json(res,200,{...await(since!==null?store.changesSince(Number(since)):store.read()),token,aiRuntime:ai.runtime(),reviewCommands:true,productVersion:PRODUCT_VERSION,builtinUpgrade,nativeLanguageStage,...(nativeLanguageStage>=4?{nativeLanguageReadiness:await store.nativeReadiness()}:{})});return;}
         if(req.method!=='PUT')throw new WorkspaceError('Method not allowed',405);
         requireMutation('application/json');const bytes=await body(req,maxBodyBytes);let request;
         try{request=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(bytes));}catch{throw new WorkspaceError('保存请求不是有效 JSON。');}
@@ -478,7 +479,7 @@ if(process.argv[1]&&pathToFileURL(path.resolve(process.argv[1])).href===import.m
   let server;
   try{
     const rawPort=process.env.DEMO_PORT||'4186';if(!/^[1-9]\d*$/.test(rawPort)||Number(rawPort)<1024||Number(rawPort)>65535)throw new Error('端口须为1024至65535之间的整数。');
-    const port=Number(rawPort);server=await createWorkbenchServer({storageMode:'sharded'});
+    const port=Number(rawPort);server=await createWorkbenchServer({storageMode:'sharded',nativeLanguageStage:4});
     server.on('error',async error=>{console.error(error.code==='EADDRINUSE'?`端口${port}已被使用，请通过DEMO_PORT选择其他端口。`:error.message);await server.closeWorkspace();process.exitCode=1;});
     for(const signal of ['SIGINT','SIGTERM'])process.once(signal,()=>server.close(()=>{process.exitCode=0;}));
     server.listen(port,'127.0.0.1',()=>console.log(`Local: http://127.0.0.1:${port}\n本机保存工作区，Ctrl+C停止。`));

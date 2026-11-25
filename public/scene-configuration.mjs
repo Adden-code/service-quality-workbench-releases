@@ -1,4 +1,5 @@
 import {isFixed24EcommerceBasis} from './ecommerce-timing-policy.mjs';
+import {workspaceLanguage,languageError} from './workspace-language.mjs';
 import {validateEcReportMetadata} from './ec-report-metadata.mjs';
 import {isBusinessEcommerceBasis,validateBusinessEcommerceBasis} from './ecommerce-business-profile.mjs';
 // Shared, deterministic scene package contracts. No network, credentials or UI.
@@ -185,11 +186,17 @@ export function validateSceneRegistry(state,previous=null,{trustedScene=false}={
  unique(state.scenePackageDrafts.map(d=>d.id),'草稿');for(const d of state.scenePackageDrafts){if(!['draft','archived','published'].includes(d.status)||!Number.isSafeInteger(d.revision)||d.revision<1||!isSceneKey(d.sceneId)||d.package?.configuration?.sceneId!==d.sceneId)fail('草稿格式无效。');}
  unique(state.sceneConfigurationEvents.map(e=>e.id),'配置审计');for(const e of state.sceneConfigurationEvents){if(!e.actor||!e.reason||!Number.isFinite(Date.parse(e.at))||!Array.isArray(e.diff)||!Object.hasOwn(e,'before')||!Object.hasOwn(e,'after'))fail('配置审计缺少操作者/时间/原因/前后值/diff。');}
  if(previous&&!trustedScene){for(const k of [...SCENE_COLLECTIONS,'sceneConfigurationMigration'])if(!sameSceneValue(state[k],previous[k]))fail('场景实体及审计只能通过配置管理事务修改。');}
- for(const task of state.tasks||[]){const s=task.executionSnapshot,old=previous?.tasks?.find(t=>t.id===task.id);if(old?.executionSnapshot&&!sameSceneValue(old.executionSnapshot,s))fail('已创建任务的完整执行快照不可改写。');if(!s)continue;if(s.ecReportMetadata!==undefined){validateEcReportMetadata(s.ecReportMetadata);if(task.scene!=='电商评论回复'||!sameSceneValue(s.ecReportMetadata,task.ecReportMetadata))fail('执行快照的批次报告信息与任务不一致。');}if(task.ecReportMetadata!==undefined&&!sameSceneValue(s.ecReportMetadata,task.ecReportMetadata))fail('执行快照缺少冻结批次报告信息。');if(s.schemaVersion!==SCENE_SCHEMA||s.configuration?.sceneId!==task.scene||!sameSceneValue(s.basis,task.basisSnapshot))fail('任务执行快照与依据不一致。');validateSceneConfiguration(s.configuration);validateSceneTemplate(s.template,s.configuration);if(!sameSceneValue(resolveSceneRuntime(s.configuration,s.overrides,s.overrideReason),s.runtime))fail('任务实际运行参数与冻结配置不一致。');if(old&&!sameSceneValue(old.executionSnapshot,s))fail('已创建任务的完整执行快照不可改写。');}
+ for(const task of state.tasks||[]){const s=task.executionSnapshot,old=previous?.tasks?.find(t=>t.id===task.id);if(old?.executionSnapshot&&!sameSceneValue(old.executionSnapshot,s))fail('已创建任务的完整执行快照不可改写。');if(!s)continue;if(s.ecReportMetadata!==undefined){validateEcReportMetadata(s.ecReportMetadata);if(task.scene!=='电商评论回复'||!sameSceneValue(s.ecReportMetadata,task.ecReportMetadata))fail('执行快照的批次报告信息与任务不一致。');}if(task.ecReportMetadata!==undefined&&!sameSceneValue(s.ecReportMetadata,task.ecReportMetadata))fail('执行快照缺少冻结批次报告信息。');if((s.schemaVersion!==SCENE_SCHEMA&&!(s.schemaVersion===2&&s.languageExecution?.mode==='native-v1'))||s.configuration?.sceneId!==task.scene||!sameSceneValue(s.basis,task.basisSnapshot))fail('任务执行快照与依据不一致。');validateSceneConfiguration(s.configuration);validateSceneTemplate(s.template,s.configuration);if(!sameSceneValue(resolveSceneRuntime(s.configuration,s.overrides,s.overrideReason),s.runtime))fail('任务实际运行参数与冻结配置不一致。');if(old&&!sameSceneValue(old.executionSnapshot,s))fail('已创建任务的完整执行快照不可改写。');}
 }
 export function freezeSceneExecution(state,sceneId,{basis,overrides={},overrideReason='',expectedVersion,ecReportMetadata}={}){
  if(ecReportMetadata!==undefined){validateEcReportMetadata(ecReportMetadata);if(sceneId!=='电商评论回复')fail('批次报告信息仅适用于电商场景。');}
- const c=latestSceneConfiguration(state,sceneId);if(!c)return null;
+ const current=latestSceneConfiguration(state,sceneId);if(!current)return null;
+ const c=clone(current),policy=workspaceLanguage(state);
+ if(policy?.mode==='native-v1'){
+  const language=policy.contentLanguage;
+  if(overrides.outputLanguages!==undefined&&!sameSceneValue(overrides.outputLanguages,[language]))languageError('LANGUAGE_PARAMETER_CONFLICT','Task output language must match the locked workspace language.');
+  c.inspectionLanguage=language;overrides={...overrides,outputLanguages:[language]};
+ }
  if(expectedVersion!==undefined&&c.version!==expectedVersion)fail('场景版本在填写期间已变化，请保留输入并重新核对。');
  if(!sameSceneValue(c.ruleBindings.map(r=>[r.ruleId,r.ruleVersion]),basis.rules.map(r=>[r.id,r.version])))fail('任务规则须精确使用已发布场景冻结的版本清单。');
  const template=sceneEntity(state,'deliveryTemplates',c.templateRef);if(!template)fail('场景模板丢失。');

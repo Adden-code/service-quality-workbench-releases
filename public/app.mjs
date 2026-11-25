@@ -1,6 +1,6 @@
 import {createNativeReviewMaterialController,nativeReviewLanguage} from './native-review-language.mjs';
 import {workspaceLanguage} from './workspace-language.mjs';
-import {languageAcceptanceScreen,enforceWorkspaceLocale} from './workspace-language-ui.mjs';
+import {languageAcceptanceScreen,enforceWorkspaceLocale,nativeReadinessNotice,nativeTaskAvailability} from './workspace-language-ui.mjs';
 import {startupMaintenanceNotice} from './startup-maintenance-view.mjs';
 import {createAdminDraftTranslationController} from './admin-draft-translation.mjs';
 import {createReasonTranslationController} from './reason-translation.mjs';
@@ -272,7 +272,8 @@ function render(){
     </aside>
     <main class="main"><header class="topbar ${isReview?'review-topbar':''}">${isReview?reviewHeader(viewState,ui):uiHtml`<div class="breadcrumb"><span>服务领域</span>${icon('chevron',11)}<span>会话质检</span>${icon('chevron',11)}<strong>${uiT(page[1])}</strong></div>`}
       <div class="top-tools">${isReview?uiHtml`<button class="text-btn" data-act="review-shortcuts-help">审核快捷键</button>`:''}<div class="locale-switch" role="group" aria-label="${getLocale()==='en'?'Interface language':'界面语言'}"><button data-act="ui-locale" data-locale="zh" ${workspaceLanguage(state)?.mode==='native-v1'?'disabled':''} aria-pressed="${getLocale()==='zh'}" lang="zh-CN">中文</button><button data-act="ui-locale" data-locale="en" ${workspaceLanguage(state)?.mode==='native-v1'?'disabled':''} aria-pressed="${getLocale()==='en'}" lang="en">English</button></div><span class="workspace-timezone" title="${getLocale()==='en'?'All displayed dates and timing use UTC+08:00':'所有日期及计时使用北京时间 UTC+08:00'}">UTC+08:00</span><button class="btn small" data-act="model-settings" aria-label="模型设置">模型设置</button><button class="icon-btn" data-act="help" title="使用指引" aria-label="使用指引">${icon('info',18)}</button>${isReview?'':uiHtml`<button class="profile text-btn" data-act="workspace-usage" aria-label="工作区用量"><span class="avatar">质检</span><span>本机工作区</span></button>`}</div>
-    </header>${ui.buildInfo&&clientBuild.buildId!==ui.buildInfo.buildId?uiHtml`<div class="notice-banner warning" role="alert">页面与本机服务版本不同，请重新加载页面。<button class="btn" data-act="reload-build">重新加载页面</button></div>`:''}<div id="workspace-warning"></div><div class="content">${content}</div></main></div>`,{reuse:samePage&&isReview});
+    </header>${ui.buildInfo&&clientBuild.buildId!==ui.buildInfo.buildId?uiHtml`<div class="notice-banner warning" role="alert">页面与本机服务版本不同，请重新加载页面。<button class="btn" data-act="reload-build">重新加载页面</button></div>`:''}<div id="workspace-warning"></div><div class="content">${languageStage>=4?nativeReadinessNotice(state,workspace.snapshot?.nativeLanguageReadiness):''}${content}</div></main></div>`,{reuse:samePage&&isReview});
+  if(languageStage>=4)applyNativeTaskControls(document.getElementById('app'));
   renderStorageWarning();
   for(const key of disclosures){const node=document.querySelector(`#app details[data-disclosure="${CSS.escape(key)}"]`);if(node)node.open=true;}
   for(const saved of scrolls){
@@ -308,6 +309,16 @@ function refreshImportDraftNotice(){
  const message=getLocale()==='en'?`${ui.importDraftCount} unfinished drafts. Continue in Inspection tasks → Import drafts.`:`有 ${ui.importDraftCount} 份未完成草稿，可在质检任务→导入草稿中继续`;
  root.querySelector('.modal-body')?.insertAdjacentHTML('afterbegin',`<div class="soft-note" data-import-draft-notice role="status">${e(message)}</div>`);
 }
+function assertNativeTaskAvailable(scene){if(languageStage<4)return;const value=nativeTaskAvailability(state,workspace.snapshot?.nativeLanguageReadiness,scene);if(!value.allowed)throw new Error(value.message);}
+function applyNativeTaskControls(root){
+ if(languageStage<4||workspaceLanguage(state)?.mode!=='native-v1')return;
+ for(const button of root.querySelectorAll('[data-act="new-task"],[data-act="task-scene"],[data-act="create-business-task"],[data-act="create-business-task-start"]')){
+  const scene=button.dataset.act==='task-scene'?(button.dataset.scene==='consultation'?'新品产品咨询':button.dataset.scene==='ecommerce'?'电商评论回复':button.dataset.scene):button.dataset.act==='new-task'?undefined:dialog?.scene;
+  const value=nativeTaskAvailability(state,workspace.snapshot?.nativeLanguageReadiness,scene);if(!value.allowed){button.disabled=true;button.title=value.message;}
+ }
+ const language=workspaceLanguage(state).contentLanguage;for(const input of root.querySelectorAll('[data-scene-param="outputLanguages"]')){input.checked=input.value===language;input.disabled=true;}
+ if(dialog?.type==='new-task')dialog.sceneRuntime={...dialog.sceneRuntime,outputLanguages:[language]};
+}
 function loadImportDraftNotice(owner){
  if(!['task-scene','new-task','ecommerce-import'].includes(owner?.type))return;
  workspace.importDraftRequest('/api/import-drafts').then(value=>{ui.importDraftCount=(value.drafts||[]).filter(d=>d.status==='draft').length;if(dialog===owner)refreshImportDraftNotice();}).catch(()=>{});
@@ -329,7 +340,7 @@ function renderDialog(force=true){
   const workflowFocus=['workflow','scenario-edit'].includes(dialog.type)?focusIdentity(document.activeElement):null;
   const scenarioScroll=dialog.type==='scenario-edit'?root.querySelector('.modal-body')?.scrollTop||0:0;
   root.innerHTML=(dialog.type==='shortcuts-help'?uiHtml`<div class="modal-backdrop" data-backdrop="true"><section class="modal" role="dialog" aria-modal="true" aria-labelledby="dialog-title" tabindex="-1"><header class="modal-head"><h2 id="dialog-title">审核快捷键</h2><button class="icon-btn" data-act="close-modal" aria-label="关闭弹窗">${icon('close',18)}</button></header><div class="modal-body"><p>J / K：下一条 / 上一条；E：编辑首个可处理项；Ctrl+Enter：按当前流程确认。</p><p class="hint">输入、弹窗、保存或未保存修改期间，快捷键不生效。普通 Enter 不会触发确认。</p></div><footer class="modal-footer"><button class="btn" data-act="workspace-usage">工作区用量</button><button class="btn primary" data-act="close-modal">关闭</button></footer></section></div>`:'')||diagnosticManager.dialog(dialog)||workspaceBackupManager.dialog(dialog)||pendingResolutionManager.dialog(dialog)||qualityInsightsManager.dialog(dialog)||workspaceUsageDialog(dialog)||triageDiagnosticsDialog(dialog,state)||taskLifecycleDialog(dialog,state)||rawWorkbenchManager.dialog(dialog)||ecommerceConversionManager.dialog(dialog)||importDraftManager.dialog(dialog)||importFlowExtraDialog(dialog)||cleaningManager.dialog(dialog)||(dialog.type==='workflow'?workflowManager.render():'')||sceneConfigurationManager.dialog(dialog)||scenarioManager.dialog(dialog)||ruleSetManager.dialog(dialog)||ecommerceManager.dialog(dialog)||importManager.dialog(dialog)||ruleCalibrationManager.dialog(dialog)||catalogManager.dialog(dialog)||dialogView(dialog,state,ui);
-  refreshImportDraftNotice();
+  refreshImportDraftNotice();applyNativeTaskControls(root);
   for(const key of modalDisclosures){const node=root.querySelector(`details[data-dialog-disclosure="${CSS.escape(key)}"]`);if(node)node.open=true;}
   for(const key of workflowDisclosures){const node=root.querySelector(`details[data-workflow-snapshot="${CSS.escape(key)}"]`);if(node)node.open=true;}
   const workflowElements=[...root.querySelectorAll('.workflow-body,.workflow-json')];
@@ -641,8 +652,8 @@ document.addEventListener('click',async event=>{
     if(await reviewRoutingController.handleAction(action,button))return;
     if(handleTaskRuleSelectionAction(action,{dialog,root:document.getElementById('overlay-root'),refreshBasis}))return;
     if(action==='nav'){ui.taskDetailId='';if(button.dataset.page==='review'){ui.reviewTaskId='';ui.reviewSceneFilter='';}go(button.dataset.page);}
-    else if(action==='new-task'){if(dialog?.file){openDialog({type:'import-change-confirm',origin:dialog,nextAction:'scene'});}else openDialog({type:'task-scene'});}
-    else if(action==='task-scene'){const scene=button.dataset.scene==='ecommerce'?'电商评论回复':button.dataset.scene==='consultation'?'新品产品咨询':button.dataset.scene,config=findScenario(state,scene,{includeDisabled:false});if(!config)throw new Error('场景已停用或不存在，请重新选择。');if(config.engine==='ecommerce')await ecommerceManager.action('ec-open');else{const scenarioSnapshot=freezeScenario(state,scene);openDialog({type:'new-task',scene,scenarioSnapshot,mode:'manual',step:1,requirePreviewConfirmation:true,reviewer:uiT('本机操作人'),catalog:catalogManager.getCatalog(),effectiveDate:localBasisDate(),ruleIds:[...config.ruleIds]});if(!config.builtin||config.inputProfileId)await importManager.action('input-import');}}
+    else if(action==='new-task'){assertNativeTaskAvailable();if(dialog?.file){openDialog({type:'import-change-confirm',origin:dialog,nextAction:'scene'});}else openDialog({type:'task-scene'});}
+    else if(action==='task-scene'){const scene=button.dataset.scene==='ecommerce'?'电商评论回复':button.dataset.scene==='consultation'?'新品产品咨询':button.dataset.scene,config=findScenario(state,scene,{includeDisabled:false});assertNativeTaskAvailable(scene);if(!config)throw new Error('场景已停用或不存在，请重新选择。');if(config.engine==='ecommerce')await ecommerceManager.action('ec-open');else{const scenarioSnapshot=freezeScenario(state,scene);openDialog({type:'new-task',scene,scenarioSnapshot,mode:'manual',step:1,requirePreviewConfirmation:true,reviewer:uiT('本机操作人'),catalog:catalogManager.getCatalog(),effectiveDate:localBasisDate(),ruleIds:[...config.ruleIds]});if(!config.builtin||config.inputProfileId)await importManager.action('input-import');}}
     else if(action==='execution-page'){const page=await workspace.readExecution(id,Number(button.dataset.offset||0));ui.executionPages??={};ui.executionPages[id]=page;if(ui.taskDetailId===id)render();}
     else if(action==='execution-close'){delete ui.executionPages?.[id];render();}
     else if(action==='task-detail')showTaskDetail(id);
@@ -738,6 +749,7 @@ document.addEventListener('click',async event=>{
     }
     else if(action==='new-back'){dialog.step--;renderDialog();}
     else if(action==='create-business-task'||action==='create-business-task-start'){
+      assertNativeTaskAvailable(dialog.scene||'新品产品咨询');
       dialog.executionSettings=normalizeExecutionSettings(dialog.executionSettings,{raw:dialog.parsed?.rawDirect===true});
       const autoStart=action==='create-business-task-start';if(autoStart&&!await ensureModelReady(dialog))return;
       assertConsultationInput(dialog.parsed,state,dialog.scene||'新品产品咨询');refreshBasis();if(!dialog.basisSnapshot)throw new Error(dialog.error||'请至少选择一个有效检查项');

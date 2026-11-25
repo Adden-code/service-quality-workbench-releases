@@ -1,7 +1,9 @@
 import {nativeExecutionContext} from './native-language-execution.mjs';
+import {nativeDisplayProjection} from './native-delivery.mjs';
+import {assertNativeReportCoverage} from './native-report-language.mjs';
 import {NATIVE_LANGUAGE_VALIDATOR} from '../public/native-language-validation.mjs';
 import {workspaceLanguage,languageError,assertNativeStageReady} from '../public/workspace-language.mjs';
-import {initializeLanguageGovernance,selectWorkspaceLanguage,diskLanguageHistory,verifyLanguageFiles} from './workspace-language-service.mjs';
+import {initializeLanguageGovernance,selectWorkspaceLanguage,diskLanguageHistory,verifyLanguageFiles,resolveNativeTaskMaterial,nativeLanguageReadiness} from './workspace-language-service.mjs';
 import {validateBilingualMaterial,assertMaterialReleaseAllowed,freezeNativeLanguage,languageHash,languageCanonical,languageDiff} from './native-language-materials.mjs';
 import {encodeWorkspaceArchive} from './workspace-archive.mjs';
 import {productVersion} from '../packaging/version.mjs';
@@ -146,6 +148,19 @@ export async function createWorkspaceStore({dataDir,fsOps=fs,catalogSeed=null,sc
     }
   }
   const nativeMaterialCache=new Map();
+  const publishedMaterialCache=new Map();let readinessCache;
+  async function publishedMaterials(){
+    const values=[];for(const ref of document.state?.languageMaterials?.releases||[]){let material=publishedMaterialCache.get(ref.contentHash);if(!material){material=JSON.parse(await fsOps.readFile(path.join(directory,'language-materials',ref.contentHash+'.json'),'utf8'));validateBilingualMaterial(material);assertMaterialReleaseAllowed(material);if(material.contentHash!==ref.contentHash)languageError('BILINGUAL_HASH_MISMATCH','Published material reference differs from its bytes.');publishedMaterialCache.set(ref.contentHash,material);}values.push(material);}return values;
+  }
+  async function nativeReadiness(){
+    if(readinessCache?.revision===document.revision)return clone(readinessCache.value);
+    const value=nativeLanguageReadiness(document.state,document.catalog,await publishedMaterials(),await selectedNativeFreeze());readinessCache={revision:document.revision,value};return clone(value);
+  }
+  async function selectedNativeFreeze(){
+    const selection=document.state?.languageAudit?.findLast(e=>e.action==='freeze-material'&&e.after?.hash&&!e.after.taskId);if(!selection)return null;
+    const ref=document.state.languageMaterials?.freezes?.find(r=>r.hash===selection.after.hash);if(!ref)languageError('LANGUAGE_FREEZE_INVALID','The explicitly selected release is missing from the frozen registry.');
+    const value=JSON.parse(await fsOps.readFile(path.join(directory,'language-materials',ref.hash+'.json'),'utf8'));if(languageHash(value)!==ref.hash)languageError('LANGUAGE_FREEZE_INVALID','The selected release bytes do not match their immutable reference.');return value;
+  }
   async function readNativeMaterial(task){
     const hash=task?.executionSnapshot?.languageMaterialRef;
     if(!HASH.test(hash||''))languageError('NATIVE_MATERIAL_INVALID','Missing frozen material reference.');
@@ -263,7 +278,7 @@ export async function createWorkspaceStore({dataDir,fsOps=fs,catalogSeed=null,sc
       return persist({...document,state,revision:document.revision+1,mutations:[...document.mutations,{id:input.operationId,digest:fingerprint}]});
     });},
     lockIdentity:()=>({path:lockPath,pid:process.pid,nonce}),
-    read,changesSince,readNativeMaterial,
+    read,changesSince,readNativeMaterial,nativeReadiness,
     // Internal immutable view: callers must never mutate or expose it to plugins.
     transportSnapshot:()=>({initialized:document.revision>0,revision:document.revision,state:document.state,catalog:document.catalog}),
     reviewCommand(input,{snapshot=true}={}){const request=clone(input);return serial(async()=>{
@@ -351,8 +366,24 @@ export async function createWorkspaceStore({dataDir,fsOps=fs,catalogSeed=null,sc
         const deletedEvents=catalog=>(catalog?.events||[]).filter(event=>(document.catalog?.deletedRules||[]).some(entry=>event.kind==='rules'&&entry.id===event.id&&entry.version===event.version));
         if(canonical(deletedEvents(request.catalog))!==canonical(deletedEvents(document.catalog)))throw new WorkspaceError('已删除规则的历史操作记录不可改写。');
         if((document.catalog?.rules||[]).some(old=>!request.catalog?.rules?.some(next=>next.id===old.id&&next.version===old.version)))throw new WorkspaceError('删除规则须使用专用入口并检查任务引用。');
-        validateWorkspace(request.state,request.catalog,document.state,{authenticateNewSnapshots:true,allowNativeTaskCreation:nativeLanguageStage>=2});
+        const newFreezes=[];
+        if(nativeLanguageStage>=4&&workspaceLanguage(document.state)?.mode==='native-v1'){
+          const oldIds=new Set(document.state.tasks.map(t=>t.id)),materials=await publishedMaterials(),selectedFreeze=await selectedNativeFreeze();
+          for(let i=0;i<(request.state?.tasks||[]).length;i++){
+            const task=request.state.tasks[i];if(oldIds.has(task.id))continue;
+            if(task.executionSnapshot?.languageExecution){
+              const frozen=await readNativeMaterial(task);assertNativeReportCoverage(nativeExecutionContext(task,frozen));nativeDisplayProjection(task,frozen,{delivery:true});task.executionSnapshot.schemaVersion=2;continue;
+            }
+            const prepared=resolveNativeTaskMaterial(document.state,task,materials,selectedFreeze);request.state.tasks[i]=prepared.task;
+            const registry=request.state.languageMaterials||{schemaVersion:1,releases:[],freezes:[]};
+            if(!registry.freezes.some(r=>r.hash===prepared.hash)){registry.freezes.push({hash:prepared.hash,languageExecution:prepared.frozen.languageExecution});newFreezes.push(prepared);}
+            request.state.languageMaterials=registry;
+            request.state.languageAudit.push({id:`freeze-task-${request.mutationId}-${i}`,action:'freeze-material',actor:'local-operator',at:new Date().toISOString(),reason:'Freeze exact previously reviewed material for the new task.',before:null,after:{taskId:task.id,hash:prepared.hash,languageExecution:prepared.frozen.languageExecution}});
+          }
+        }
+        validateWorkspace(request.state,request.catalog,document.state,{authenticateNewSnapshots:true,allowNativeTaskCreation:nativeLanguageStage>=2,trustedLanguage:nativeLanguageStage>=4});
         try{validateRuleSetCatalogTransition(document.catalog,request.catalog);}catch(error){throw new WorkspaceError(error.message);}
+        for(const prepared of newFreezes)await writeLanguageArtifact(prepared.hash,prepared.frozen);
         await checkSources(request.state,request.catalog);
         const monitored=monitorCalibrations(request.state);
         validateWorkspace(monitored,request.catalog,request.state,{trustedCalibration:true});

@@ -17,7 +17,7 @@ const missing=error=>error?.code==='ENOENT';
 /** The HTTP owner must reject/drain all other requests before apply, including
  * settings writes and connection-test completion. This lifetime lock precedes
  * opening the workspace store, so another process cannot enter between swaps. */
-export async function createWorkspaceRestore({dataDir,fsOps=fs,failurePoint=async()=>{}}={}){
+export async function createWorkspaceRestore({dataDir,fsOps=fs,nativeLanguageStage=0,failurePoint=async()=>{}}={}){
  if(typeof dataDir!=='string'||!dataDir.trim())throw issue('请指定恢复目标工作区。',400);
  const root=path.resolve(dataDir),parent=path.dirname(root),stem=path.basename(root);
  if(parent===root)throw issue('工作区不能是磁盘根目录。',400);
@@ -97,7 +97,7 @@ export async function createWorkspaceRestore({dataDir,fsOps=fs,failurePoint=asyn
    // Empty directories do not occupy archive entries. Declare every business
    // directory before the journal, including those a reopening module creates.
    for(const name of WORKSPACE_BUSINESS_ENTRIES.filter(name=>name!=='workspace.json'))await fsOps.mkdir(path.join(p.stage,name),{recursive:true,mode:0o700});
-   validator=await createWorkspaceStore({dataDir:p.stage,fsOps});const document=await validator.validateIntegrity();await validator.close();validator=null;
+   validator=await createWorkspaceStore({dataDir:p.stage,fsOps,nativeLanguageStage});const document=await validator.validateIntegrity();await validator.close();validator=null;
    const publicValue=Object.freeze({id,directory:p.stage,manifest:structuredClone(decoded.manifest),summary:backupSummary(document)});
    stages.set(id,{public:publicValue});return publicValue;
   }catch(error){await validator?.close().catch(()=>{});await fsOps.rm(p.stage,{recursive:true,force:true}).catch(()=>{});throw error;}
@@ -117,7 +117,7 @@ export async function createWorkspaceRestore({dataDir,fsOps=fs,failurePoint=asyn
    const revision=Math.max(before.revision,incoming.revision)+1;if(!Number.isSafeInteger(revision))throw issue('工作区版本超出允许范围。');
    await atomic(path.join(p.stage,'workspace.json'),JSON.stringify({...incoming,state:taskDeletion?incoming.state:suspendRestoredCalibrations(incoming.state),revision,mutations:[]}));
    // Recheck all original sources after staging, before closing the old data.
-   let validator;try{validator=await createWorkspaceStore({dataDir:p.stage,fsOps});await validator.validateIntegrity();}finally{await validator?.close();}
+   let validator;try{validator=await createWorkspaceStore({dataDir:p.stage,fsOps,nativeLanguageStage});await validator.validateIntegrity();}finally{await validator?.close();}
    const oldNames=[],newNames=[];for(const name of WORKSPACE_BUSINESS_ENTRIES){if(await plain(path.join(root,name)))oldNames.push(name);if(await plain(path.join(p.stage,name)))newNames.push(name);}
    await fsOps.mkdir(p.old,{mode:0o700});await syncDirectory(parent);
    journal={version:1,id:staged.id,target:root,phase:'swapping',oldNames,newNames};await atomic(journalPath,JSON.stringify(journal));await failurePoint('journal-written',{id:staged.id});

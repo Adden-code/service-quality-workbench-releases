@@ -1,9 +1,58 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {workspaceLanguage,validateLanguagePolicy,languageError} from '../public/workspace-language.mjs';
-import {languageCanonical,languageHash,validateBilingualMaterial,validateFrozenLanguageMaterial,assertMaterialReleaseAllowed} from './native-language-materials.mjs';
+import {languageCanonical,languageHash,validateBilingualMaterial,validateFrozenLanguageMaterial,assertMaterialReleaseAllowed,freezeNativeLanguage,freezeTaskLanguageContract} from './native-language-materials.mjs';
+import {nativeExecutionContext,nativeSourceConfiguration,REQUIRED_NATIVE_PROMPTS} from './native-language-execution.mjs';
+import {assertNativeReportCoverage,REQUIRED_NATIVE_REPORT_PROMPTS} from './native-report-language.mjs';
+import {nativeDisplayProjection} from './native-delivery.mjs';
+import {NATIVE_LANGUAGE_VALIDATOR} from '../public/native-language-validation.mjs';
+import {sceneBasisForTask,freezeSceneExecution} from '../public/scene-configuration.mjs';
 const hash=v=>typeof v==='string'&&/^[a-f0-9]{64}$/.test(v);
 const same=(a,b)=>languageCanonical(a)===languageCanonical(b);
+// Publication is a separate, audited human operation. This resolver consumes
+// only existing approved bytes and never chooses among competing versions.
+export function resolveNativeTaskMaterial(state,task,materials,selectedFreeze=null){
+  const policy=workspaceLanguage(state);
+  if(task.scene!=='新品产品咨询')languageError('EC_ARBITRATION_PENDING','This scene has no approved native execution scope. EC still requires arbitration and bilingual business review.');
+  if(!task.executionSnapshot)languageError('NATIVE_MATERIAL_NOT_READY','The task needs a published scene configuration and its exact reviewed bilingual materials.');
+  if(selectedFreeze){
+    const prepared=freezeTaskLanguageContract(task,policy,selectedFreeze);prepared.executionSnapshot.schemaVersion=2;
+    const context=nativeExecutionContext(prepared,selectedFreeze);assertNativeReportCoverage(context);nativeDisplayProjection(prepared,selectedFreeze,{delivery:true});
+    return{task:prepared,frozen:selectedFreeze,hash:languageHash(selectedFreeze)};
+  }
+  const available=materials.filter(m=>m.scene===task.scene),selected=[];
+  const pick=(matches,label)=>{
+    if(!matches.length)languageError('NATIVE_MATERIAL_NOT_READY',`No exact reviewed material for ${label}. Complete paired Chinese/English review and publish the matching rules, policies, configuration, report template, prompt and glossary before creating a task.`);
+    if(matches.length!==1)languageError('NATIVE_MATERIAL_AMBIGUOUS',`Multiple reviewed versions match ${label}. An explicit approved release selection is required before task creation.`);
+    const m=matches[0];validateBilingualMaterial(m);assertMaterialReleaseAllowed(m);if(!selected.some(v=>v.id===m.id))selected.push(m);return m;
+  };
+  const source=(value,kind)=>pick(available.filter(m=>m.id===value.id&&m.kind===kind&&m.sourceHash===languageHash(value)&&(kind==='rule'||kind==='policy'?m.version===value.version:true)),`${value.id}@${value.version}`);
+  for(const r of task.basisSnapshot.rules.filter(r=>r.ruleKind!=='meta'))source(r,'rule');
+  for(const p of task.basisSnapshot.policies)source(p,'policy');
+  const s=task.executionSnapshot;
+  if(s.taxonomy)source(s.taxonomy,'taxonomy');for(const table of s.exceptions||[])source(table,'exception');
+  source(s.template,'template');
+  pick(available.filter(m=>m.id==='NATIVE-CONFIG'&&m.sourceHash===languageHash(nativeSourceConfiguration(s))),'NATIVE-CONFIG');
+  const required=[...REQUIRED_NATIVE_PROMPTS,...REQUIRED_NATIVE_REPORT_PROMPTS];
+  const prompt=pick(available.filter(m=>m.kind==='prompt'&&required.every(id=>m.clauses.some(c=>c.clauseId===id))),'complete inspection and report prompt');
+  const glossary=pick(available.filter(m=>m.kind==='glossary'),'glossary');
+  for(let i=0;i<selected.length;i++)for(const key of ['exceptionIds','dependencyIds'])for(const id of selected[i].shared[key])if(!selected.some(m=>m.id===id))pick(available.filter(m=>m.id===id),id);
+  const frozen=freezeNativeLanguage(policy,{materials:selected,promptId:prompt.id,glossaryId:glossary.id,languageValidatorVersion:NATIVE_LANGUAGE_VALIDATOR});
+  const prepared=freezeTaskLanguageContract(task,policy,frozen);prepared.executionSnapshot.schemaVersion=2;
+  const context=nativeExecutionContext(prepared,frozen);assertNativeReportCoverage(context);nativeDisplayProjection(prepared,frozen,{delivery:true});
+  return{task:prepared,frozen,hash:languageHash(frozen)};
+}
+export function nativeLanguageReadiness(state,catalog,materials,selectedFreeze=null){
+  const policy=workspaceLanguage(state),base={mode:policy?.mode||'legacy-display-v1',contentLanguage:policy?.contentLanguage||null,scenes:[]};
+  if(policy?.mode==='pending-selection')return{...base,status:'selection-required'};
+  if(policy?.mode!=='native-v1')return{...base,status:'legacy'};
+  const scenes=[...new Set((state.sceneConfigurations||[]).map(c=>c.sceneId))];if(!scenes.includes('新品产品咨询'))scenes.push('新品产品咨询');if(!scenes.includes('电商评论回复'))scenes.push('电商评论回复');
+  base.scenes=scenes.map(scene=>{
+    try{const basis=sceneBasisForTask(state,catalog,scene),task={id:'readiness-preview',scene,basisSnapshot:basis,executionSnapshot:basis&&freezeSceneExecution(state,scene,{basis})};const value=resolveNativeTaskMaterial(state,task,materials,selectedFreeze);return{scene,status:'ready',materialHash:value.hash,promptBundleRef:value.frozen.languageExecution.promptBundleRef};}
+    catch(error){return{scene,status:'blocked',code:error.code||'NATIVE_MATERIAL_NOT_READY',detail:error.message};}
+  });
+  return{...base,status:base.scenes.some(s=>s.status==='ready')?'ready':'blocked'};
+}
 export function classifyLanguageHistory(state,externalHistory=[]){
   const reasons=[];
   for(const key of ['tasks','sessions','taskDeletionAudit'])if(state?.[key]?.length)reasons.push(key);

@@ -97,10 +97,11 @@ export async function seedStage3Workspace({dataDir,language='en'}={}){
 }
 
 /** Reopen only a marked synthetic workspace with a local scripted model. */
-export async function serveStage3Workspace({dataDir,port=0,requests=[]}={}){
+export async function serveStage3Workspace({dataDir,port=0,requests=[],runtimeRoot=process.env.R39_RUNTIME_ROOT}={}){
  const directory=path.resolve(dataDir),metadata=JSON.parse(await fs.readFile(path.join(directory,'synthetic-stage3.json'),'utf8'));
  assert.equal(metadata.marker,STAGE3_SYNTHETIC_MARKER);const model=createStage3SyntheticModel({language:metadata.language,requests});
- const server=await createWorkbenchServer({dataDir:directory,nativeLanguageStage:3,arkClient:model.client,modelConfig:model.modelConfig,catalogSeed:null,sceneSeed:null,automaticBuiltinUpgrade:false});
+ const factory=runtimeRoot?(await import(pathToFileURL(path.join(path.resolve(runtimeRoot),'server.mjs')))).createWorkbenchServer:createWorkbenchServer;
+ const server=await factory({dataDir:directory,nativeLanguageStage:runtimeRoot?4:3,arkClient:model.client,modelConfig:model.modelConfig,catalogSeed:null,sceneSeed:null,automaticBuiltinUpgrade:false});
  server.listen(port,'127.0.0.1');await once(server,'listening');return{server,origin:'http://127.0.0.1:'+server.address().port,metadata,requests};
 }
 
