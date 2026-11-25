@@ -92,6 +92,11 @@ export function createWorkspaceClient({fetchImpl=globalThis.fetch,storage=null,t
     get snapshot(){return view(acknowledged);},
     get revision(){return acknowledged?.revision;},
     get token(){return acknowledged?.token;},
+    activatePilotMaterials(input){return serial(async()=>{
+      ensureWritable();
+      pending={url:'/api/workspace-language/pilot/activate',body:JSON.stringify({...input,operationId:mutationId(),baseRevision:acknowledged.revision})};
+      return sendPending();
+    });},
     chooseLanguage(language,operationId=mutationId()){return serial(async()=>{
       ensureWritable();
       try{return adopt(await request('/api/workspace-language/select',{method:'POST',headers:{'Content-Type':'application/json','X-Workspace-Token':acknowledged.token},body:JSON.stringify({language,actor:'local-operator',operationId,baseRevision:acknowledged.revision})}));}

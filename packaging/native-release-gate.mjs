@@ -7,6 +7,7 @@ export const LEGACY_RELEASE_SEEDS=Object.freeze({
  'catalog-seed.json':'59b733917c9c2345f5a9143f6559661c73dfa7e43f5be7d84487850e23c54d55',
  'scene-seed.json':'51e71a94b16c410a9b3b0f0eb0caf7058d2adee42002185806bd3d642f539351'
 });
+export const HOTFIX_01127_RELEASE_SEEDS=Object.freeze({...LEGACY_RELEASE_SEEDS,'scene-seed.json':'3e2b25273ae15ce3b214bc01ae7da8a23db1d8619e419d0ef556ee593ea143e5'});
 
 /** Compatibility packages omit drafts; pilot packages require explicit, hash-bound authorization. */
 export async function validateNativeReleasePayload(root,{expectedSeeds=LEGACY_RELEASE_SEEDS,requireLegacyCompatibility=false,requirePilot=false}={}){
@@ -28,11 +29,12 @@ export async function validateNativeReleasePayload(root,{expectedSeeds=LEGACY_RE
   legacySeeds.push({path:'resources/'+name,sha256,expectedSha256,matches:sha256===expectedSha256});
  }
  const legacySeedCompatibility=legacySeeds.length>0&&legacySeeds.every(seed=>seed.matches);
- if(requireLegacyCompatibility&&!legacySeedCompatibility)throw new Error('Legacy seeds differ from the approved 0.11.24 baseline; native draft publication is not authorized.');
+ const authorizedHotfixCompatibility=legacySeeds.length===2&&legacySeeds.every(seed=>seed.sha256===HOTFIX_01127_RELEASE_SEEDS[seed.path.slice('resources/'.length)]);
+ if(requireLegacyCompatibility&&!legacySeedCompatibility&&!authorizedHotfixCompatibility)throw new Error('Seeds differ from the approved baseline and the exact authorized 0.11.27 v2 rollback.');
  let pilot=null;try{pilot=JSON.parse(await fs.readFile(path.join(root,'resources/native-pilot-materials.json'),'utf8'));}catch(error){if(error.code!=='ENOENT')throw error;}
  if(requirePilot&&!pilot)throw new Error('The complete native pilot bundle is required.');
  if(pilot)validateNativePilotBundle(pilot);
- return {stage:4,reviewGate:pilot?'explicit-user-authorized-pilot':'required',nativeBusinessMaterialCount:pilot?.materials.length||0,...(pilot?{pilotId:pilot.id,pilotVersion:pilot.version,pilotHash:languageHash(pilot),materialStatus:'pilot-unreviewed',authorizationId:pilot.authorization.authorizationId}:{}),legacySeedCompatibility,legacySeeds,npBilingualReview:'pending',reportPromptV12Review:'pending',ecEnglishArbitration:'pending'};
+ return {stage:4,reviewGate:pilot?'explicit-workspace-activation-required':'required',nativeBusinessMaterialCount:pilot?.materials.length||0,...(pilot?{pilotId:pilot.id,pilotVersion:pilot.version,pilotHash:languageHash(pilot),materialStatus:'pilot-unreviewed',authorizationId:pilot.authorization.authorizationId,automaticInjection:false}:{}),legacySeedCompatibility,authorizedHotfixCompatibility,legacySeeds,npBilingualReview:'pending',reportPromptV12Review:'pending',ecEnglishArbitration:'pending'};
 }
 
 export function validateNativePilotBundle(bundle){
@@ -44,21 +46,25 @@ export function validateNativePilotBundle(bundle){
 }
 
 export function nativePilotReleaseGuide(language='zh'){
- return language==='en'?`Native-language pilot (0.11.26)
+ return language==='en'?`Emergency repair 0.11.27 — native pilot activation
 
-New workspaces can select Chinese or English and immediately use the built-in NP and EC scenes. Paired criteria, prompts and report templates are supplied under the user's explicit pilot authorization. Business review and EC arbitration are still pending; this package does not claim they are complete. The current Chinese criteria have not been recalibrated in this release. Please report incorrect or awkward wording with the task and rule IDs.
+The 52 paired pilot materials are unchanged from 0.11.26. They are NOT injected or activated automatically. A local maintainer must explicitly enable them, enter their name and reason, and acknowledge that Business review and EC arbitration are still pending. This approval is logged for this workspace and exact bundle. Previously auto-installed materials also require this confirmation before new tasks may use them. Existing frozen tasks and reports retain their original materials.
 
-The workspace language is locked. AI explanations are generated directly in that language. Original source text is preserved, and review/reply translations are generated automatically with the delivery. Existing workspaces and historical task snapshots retain their original behavior.
+EC-TARGET is restored verbatim to the released 0.11.22 v2 criteria, published under a new bundle/version. Other EC and NP criteria are unchanged. The retained EC native pilot material describes v3; it therefore cannot be used for new v2 tasks. Enabling the pilot allows the matching NP material, but does not bypass the EC mismatch. Existing legacy workspaces can create EC tasks using v2.
 
-English native tasks cannot reuse Chinese B6 calibration. They initially require human confirmation until each rule reaches the existing 30-pair / 80% agreement criteria in the English scope. Before upgrading, keep a full workspace backup outside the program directory. Reverting to 0.11.24 requires the pre-upgrade backup.
+English native tasks cannot reuse Chinese B6 calibration. They initially require human confirmation until each rule reaches the existing 30-pair / 80% agreement criteria in the English scope. Original source text is preserved; delivery translations remain automatic.
 
-`:`原生语言试用版（0.11.26）
+WebView2 now stores its browser profile outside the business data directory. Old desktop-profile folders are preserved and excluded from backups/startup cleanup. Browser-local preferences may reset once. Business data, frozen tasks, model settings and audit history remain in the workspace. Keep a full backup outside the program directory before upgrading.
 
-全新工作区选择中文或English后，即可使用内置新品、电商两场景。中英文判据、提示词与报告模板按用户明确授权作为试用材料随包提供；业务逐条核对和EC仲裁仍待完成，不标为正式复核通过。本版不增加新的电商判定口径调整。发现判定或措辞问题时，请记录任务编号、规则编号反馈。
+`:`0.11.27紧急修复版：原生试用启用说明
 
-工作区语言选定后锁定，AI理由直接以该语言生成；原始内容保留，评价/回复译文仍在交付时自动生成。旧工作区和历史任务继续原有行为，不重写冻结依据。
+52项双语试用材料与0.11.26逐字不变，默认不注入、不启用。维护人须在本机显式启用，填写姓名与原因，并确认业务逐条核对和EC仲裁仍待完成；授权绑定本工作区与材料包哈希并留痕。0.11.26已自动装入的材料，在用于新任务前同样须确认；已有任务及报告继续原冻结材料。
 
-英文原生任务不能复用中文B6标定，初期均需人工确认；各规则在英文范围积累至少30对独立样本、一致率达到80%后再逐步启用免审。升级前请完整备份到程序目录之外。回退0.11.24须使用升级前备份。
+EC-TARGET逐字回退0.11.22 v2，以新种子ID及版本发布。其他EC与NP判据不变。保留的EC原生试用材料仍对应v3，因此不能用于新v2任务：启用试用后，匹配的NP材料可用，EC不绕过版本不匹配。既有legacy工作区可正常新建使用v2的EC任务。
+
+英文原生任务不能复用中文B6标定，初期均需人工确认；英文范围每规则独立验证至少30对且一致率80%后再逐步开启免审。原始内容保持，交付原文译文仍自动生成。
+
+WebView2浏览器配置移至业务数据目录之外；旧desktop-profile保留原处，不进入备份与启动清理。浏览器本地偏好可能重置一次；业务数据、冻结任务、模型设置与审计保留。升级前请另存完整工作区备份。
 
 `;
 }

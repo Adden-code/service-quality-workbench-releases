@@ -69,7 +69,7 @@ test('failed atomic task write retains the original visible registry and can ret
 });
 test('changed source and conflicting client language cannot borrow reviewed hashes',async t=>{
  const f=await fixture(t);await f.publish();let {view,state}=await f.create();state.tasks[0].basisSnapshot.rules[0].passCriteria+=' changed';
- await assert.rejects(f.store.save({baseRevision:view.revision,mutationId:'changed',state,catalog:view.catalog}),e=>e.code==='NATIVE_MATERIAL_NOT_READY');
+ await assert.rejects(f.store.save({baseRevision:view.revision,mutationId:'changed',state,catalog:view.catalog}),e=>e.code==='NATIVE_SOURCE_MISMATCH');
  ({view,state}=await f.create());state.tasks[0].executionSnapshot.configuration.inspectionLanguage='zh';
  await assert.rejects(f.store.save({baseRevision:view.revision,mutationId:'language-conflict',state,catalog:view.catalog}),e=>e.code==='LANGUAGE_PARAMETER_CONFLICT');assert.deepEqual(await f.store.read(),view);
 });

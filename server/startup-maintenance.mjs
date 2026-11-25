@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import {constants} from 'node:fs';
 import path from 'node:path';
 import {createHash,randomBytes} from 'node:crypto';
-import {decodeWorkspaceArchive,MAX_BACKUP_BYTES} from './workspace-archive.mjs';
+import {decodeWorkspaceArchive,MAX_BACKUP_BYTES,isLocalWorkspaceOutput} from './workspace-archive.mjs';
 
 const sha=bytes=>createHash('sha256').update(bytes).digest('hex');
 const folded=value=>process.platform==='win32'?value.toLowerCase():value;
@@ -110,6 +110,9 @@ export async function recoverStartupCreatingFiles({dataDir,ownedLocks=[]}){
   if(depth>32){await refuse(relative(root,dir),'目录超过 32 层，保留并请维护人检查。');return;}
   await plainAncestors(dir);
   for(const entry of await fs.readdir(dir,{withFileTypes:true})){
+   // Browser caches and exported diagnostics have their own lifecycle. Never
+   // inspect or clean their contents, including legacy .creating-* and links.
+   if(depth===0&&isLocalWorkspaceOutput(entry.name))continue;
    const file=path.join(dir,entry.name),name=relative(root,file),info=await fs.lstat(file),temporary=entry.name.startsWith('.creating-');
    if(info.isSymbolicLink()){await refuse(name,'符号链接或目录联接，未跟随、未清理。');continue;}
    if(!inside(real,await fs.realpath(file))){await refuse(name,'解析后的路径超出工作区，未清理。');continue;}

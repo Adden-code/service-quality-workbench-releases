@@ -8,6 +8,7 @@ import {sceneBasisForTask,freezeSceneExecution} from '../public/scene-configurat
 import {resolveNativeTaskMaterial} from '../server/workspace-language-service.mjs';
 import {prepareReportEnrichment} from '../server/report-enrichment.mjs';
 import {nativeReportMessages,parseNativeReportEnrichment,nativeReportWireValue} from '../server/native-report-language.mjs';
+import {languageHash} from '../server/native-language-materials.mjs';
 const file=process.env.NATIVE_PILOT_BUNDLE;
 const seedDir=process.env.NATIVE_PILOT_SEEDS;
 const read=async p=>JSON.parse((await fs.readFile(p,'utf8')).replace(/^\uFEFF/,''));
@@ -16,6 +17,8 @@ for(const language of ['zh','en'])test(`complete installed pilot material ${lang
  const bundle=await read(file),store=await createWorkspaceStore({dataDir,nativeLanguageStage:4,catalogSeed:()=>read(path.join(seedDir,'catalog-seed.json')),sceneSeed:()=>read(path.join(seedDir,'scene-seed.json'))});
  t.after(async()=>{await store.close();assert.ok(dataDir.startsWith(scratch+path.sep));await fs.rm(dataDir,{recursive:true,force:true});});
  await store.enableLanguageGovernance();let view=await store.read();await store.selectLanguage({baseRevision:view.revision,operationId:'select',actor:'SYNTHETIC TEST',language});await store.installNativePilotMaterials(bundle);
+ assert.ok((await store.nativeReadiness()).scenes.every(s=>s.status==='blocked'));
+ view=await store.read();await store.activateNativePilotMaterials(bundle,{baseRevision:view.revision,operationId:'explicit-activation',actor:'SYNTHETIC TEST',reason:'Verify the unchanged paired material against its own frozen v3 baseline.',acknowledgeUnreviewed:true,bundleHash:languageHash(bundle)});
  const ready=await store.nativeReadiness();assert.equal(ready.scenes.length,2);assert.ok(ready.scenes.every(s=>s.status==='ready'),JSON.stringify(ready));view=await store.read();
  for(const scene of ['新品产品咨询','电商评论回复']){
   const basis=sceneBasisForTask(view.state,view.catalog,scene,'2026-11-25T15:00:00Z'),task={id:'SYNTHETIC',scene,basisSnapshot:basis,executionSnapshot:freezeSceneExecution(view.state,scene,{basis})};

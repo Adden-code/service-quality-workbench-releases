@@ -4,6 +4,7 @@ import path from 'node:path';
 import http from 'node:http';
 import net from 'node:net';
 import assert from 'node:assert/strict';
+import {createHash} from 'node:crypto';
 import {spawn,execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {fileURLToPath} from 'node:url';
@@ -22,7 +23,10 @@ const probe=net.createServer();await new Promise(resolve=>probe.listen(0,'127.0.
 await fs.writeFile(path.join(root,'packaging','desktop-host.mjs'),`import fs from 'node:fs';const cmd=process.argv[2];fs.appendFileSync(${JSON.stringify(calls)},JSON.stringify({cmd,dataDir:process.env.DEMO_DATA_DIR})+'\\n');const stopped=cmd==='--stop';console.log(JSON.stringify({ok:true,state:stopped?'stopped':'ready',dataDir:process.env.DEMO_DATA_DIR,rootId:'synthetic-root',url:${JSON.stringify(origin)},staleLock:{present:!stopped,recoverable:false,reason:'owner-alive'},activity:{busy:false,unknown:false,counts:{ai:0,report:0,translation:0,structured:0}}}));`);
 // The template above deliberately creates literal JavaScript newline escaping.
 const stub=path.join(root,'packaging','desktop-host.mjs');await fs.writeFile(stub,(await fs.readFile(stub,'utf8')).replace("+'\\\\n'","+'\\n'"));
-const env={...process.env,DEMO_DATA_DIR:data,WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS:`--remote-debugging-port=${debugPort}`};
+const local=path.join(root,'synthetic-local-app-data'),legacy=path.join(data,'desktop-profile','Default','synthetic-cache.txt');
+await fs.mkdir(path.dirname(legacy),{recursive:true});await fs.writeFile(legacy,'Synthetic legacy cache must remain untouched');
+const profile=path.join(local,'MSSQualityWorkbench-shell','profile',createHash('sha256').update(path.resolve(data).replace(/[\\/]+$/,'').toLowerCase()+'\nwebview2-profile').digest('hex'));
+const env={...process.env,LOCALAPPDATA:local,DEMO_DATA_DIR:data,WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS:`--remote-debugging-port=${debugPort}`};
 let child,browser,popupBrowser,closed=false;const errors=[];
 const waitFor=async(fn,label)=>{const until=Date.now()+45000;while(Date.now()<until){try{const value=await fn();if(value)return value;}catch{}await new Promise(resolve=>setTimeout(resolve,150));}throw new Error('Timed out: '+label);};
 try{
@@ -44,8 +48,8 @@ try{
  const before=await fs.readFile(calls,'utf8');await execute(built.executable,[],{env:{...env,DEMO_DATA_DIR:other},windowsHide:true});assert.equal(await fs.readFile(calls,'utf8'),before,'second different-data launch only activates existing window');
  await execute(built.executable,['--exit-for-install'],{env:{...env,DEMO_DATA_DIR:other},windowsHide:true,timeout:90000});assert.deepEqual(await exit,{code:0,signal:null});closed=true;
  const log=(await fs.readFile(calls,'utf8')).trim().split('\n').map(JSON.parse);assert.deepEqual(log.map(x=>x.cmd),['--inspect','--start','--inspect','--stop']);assert.ok(log.every(x=>x.dataDir===data));
- assert.equal(await fs.stat(other).then(()=>true,()=>false),false);assert.equal(await fs.stat(path.join(data,'desktop-profile')).then(()=>true,()=>false),true);assert.deepEqual(errors,[]);
- const verification={status:'passed',runtimeVersion:info.runtimeVersion,sdkVersion:WEBVIEW2_SDK.version,root,syntheticOnly:true,externalModelCalls:0,steps:['native-WebView2-ready','installer-English-navigator','file-input','blob-download','blob-report-popup','different-data-second-launch-activation','different-data-installer-close','WebView2-dispose-and-exit'],bridgeCalls:log,errors};
+ assert.equal(await fs.stat(other).then(()=>true,()=>false),false);assert.equal((await fs.stat(profile)).isDirectory(),true);assert.equal(await fs.readFile(legacy,'utf8'),'Synthetic legacy cache must remain untouched');assert.deepEqual(await fs.readdir(path.dirname(legacy)),['synthetic-cache.txt']);assert.deepEqual(errors,[]);
+ const verification={status:'passed',runtimeVersion:info.runtimeVersion,sdkVersion:WEBVIEW2_SDK.version,root,profile,legacyProfilePreserved:true,syntheticOnly:true,externalModelCalls:0,steps:['native-WebView2-ready','external-per-workspace-profile-created','legacy-profile-untouched','installer-English-navigator','file-input','blob-download','blob-report-popup','different-data-second-launch-activation','different-data-installer-close','WebView2-dispose-and-exit'],bridgeCalls:log,errors};
  await fs.writeFile(path.join(root,'verification.json'),JSON.stringify(verification,null,2));console.log(JSON.stringify(verification,null,2));
 }finally{
  if(!closed&&child&&child.exitCode===null)await execute(built.executable,['--exit-for-install'],{env,windowsHide:true,timeout:90000}).catch(()=>{});

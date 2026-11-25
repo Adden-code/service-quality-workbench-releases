@@ -9,6 +9,16 @@ import {NATIVE_LANGUAGE_VALIDATOR} from '../public/native-language-validation.mj
 import {sceneBasisForTask,freezeSceneExecution} from '../public/scene-configuration.mjs';
 const hash=v=>typeof v==='string'&&/^[a-f0-9]{64}$/.test(v);
 const same=(a,b)=>languageCanonical(a)===languageCanonical(b);
+export function assertNativeMaterialActivated(state,materials){
+  const activated=new Set((state.languageAudit||[]).filter(e=>e.action==='activate-pilot-materials'&&e.after?.acknowledgeUnreviewed===true&&hash(e.after.bundleHash)).flatMap(e=>e.after.materialHashes||[]));
+  for(const material of materials){
+    validateBilingualMaterial(material);assertMaterialReleaseAllowed(material);
+    if(material.review.status!=='approved-pair'&&!activated.has(material.contentHash))languageError('NATIVE_PILOT_ACTIVATION_REQUIRED','A local maintainer must explicitly activate these exact unreviewed pilot materials before creating new native tasks. Existing frozen tasks remain available.');
+  }
+}
+function materialActivated(state,material){
+  return material.review?.status==='approved-pair'||(state.languageAudit||[]).some(e=>e.action==='activate-pilot-materials'&&e.after?.acknowledgeUnreviewed===true&&hash(e.after.bundleHash)&&e.after.materialHashes?.includes(material.contentHash));
+}
 // Publication is a separate, audited human operation. This resolver consumes
 // only existing approved bytes and never chooses among competing versions.
 export function resolveNativeTaskMaterial(state,task,materials,selectedFreeze=null){
@@ -17,20 +27,25 @@ export function resolveNativeTaskMaterial(state,task,materials,selectedFreeze=nu
   if(!['新品产品咨询','电商评论回复'].includes(task.scene))languageError('LANGUAGE_SCENE_NOT_READY','This scene has no native execution material scope.');
   if(!task.executionSnapshot)languageError('NATIVE_MATERIAL_NOT_READY','The task needs a published scene configuration and its exact reviewed bilingual materials.');
   if(selectedFreeze&&selectedFreeze.paired.every(m=>m.scene===task.scene)){
+    assertNativeMaterialActivated(state,selectedFreeze.paired);
     const prepared=freezeTaskLanguageContract(task,policy,selectedFreeze);prepared.executionSnapshot.schemaVersion=2;
     const context=nativeExecutionContext(prepared,selectedFreeze);assertNativeReportCoverage(context);nativeDisplayProjection(prepared,selectedFreeze,{delivery:true});
     return{task:prepared,frozen:selectedFreeze,hash:languageHash(selectedFreeze)};
   }
-  const installed=state.languageAudit?.findLast(e=>e.action==='install-pilot-materials'&&e.after?.scenes?.includes(task.scene));
   const approved=materials.filter(m=>m.scene===task.scene&&m.review?.status==='approved-pair');
-  const available=materials.filter(m=>m.scene===task.scene&&(m.review?.status==='approved-pair'||installed?.after?.materialHashes?.includes(m.contentHash))),selected=[];
+  const sceneMaterials=materials.filter(m=>m.scene===task.scene),available=sceneMaterials.filter(m=>materialActivated(state,m)),selected=[];
   const pick=(matches,label)=>{
+    if(!matches.length&&sceneMaterials.some(m=>!materialActivated(state,m)))languageError('NATIVE_PILOT_ACTIVATION_REQUIRED','Explicit local activation of the bundled unreviewed pilot materials is required before new native tasks.');
     if(!matches.length)languageError('NATIVE_MATERIAL_NOT_READY',`No exact reviewed material for ${label}. Complete paired Chinese/English review and publish the matching rules, policies, configuration, report template, prompt and glossary before creating a task.`);
     const reviewed=matches.filter(m=>approved.includes(m));if(reviewed.length)matches=reviewed;
     if(matches.length!==1)languageError('NATIVE_MATERIAL_AMBIGUOUS',`Multiple reviewed versions match ${label}. An explicit approved release selection is required before task creation.`);
     const m=matches[0];validateBilingualMaterial(m);assertMaterialReleaseAllowed(m);if(!selected.some(v=>v.id===m.id))selected.push(m);return m;
   };
-  const source=(value,kind)=>pick(available.filter(m=>m.id===value.id&&m.kind===kind&&m.sourceHash===languageHash(value)&&(kind==='rule'||kind==='policy'?m.version===String(value.version):true)),`${value.id}@${value.version}`);
+  const source=(value,kind)=>{
+    const candidates=available.filter(m=>m.id===value.id&&m.kind===kind),matches=candidates.filter(m=>m.sourceHash===languageHash(value)&&(kind==='rule'||kind==='policy'?m.version===String(value.version):true));
+    if(!matches.length&&candidates.length)languageError('NATIVE_SOURCE_MISMATCH',`Activated material does not match the current source: ${value.id}@${value.version}. Activation cannot replace missing reviewed source bytes.`);
+    return pick(matches,`${value.id}@${value.version}`);
+  };
   for(const r of task.basisSnapshot.rules.filter(r=>r.ruleKind!=='meta'))source(r,'rule');
   for(const p of task.basisSnapshot.policies)source(p,'policy');
   const s=task.executionSnapshot;
@@ -98,7 +113,11 @@ export function validateLanguageRegistry(state,previous,{trustedLanguage=false}=
     const hashes=new Set();for(const r of registry.freezes){if(!r||Object.keys(r).length!==2||!hash(r.hash)||!r.languageExecution||hashes.has(r.hash))languageError('LANGUAGE_MATERIAL_INVALID','Invalid frozen language material reference.');hashes.add(r.hash);}
   }
   const audit=state?.languageAudit;
-  if(audit!==undefined&&(!Array.isArray(audit)||new Set(audit.map(e=>e?.id)).size!==audit.length||audit.some(e=>!e||!['classify','select-language','publish-material','freeze-material','install-pilot-materials'].includes(e.action)||!['id','actor','at','reason'].every(k=>typeof e[k]==='string'&&e[k].trim())||!Number.isFinite(Date.parse(e.at))||!Object.hasOwn(e,'before')||!Object.hasOwn(e,'after'))))languageError('LANGUAGE_AUDIT_INVALID','Language audit trail is incomplete.');
+  if(audit!==undefined&&(!Array.isArray(audit)||new Set(audit.map(e=>e?.id)).size!==audit.length||audit.some(e=>!e||!['classify','select-language','publish-material','freeze-material','install-pilot-materials','activate-pilot-materials'].includes(e.action)||!['id','actor','at','reason'].every(k=>typeof e[k]==='string'&&e[k].trim())||!Number.isFinite(Date.parse(e.at))||!Object.hasOwn(e,'before')||!Object.hasOwn(e,'after'))))languageError('LANGUAGE_AUDIT_INVALID','Language audit trail is incomplete.');
+  for(const event of audit||[])if(event.action==='activate-pilot-materials'){
+    const value=event.after;
+    if(!value||!hash(value.bundleHash)||value.materialStatus!=='pilot-unreviewed'||value.acknowledgeUnreviewed!==true||!['id','version'].every(k=>typeof value[k]==='string'&&value[k].trim())||!Array.isArray(value.materialHashes)||!value.materialHashes.length||new Set(value.materialHashes).size!==value.materialHashes.length||value.materialHashes.some(h=>!hash(h)||!registry?.releases.some(r=>r.contentHash===h))||!Array.isArray(value.scenes)||!value.scenes.length)languageError('LANGUAGE_AUDIT_INVALID','Pilot activation must bind the exact installed bundle and material hashes with explicit local acknowledgement.');
+  }
   if(previous){
     if(!same((audit||[]).slice(0,(previous.languageAudit||[]).length),previous.languageAudit||[]))languageError('LANGUAGE_AUDIT_IMMUTABLE','Language audit history cannot be rewritten.');
     for(const key of ['releases','freezes'])if(!same((registry?.[key]||[]).slice(0,(previous.languageMaterials?.[key]||[]).length),previous.languageMaterials?.[key]||[]))languageError('LANGUAGE_MATERIAL_IMMUTABLE','Published language materials and frozen references cannot be removed or rewritten.');

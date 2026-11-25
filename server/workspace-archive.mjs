@@ -10,6 +10,10 @@ const MAGIC=Buffer.from('SQWB0001');
 export const MAX_BACKUP_BYTES=512*1024*1024;
 const MAX_MANIFEST=8*1024*1024,MAX_FILE=64*1024*1024,MAX_FILES=20000;
 const roots=new Set(['sources','workflow-runs','report-jobs','raw-structure','content-translations','report-cache','translation-cache','import-drafts','admin-drafts','backups','language-materials']);
+// Exact top-level local outputs, never business sources or restore targets.
+// Skip before lstat/realpath so legacy WebView2 locks and junctions are untouched.
+// diagnostics contains generated, allowlisted metadata ZIPs, not source records.
+export const isLocalWorkspaceOutput=name=>['desktop-profile','diagnostics'].includes(process.platform==='win32'?name.toLowerCase():name);
 const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
 const fail=message=>{throw new WorkspaceError(message,400);};
 const transient=name=>/^\..*\.tmp$/.test(name)||/^\.(workspace|workflow)\.lock(?:\.recovery)?$/.test(name);
@@ -55,7 +59,7 @@ export async function encodeWorkspaceArchive(dataDir,{appVersion='0.10.6'}={}){
  async function walk(dir,relative='',depth=0){
   if(depth>32)fail('工作区目录层级过深。');
   for(const entry of (await fs.readdir(dir,{withFileTypes:true})).sort((a,b)=>a.name.localeCompare(b.name,'en'))){
-   if(!relative&&['workspace-records','.secrets','logs','.portable-instance.json','.portable-instance.lock','.workspace-control.lock','.workspace-control.lock.recovery','.workspace-restore.json'].includes(entry.name)||transient(entry.name))continue;
+   if(!relative&&(isLocalWorkspaceOutput(entry.name)||['workspace-records','.secrets','logs','.portable-instance.json','.portable-instance.lock','.workspace-control.lock','.workspace-control.lock.recovery','.workspace-restore.json'].includes(entry.name))||transient(entry.name))continue;
    const name=relative?`${relative}/${entry.name}`:entry.name,full=path.join(dir,entry.name),stat=await fs.lstat(full);
    if(stat.isSymbolicLink()||!(await fs.realpath(full)).startsWith(real+path.sep))fail('工作区包含目录链接，无法保证完整备份。');
    if(stat.isDirectory()){

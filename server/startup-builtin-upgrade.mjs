@@ -19,14 +19,18 @@ function bundledEvent(state,sceneId){return [...(state.sceneConfigurationEvents|
 function bundledAncestor(state,sceneId){return bundledEvent(state,sceneId)?.after;}
 function versionTuple(value){return String(value||'').replace(/^V/i,'').split('.').map(n=>Number(n)||0);}
 function newer(a,b){const x=versionTuple(a),y=versionTuple(b);return x.some((n,i)=>n!==(y[i]||0)&&x.slice(0,i).every((v,j)=>v===(y[j]||0))&&n>(y[i]||0));}
-function isOlderBundle(pkg,event){
+// Explicit user-authorized rollback only. A renamed/mutated seed cannot use
+// this exception; all other anti-downgrade checks continue to apply.
+export const AUTHORIZED_TARGET_V2_ROLLBACK={id:'builtin-two-scenes-01127-target-v2-rollback',sha256:'688567a652e19828d26e81bd912d3486cc4f28384a2299f3cdc7f58fd8b2079c'};
+function isOlderBundle(pkg,event,{targetRollback=false}={}){
  // First-install events predate productVersion metadata. Compare their exact
  // bundled ancestor, never the administrator's independently edited versions.
  const old=event?.after?.configuration;if(!old)return false;
  const incoming=pkg.configuration,oldRules=new Map((old.basis?.rules||[]).map(r=>[r.id,r]));
  if((incoming.basis?.rules||[]).some(r=>oldRules.has(r.id)&&newer(oldRules.get(r.id).version,r.version)))return true;
  const rank={'ec-specific-response-v1':1,'ec-target-calibration-v2':2,'ec-target-calibration-v3':3};
- if((rank[old.basis?.businessProfile?.targetPolicyVersion]||0)>(rank[incoming.basis?.businessProfile?.targetPolicyVersion]||0))return true;
+ const authorizedTargetRollback=targetRollback&&old.basis?.businessProfile?.targetPolicyVersion==='ec-target-calibration-v3'&&incoming.basis?.businessProfile?.targetPolicyVersion==='ec-target-calibration-v2';
+ if(!authorizedTargetRollback&&(rank[old.basis?.businessProfile?.targetPolicyVersion]||0)>(rank[incoming.basis?.businessProfile?.targetPolicyVersion]||0))return true;
  if(old.basis?.businessProfile?.timing?.policyVersion==='ec-first-reply-fixed24-v1'&&incoming.basis?.businessProfile?.timing?.policyVersion!=='ec-first-reply-fixed24-v1')return true;
  return old.aggregatePolicy==='fail-only.v2'&&incoming.aggregatePolicy!=='fail-only.v2';
 }
@@ -65,10 +69,11 @@ export function prepareAutomaticBuiltinUpgrade(document,{catalogSeed,sceneSeed,p
  if(!document.state||!catalogSeed||!sceneSeed)return null;
  validateSceneSeed(sceneSeed,catalogSeed);
  const hashes=seedHashes(sceneSeed),events=document.state.sceneConfigurationEvents||[];
+ const targetRollback=sceneSeed.id===AUTHORIZED_TARGET_V2_ROLLBACK.id&&hashes[0]===AUTHORIZED_TARGET_V2_ROLLBACK.sha256;
  if(events.some(e=>e.action==='system-upgrade'&&newer(e.productVersion,productVersion)))return null;
  const already=sceneSeed.packages.every(p=>events.some(e=>e.sceneId===p.configuration.sceneId&&(['builtin-upgrade','system-upgrade'].includes(e.action)&&hashes.includes(e.seedHash)||e.action==='builtin-install'&&hashes.includes(e.requestHash))));
  if(already)return null;
- const sceneIds=sceneSeed.packages.filter(p=>{const sceneId=p.configuration.sceneId;if(events.some(e=>e.sceneId===sceneId&&['system-upgrade','builtin-upgrade'].includes(e.action)&&hashes.includes(e.seedHash)))return false;const event=bundledEvent(document.state,sceneId);if(isOlderBundle(p,event)||event?.bundledContentHash===digest(stable(content(p))))return false;const old=event?.after;return !old||!sameSceneValue(content(old),content(p));}).map(p=>p.configuration.sceneId);
+ const sceneIds=sceneSeed.packages.filter(p=>{const sceneId=p.configuration.sceneId;if(events.some(e=>e.sceneId===sceneId&&['system-upgrade','builtin-upgrade'].includes(e.action)&&hashes.includes(e.seedHash)))return false;const event=bundledEvent(document.state,sceneId);if(isOlderBundle(p,event,{targetRollback})||event?.bundledContentHash===digest(stable(content(p))))return false;const old=event?.after;return !old||!sameSceneValue(content(old),content(p));}).map(p=>p.configuration.sceneId);
  // An unchanged bundle is already represented by its installed package contents.
  if(!sceneIds.length)return null;
  const before=clone(document),actor='system-upgrade',reason=`安装版本 ${productVersion} 自动升级内置口径 ${sceneSeed.id}；历史任务冻结依据不变。`;

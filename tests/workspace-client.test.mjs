@@ -37,6 +37,16 @@ test('model API requests use server token without adding credentials to workspac
   await client.load();assert.deepEqual(await client.readModelConfig(),config);await client.saveModelConfig({apiKey:'fixture-private-key',model:'glm-5.3-flash'});await client.testModel();
   assert.equal(requests[1].headers['X-Workspace-Token'],'test-token');assert.equal(h.writes.length,0);assert.doesNotMatch(JSON.stringify(client.snapshot),/fixture-private-key/);
 });
+test('pilot activation preserves one operation body after a lost response and exposes revision conflicts for reload',async()=>{
+ const h=harness(),writes=[];let lose=true,conflict=false;const client=factory({fetchImpl:async(url,options={})=>{
+  if(url!=='/api/workspace-language/pilot/activate')return h.fetchImpl(url,options);
+  writes.push({url,headers:options.headers,body:options.body});if(conflict)return response(409,{error:'Reload before activation'});if(lose){lose=false;throw new TypeError('Synthetic lost activation response');}
+  return response(200,{...h.document,revision:2,nativePilotStatus:{status:'active',bundleHash:'a'.repeat(64)}});
+ }});
+ await client.load();const input={actor:'SYNTHETIC operator',reason:'Synthetic trial only',acknowledgeUnreviewed:true,bundleHash:'a'.repeat(64)};
+ await assert.rejects(client.activatePilotMaterials(input),/结果未确认/);assert.equal(client.hasPending,true);await client.retryPending();assert.equal(client.hasPending,false);assert.equal(client.snapshot.nativePilotStatus.status,'active');assert.equal(writes.length,2);assert.equal(writes[0].body,writes[1].body);assert.equal(writes[0].headers['X-Workspace-Token'],'test-token');assert.equal(JSON.parse(writes[0].body).baseRevision,1);assert.ok(JSON.parse(writes[0].body).operationId);
+ conflict=true;await assert.rejects(client.activatePilotMaterials(input),/Reload/);assert.equal(client.conflicted,true);assert.equal(client.hasPending,false);await client.reload();assert.equal(client.conflicted,false);
+});
 
 test('model testing and rule preparation use the saved model timeout with browser overhead',async()=>{
  const h=harness(),limits=[],config={baseUrl:'http://maas.internal/v1',model:'内网模型',authMode:'none',timeoutMs:290000,reasoningEffort:'low',maxTokens:32768,configured:true,keyConfigured:false};

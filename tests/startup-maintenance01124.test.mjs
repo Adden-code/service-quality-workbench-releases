@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {spawn} from 'node:child_process';
 import {once} from 'node:events';
+import {randomInt} from 'node:crypto';
 import {fixture as syntheticFixture} from './ec-target01121-fixtures.mjs';
 import {createWorkspaceStore} from '../server/workspace-store.mjs';
 import {createWorkbenchServer} from '../server.mjs';
@@ -18,7 +19,17 @@ async function sandbox(t){
  const close=[];t.after(async()=>{for(const fn of close.reverse())await fn();assert.ok(path.resolve(container).startsWith(root+path.sep));await fs.rm(container,{recursive:true,force:true});});
  const f=seeds(),store=await createWorkspaceStore({dataDir,...f});await store.close();return{container,dataDir,f,close};
 }
-async function openServer(box,options={}){const server=await createWorkbenchServer({dataDir:box.dataDir,...box.f,...options});await new Promise(r=>server.listen(0,'127.0.0.1',r));box.close.push(()=>new Promise((resolve,reject)=>server.close(error=>error?reject(error):resolve())));const origin=`http://127.0.0.1:${server.address().port}`;return{server,origin,snapshot:await(await fetch(origin+'/api/workspace')).json()};}
+async function openServer(box,options={}){
+ const server=await createWorkbenchServer({dataDir:box.dataDir,...box.f,...options});
+ box.close.push(()=>new Promise((resolve,reject)=>server.close(error=>error?reject(error):resolve())));
+ // Windows ephemeral allocation may select a Fetch-blocked port (e.g. 10080).
+ // These HTTP tests need a safe port, not a change to the product's fixed 4186.
+ for(let attempt=0;;attempt++){
+  try{await new Promise((resolve,reject)=>{const failed=error=>reject(error);server.once('error',failed);server.listen(randomInt(20000,60000),'127.0.0.1',()=>{server.off('error',failed);resolve();});});break;}
+  catch(error){if(error.code!=='EADDRINUSE'||attempt>=20)throw error;}
+ }
+ const origin=`http://127.0.0.1:${server.address().port}`;return{server,origin,snapshot:await(await fetch(origin+'/api/workspace')).json()};
+}
 async function readAudit(box){return(await fs.readFile(startupAuditPath(box.dataDir),'utf8')).trim().split('\n').map(line=>JSON.parse(line));}
 async function backups(box){return(await fs.readdir(box.container)).filter(name=>name.startsWith('data.before-auto-builtin-')&&name.endsWith('.sqwb')).sort();}
 async function childReady(t,box,mode){

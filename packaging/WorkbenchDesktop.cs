@@ -26,6 +26,24 @@ public static class DesktopPolicy
         using (SHA256 sha = SHA256.Create())
             return BitConverter.ToString(sha.ComputeHash(Encoding.UTF8.GetBytes(PathKey(root) + "\n" + userSid))).Replace("-", "").ToLowerInvariant();
     }
+    public static string ProfileDirectory(string dataDirectory)
+    {
+        string local = Environment.GetEnvironmentVariable("LOCALAPPDATA");
+        if (System.String.IsNullOrWhiteSpace(local)) local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        // WebView2 owns this disposable browser state. Keep it outside the
+        // backed-up workspace, isolated by workspace even across installations.
+        // Legacy dataDirectory/desktop-profile is deliberately left untouched.
+        string dataKey = PathKey(dataDirectory), key = InstanceKey(dataDirectory, "webview2-profile");
+        List<string> bases = new List<string> { Path.GetFullPath(local), Path.GetTempPath() };
+        DirectoryInfo parent = Directory.GetParent(Path.GetFullPath(dataDirectory).TrimEnd(Path.DirectorySeparatorChar));
+        if (parent != null) bases.Add(parent.FullName);
+        foreach (string directory in bases) {
+            string candidate = Path.Combine(directory, "MSSQualityWorkbench-shell", "profile", key);
+            string candidateKey = PathKey(candidate);
+            if (candidateKey != dataKey && !candidateKey.StartsWith(dataKey + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) return candidate;
+        }
+        throw new IOException("Cannot place browser profile outside this workspace. Choose a dedicated workspace folder instead of a drive root.");
+    }
     public static string Language(string root, string osLanguage)
     {
         try {
@@ -255,7 +273,7 @@ internal sealed class WorkbenchWindow : Form
     {
         if (web != null && web.CoreWebView2 != null) { web.CoreWebView2.Navigate(workbench.AbsoluteUri); return; }
         CoreWebView2EnvironmentOptions options = new CoreWebView2EnvironmentOptions(); options.Language = language == "en" ? "en-US" : "zh-CN";
-        environment = await CoreWebView2Environment.CreateAsync(null, Path.Combine(dataDir, "desktop-profile"), options);
+        environment = await CoreWebView2Environment.CreateAsync(null, DesktopPolicy.ProfileDirectory(dataDir), options);
         browserExited = new TaskCompletionSource<bool>(); environment.BrowserProcessExited += delegate { browserExited.TrySetResult(true); };
         web = new WebView2(); web.Dock = DockStyle.Fill; content.Controls.Add(web); await web.EnsureCoreWebView2Async(environment); browserCreated = true; ConfigureWebView(web); web.CoreWebView2.Navigate(workbench.AbsoluteUri);
     }

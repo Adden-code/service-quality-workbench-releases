@@ -18,9 +18,10 @@ before(async()=>{
  built=await buildDesktopShell({root,sdkDir});
  const source=path.join(root,'PolicyHarness.cs');harness=path.join(root,'PolicyHarness.exe');
  await fs.writeFile(source,`using System;using System.IO;using System.Collections.Generic;using System.Web.Script.Serialization;
-class PolicyHarness {static int Main(string[] args){var json=new JavaScriptSerializer();try {object result=null;
+class PolicyHarness {static int Main(string[] args){Console.OutputEncoding=new System.Text.UTF8Encoding(false);var json=new JavaScriptSerializer();try {object result=null;
  if(args[0]=="language")result=DesktopPolicy.Language(args[1],args[2]);
  else if(args[0]=="identity")result=DesktopPolicy.InstanceKey(args[1],args[2]);
+ else if(args[0]=="profile"){var method=typeof(DesktopPolicy).GetMethod("ProfileDirectory");if(method==null)throw new MissingMethodException("ProfileDirectory");result=method.Invoke(null,new object[]{args[1]});}
  else if(args[0]=="internal")result=DesktopPolicy.InternalNavigation(args[1],DesktopPolicy.WorkbenchUri(args[2]));
  else if(args[0]=="workbench")result=DesktopPolicy.WorkbenchUri(args[1]).AbsoluteUri;
  else if(args[0]=="close")result=DesktopPolicy.NeedsCloseConfirmation(json.DeserializeObject(args[1]) as Dictionary<string,object>);
@@ -71,6 +72,20 @@ test('native navigation retains only the verified loopback origin and its blob p
  for(const url of ['http://127.0.0.1:4186/#review','blob:http://127.0.0.1:4186/fixture','about:blank'])assert.equal((await invoke('internal',url,origin)).value,true,url);
  for(const url of ['https://example.com/','http://127.0.0.1:4187/','http://localhost:4186/','file:///D:/test.html','javascript:alert(1)','http://user@127.0.0.1:4186/'])assert.equal((await invoke('internal',url,origin)).value,false,url);
  for(const url of ['https://127.0.0.1:4186/','http://example.com:4186/','http://127.0.0.1:80/'])assert.equal((await invoke('workbench',url)).ok,false,url);
+});
+
+test('desktop WebView2 profile is outside business data and stable per normalized workspace path',native,async()=>{
+ const dataDir=path.join(root,'Synthetic business data'),local=path.join(root,'Synthetic local app data');
+ async function profile(value){const result=JSON.parse((await execute(harness,['profile',value],{windowsHide:true,env:{...process.env,LOCALAPPDATA:local}})).stdout);assert.equal(result.ok,true,JSON.stringify(result));return result.value;}
+ const one=await profile(dataDir),again=await profile(dataDir.toUpperCase()+path.sep),other=await profile(path.join(root,'Other workspace'));
+ assert.equal(one,again);assert.notEqual(one,other);assert.ok(one.toLowerCase().startsWith((path.join(local,'MSSQualityWorkbench-shell','profile')+path.sep).toLowerCase()),one);assert.equal(one.toLowerCase().startsWith((dataDir+path.sep).toLowerCase()),false);
+ assert.equal(existsSync(dataDir),false);assert.equal(existsSync(one),false);
+ for(const customData of [path.join(local,'MSSQualityWorkbench-shell'),local]){
+  const external=await profile(customData),relative=path.relative(customData,external);
+  assert.ok(relative.startsWith('..'+path.sep)||path.isAbsolute(relative),`${external} must stay outside ${customData}`);
+  assert.equal(existsSync(external),false);
+ }
+ const source=await fs.readFile(path.join(root,'packaging','WorkbenchDesktop.cs'),'utf8');assert.match(source,/CreateAsync\(null,\s*DesktopPolicy\.ProfileDirectory\(dataDir\),\s*options\)/);assert.doesNotMatch(source,/Path\.Combine\(dataDir,\s*"desktop-profile"\)/);
 });
 
 test('close confirmation is conservative for busy, unknown, blocked or incomplete activity',native,async()=>{

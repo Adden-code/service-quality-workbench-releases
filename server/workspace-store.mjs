@@ -3,7 +3,7 @@ import {nativeDisplayProjection} from './native-delivery.mjs';
 import {assertNativeReportCoverage} from './native-report-language.mjs';
 import {NATIVE_LANGUAGE_VALIDATOR} from '../public/native-language-validation.mjs';
 import {workspaceLanguage,languageError,assertNativeStageReady} from '../public/workspace-language.mjs';
-import {initializeLanguageGovernance,selectWorkspaceLanguage,diskLanguageHistory,verifyLanguageFiles,resolveNativeTaskMaterial,nativeLanguageReadiness} from './workspace-language-service.mjs';
+import {initializeLanguageGovernance,selectWorkspaceLanguage,diskLanguageHistory,verifyLanguageFiles,resolveNativeTaskMaterial,nativeLanguageReadiness,assertNativeMaterialActivated} from './workspace-language-service.mjs';
 import {validateBilingualMaterial,assertMaterialReleaseAllowed,freezeNativeLanguage,languageHash,languageCanonical,languageDiff} from './native-language-materials.mjs';
 import {encodeWorkspaceArchive} from './workspace-archive.mjs';
 import {productVersion} from '../packaging/version.mjs';
@@ -41,6 +41,16 @@ const MAX_WORKSPACE_BYTES=64*1024*1024;
 function safeName(name){
   if(typeof name!=='string'||!name.trim()||name.length>200||/[\\/\u0000-\u001f\u007f]/.test(name)||['.','..'].includes(name))throw new WorkspaceError('原文件名称无效，不可包含目录或控制字符。');
   return name;
+}
+function pilotBundleMetadata(bundle){
+  if(!object(bundle)||bundle.schemaVersion!==1||!['id','version'].every(k=>typeof bundle[k]==='string'&&bundle[k].trim())||!Array.isArray(bundle.materials)||!bundle.materials.length||!object(bundle.authorization))languageError('BILINGUAL_INVALID','Invalid shipped pilot material bundle.');
+  const seen=new Set();
+  for(const m of bundle.materials){
+    validateBilingualMaterial(m);assertMaterialReleaseAllowed(m);
+    if(m.review.status!=='pilot-unreviewed'||m.review.authorizationId!==bundle.authorization.authorizationId||m.review.actor!==bundle.authorization.actor||m.review.reason!==bundle.authorization.reason)languageError('BILINGUAL_INVALID','Pilot material authorization must match the shipped bundle.');
+    const key=m.scene+'::'+m.id+'@'+m.version;if(seen.has(key))languageError('BILINGUAL_INVALID','Duplicate pilot material version.');seen.add(key);
+  }
+  return{id:bundle.id,version:bundle.version,bundleHash:languageHash(bundle),materialStatus:'pilot-unreviewed',scenes:[...new Set(bundle.materials.map(m=>m.scene))],materialHashes:bundle.materials.map(m=>m.contentHash)};
 }
 async function acquireLock(fsOps,lockPath){
   const unavailable=()=>new WorkspaceError('数据目录已有进程锁，无法启动第二个写入进程。无法确认归属的遗留锁需要人工检查。',409);
@@ -148,7 +158,7 @@ export async function createWorkspaceStore({dataDir,fsOps=fs,catalogSeed=null,sc
     }
   }
   const nativeMaterialCache=new Map();
-  const publishedMaterialCache=new Map();let readinessCache;
+  const publishedMaterialCache=new Map(),pilotStatusMetadata=new WeakMap();let readinessCache;
   async function publishedMaterials(){
     const values=[];for(const ref of document.state?.languageMaterials?.releases||[]){let material=publishedMaterialCache.get(ref.contentHash);if(!material){material=JSON.parse(await fsOps.readFile(path.join(directory,'language-materials',ref.contentHash+'.json'),'utf8'));validateBilingualMaterial(material);assertMaterialReleaseAllowed(material);if(material.contentHash!==ref.contentHash)languageError('BILINGUAL_HASH_MISMATCH','Published material reference differs from its bytes.');publishedMaterialCache.set(ref.contentHash,material);}values.push(material);}return values;
   }
@@ -236,6 +246,34 @@ export async function createWorkspaceStore({dataDir,fsOps=fs,catalogSeed=null,sc
     return clone({initialized:true,baseRevision:revision,revision:document.revision,patch});
   }
   return {
+    nativePilotStatus(bundle){
+      if(!bundle)return{available:false,status:'unavailable',materialCount:0,activation:null};
+      // The server keeps the loaded resource object private. Polling status must
+      // not revalidate/hash all 52 materials; activation always validates anew.
+      let metadata=pilotStatusMetadata.get(bundle);if(!metadata){metadata=pilotBundleMetadata(bundle);pilotStatusMetadata.set(bundle,metadata);}
+      const activation=document.state?.languageAudit?.findLast(e=>e.action==='activate-pilot-materials'&&e.after?.bundleHash===metadata.bundleHash&&e.after?.acknowledgeUnreviewed===true),legacy=workspaceLanguage(document.state)?.mode==='legacy-display-v1';
+      return{available:true,status:legacy?'legacy':activation?'active':'inactive',id:metadata.id,version:metadata.version,bundleHash:metadata.bundleHash,materialCount:bundle.materials.length,scenes:metadata.scenes,activation:activation?{actor:activation.actor,at:activation.at,reason:activation.reason,bundleHash:metadata.bundleHash}:null};
+    },
+    activateNativePilotMaterials(bundle,input){return serial(async()=>{
+      if(nativeLanguageStage<4)languageError('NATIVE_LANGUAGE_STAGE_PENDING','Pilot activation requires the complete native interpreter.');
+      if(!object(input)||Object.keys(input).some(k=>!['baseRevision','operationId','actor','reason','acknowledgeUnreviewed','bundleHash'].includes(k))||!Number.isSafeInteger(input.baseRevision)||!['operationId','actor','reason'].every(k=>typeof input[k]==='string'&&input[k].trim()&&input[k].length<=(k==='reason'?500:k==='actor'?100:128))||input.acknowledgeUnreviewed!==true||!HASH.test(input.bundleHash||''))languageError('NATIVE_PILOT_CONFIRMATION_REQUIRED','Provide the local operator, reason and explicit acknowledgement that business review is incomplete.');
+      const metadata=pilotBundleMetadata(bundle);
+      if(input.bundleHash!==metadata.bundleHash)languageError('NATIVE_PILOT_BUNDLE_CHANGED','The bundled materials changed. Reload and review the current bundle before activation.');
+      const fingerprint=digest(canonical({input,bundleHash:metadata.bundleHash})),replay=document.mutations.find(m=>m.id===input.operationId);
+      if(replay){if(replay.digest!==fingerprint)languageError('LANGUAGE_OPERATION_CONFLICT','The operation identifier belongs to a different activation.');return read();}
+      if(input.baseRevision!==document.revision)languageError('LANGUAGE_REVISION_CONFLICT','Reload the current workspace before activating pilot materials.');
+      if(workspaceLanguage(document.state)?.mode!=='native-v1')languageError('LANGUAGE_SELECTION_REQUIRED','Only a selected native workspace can activate pilot materials.');
+      if(document.state.languageAudit?.some(e=>e.id===input.operationId))languageError('LANGUAGE_OPERATION_CONFLICT','The operation identifier is already present in the language audit.');
+      const installed=document.state.languageAudit?.find(e=>e.id===`install-pilot-${bundle.id}-${bundle.version}`);
+      if(installed&&installed.after?.bundleHash!==metadata.bundleHash)languageError('LANGUAGE_OPERATION_CONFLICT','Installed pilot version bytes changed; issue a new bundle version.');
+      if(document.state.languageAudit?.some(e=>e.action==='activate-pilot-materials'&&e.after?.bundleHash===metadata.bundleHash))return read();
+      const state=clone(document.state),registry=state.languageMaterials||{schemaVersion:1,releases:[],freezes:[]};
+      for(const m of bundle.materials)if(!registry.releases.some(r=>r.contentHash===m.contentHash))registry.releases.push({id:m.id,version:m.version,scene:m.scene,contentHash:m.contentHash});
+      state.languageMaterials=registry;state.languageAudit=[...(state.languageAudit||[]),{id:input.operationId,action:'activate-pilot-materials',actor:input.actor.trim(),at:new Date().toISOString(),reason:input.reason.trim(),before:{active:false},after:{...metadata,acknowledgeUnreviewed:true}}];
+      validateWorkspace(state,document.catalog,document.state,{trustedLanguage:true});
+      for(const m of bundle.materials)await writeLanguageArtifact(m.contentHash,m);
+      return persist({...document,state,revision:document.revision+1,mutations:[...document.mutations,{id:input.operationId,digest:fingerprint}]});
+    });},
     installNativePilotMaterials(bundle){return serial(async()=>{
       if(nativeLanguageStage<4)languageError('NATIVE_LANGUAGE_STAGE_PENDING','Pilot installation requires the complete native interpreter.');
       if(workspaceLanguage(document.state)?.mode==='legacy-display-v1')return read();
@@ -297,6 +335,7 @@ export async function createWorkspaceStore({dataDir,fsOps=fs,catalogSeed=null,sc
       if(input.baseRevision!==document.revision)languageError('LANGUAGE_REVISION_CONFLICT','Reload before freezing language materials.');
       const registry=clone(document.state.languageMaterials||{schemaVersion:1,releases:[],freezes:[]}),materials=[];
       for(const hash of input.materialHashes){if(!registry.releases.some(r=>r.contentHash===hash))languageError('LANGUAGE_MATERIAL_MISSING','Only published materials may enter an execution snapshot.');materials.push(JSON.parse(await fsOps.readFile(path.join(directory,'language-materials',hash+'.json'),'utf8')));}
+      assertNativeMaterialActivated(document.state,materials);
       const frozen=freezeNativeLanguage(workspaceLanguage(document.state),{materials,promptId:input.promptId,glossaryId:input.glossaryId,...(nativeLanguageStage>=2?{languageValidatorVersion:NATIVE_LANGUAGE_VALIDATOR}:{})}),hash=languageHash(frozen),state=clone(document.state);
       if(!registry.freezes.some(r=>r.hash===hash))registry.freezes.push({hash,languageExecution:frozen.languageExecution});state.languageMaterials=registry;
       state.languageAudit.push({id:input.operationId,action:'freeze-material',actor:input.actor,at:new Date().toISOString(),reason:input.reason,before:null,after:{hash,languageExecution:frozen.languageExecution}});
@@ -398,7 +437,7 @@ export async function createWorkspaceStore({dataDir,fsOps=fs,catalogSeed=null,sc
           for(let i=0;i<(request.state?.tasks||[]).length;i++){
             const task=request.state.tasks[i];if(oldIds.has(task.id))continue;
             if(task.executionSnapshot?.languageExecution){
-              const frozen=await readNativeMaterial(task);assertNativeReportCoverage(nativeExecutionContext(task,frozen));nativeDisplayProjection(task,frozen,{delivery:true});task.executionSnapshot.schemaVersion=2;continue;
+              const frozen=await readNativeMaterial(task);assertNativeMaterialActivated(document.state,frozen.paired);assertNativeReportCoverage(nativeExecutionContext(task,frozen));nativeDisplayProjection(task,frozen,{delivery:true});task.executionSnapshot.schemaVersion=2;continue;
             }
             const prepared=resolveNativeTaskMaterial(document.state,task,materials,selectedFreeze);request.state.tasks[i]=prepared.task;
             const registry=request.state.languageMaterials||{schemaVersion:1,releases:[],freezes:[]};

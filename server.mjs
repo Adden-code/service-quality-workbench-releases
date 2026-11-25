@@ -55,7 +55,7 @@ export async function createWorkbenchServer({dataDir=process.env.DEMO_DATA_DIR||
   const guardedRoot=process.platform==='win32'?root.toLowerCase():root,guardedData=process.platform==='win32'?resolvedData.toLowerCase():resolvedData;
   if(guardedData===guardedRoot||guardedData.startsWith(guardedRoot+path.sep))throw new WorkspaceError('工作区数据目录必须位于 public 目录之外。');
   let recovery;try{recovery=await createWorkspaceRestore({dataDir:resolvedData,nativeLanguageStage});}catch(error){error.path??='.workspace-control.lock';throw await auditStartupRefusal(resolvedData,error);}
-  let store,builtinUpgrade={status:'current'},token=randomBytes(32).toString('hex'),startupMaintenancePending=true;
+  let store,nativePilotBundle=null,builtinUpgrade={status:'current'},token=randomBytes(32).toString('hex'),startupMaintenancePending=true;
   const readWorkspaceUsage=createWorkspaceUsageReader(resolvedData);
   let config,ai,traces,reportJobs,translationJobs,importDrafts,adminDrafts,rawStructureJobs,serverClosing=false,maintenance=false,unavailable=false,inflight=0,mutationEpoch=0,preview=null;const connectionTests=new Set();
   async function closeServices(){await Promise.all([ai?.close(),reportJobs?.close(),translationJobs?.close(),rawStructureJobs?.close()]);await adminDrafts?.close();await importDrafts?.close();await traces?.close();await store?.close();}
@@ -70,10 +70,9 @@ export async function createWorkbenchServer({dataDir=process.env.DEMO_DATA_DIR||
       builtinUpgrade=automaticBuiltinUpgrade?await upgradeBuiltinOnStartup({store,dataDir:resolvedData,catalogSeed,sceneSeed,productVersion:PRODUCT_VERSION,recovery:startupRecovery}):{status:'current',recovery:startupRecovery};
       if(nativeLanguageStage>=1)await store.enableLanguageGovernance();
       if(nativeLanguageStage>=4){
-        let pilotBundle;
-        try{pilotBundle=JSON.parse(await fs.readFile(path.join(project,'resources/native-pilot-materials.json'),'utf8'));}
+        nativePilotBundle=null;
+        try{nativePilotBundle=JSON.parse(await fs.readFile(path.join(project,'resources/native-pilot-materials.json'),'utf8'));}
         catch(error){if(error.code!=='ENOENT')throw error;}
-        if(pilotBundle)await store.installNativePilotMaterials(pilotBundle);
       }
       if(nativeLanguageStage<2&&workspaceLanguage(store.transportSnapshot().state)?.mode==='native-v1'&&store.transportSnapshot().state.tasks.length)languageError('NATIVE_LANGUAGE_STAGE_PENDING','This stage 1 build cannot execute native tasks from a later-stage workspace. Restore its pre-upgrade backup or use the matching later build.');
       if(nativeLanguageStage>=2)for(const task of store.transportSnapshot().state?.tasks||[])if(task.executionSnapshot?.languageExecution)await store.readNativeMaterial(task);
@@ -97,7 +96,7 @@ export async function createWorkbenchServer({dataDir=process.env.DEMO_DATA_DIR||
       res.workspaceEnvelope=async value=>{
         if(!value||!(value.patch||value.unchanged||typeof value.initialized==='boolean'))return value;
         const {state:ignoredState,catalog:ignoredCatalog,patch:ignoredPatch,baseRevision:ignoredBase,revision:ignoredRevision,initialized:ignoredInit,unchanged:ignoredUnchanged,...extra}=value;
-        const current=store.transportSnapshot(),meta={...extra,token,aiRuntime:ai.runtime(),reviewCommands:true,productVersion:PRODUCT_VERSION,builtinUpgrade,nativeLanguageStage,...(nativeLanguageStage>=4?{nativeLanguageReadiness:await store.nativeReadiness()}:{})};
+        const current=store.transportSnapshot(),meta={...extra,token,aiRuntime:ai.runtime(),reviewCommands:true,productVersion:PRODUCT_VERSION,builtinUpgrade,nativeLanguageStage,...(nativeLanguageStage>=4?{nativeLanguageReadiness:await store.nativeReadiness(),nativePilotStatus:store.nativePilotStatus(nativePilotBundle)}:{})};
         if(req.headers['x-workspace-sync']!=='records-v1')return{...value,...meta};
         if(!current.initialized)return{...current,...meta};
         const since=Number(req.headers['x-workspace-revision']);
@@ -122,6 +121,10 @@ export async function createWorkbenchServer({dataDir=process.env.DEMO_DATA_DIR||
         if(req.method!=='POST')throw new WorkspaceError('Method not allowed',405);
         requireMutation('application/json');const input=await parseJson(2*1024*1024);
         if(!workspaceLanguage(store.transportSnapshot().state))throw new WorkspaceError('Stage 1 language acceptance is not enabled in this workspace.',409);
+        if(pathname==='/api/workspace-language/pilot/activate'){
+          if(!nativePilotBundle)languageError('NATIVE_PILOT_BUNDLE_UNAVAILABLE','This installation has no bundled pilot materials.');
+          await json(res,200,await store.activateNativePilotMaterials(nativePilotBundle,input));return;
+        }
         if(pathname==='/api/workspace-language/material/preview'){await json(res,200,{hashes:bilingualHashes(input.material)});return;}
         if(pathname==='/api/workspace-language/material/review'){await json(res,200,{material:reviewBilingualMaterial(input.material,input.review)});return;}
         const method={'/api/workspace-language/select':'selectLanguage','/api/workspace-language/material/publish':'publishLanguageMaterial','/api/workspace-language/material/freeze':'freezeLanguageMaterial'}[pathname];

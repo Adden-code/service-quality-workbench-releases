@@ -17,18 +17,21 @@ import {nativeExecutionContext,nativeSourceConfiguration} from '../server/native
 import {nativeEcommerceProgramResults,nativeEcommerceBatchFacts} from '../server/native-ecommerce-execution.mjs';
 import {upgradeEcommerceTargetLimitedBasis} from '../public/ecommerce-semantic-policy.mjs';
 import {mergeEcommerceResults} from '../server/ecommerce-engine.mjs';
-import {nativeReadinessNotice} from '../public/workspace-language-ui.mjs';
+import {nativeReadinessNotice,nativePilotMaintenanceDialog} from '../public/workspace-language-ui.mjs';
 import {workbook} from '../public/io.mjs';
 import {EC_HEADERS} from '../public/ecommerce-schema.mjs';
 import {parseEcommerceFile} from '../public/ecommerce-input.mjs';
 import {encodeWorkspaceArchive,decodeWorkspaceArchive} from '../server/workspace-archive.mjs';
 import {createWorkspaceRestore} from '../server/workspace-restore.mjs';
+import {resolveNativeTaskMaterial} from '../server/workspace-language-service.mjs';
+import {freezeNativeLanguage} from '../server/native-language-materials.mjs';
+import {NATIVE_LANGUAGE_VALIDATOR} from '../public/native-language-validation.mjs';
 const auth={actor:'SYNTHETIC USER AUTHORIZATION',reason:'Synthetic pilot only; business review pending.',authorizationId:'synthetic-pilot',at:now};
 const scratch=path.resolve('outputs/native-pilot-runtime-tests');
-async function setup(t,language='en',{calibrated=false}={}){
+async function setup(t,language='en',{calibrated=false,activate=true,install=true,fsOps}={}){
  await fs.mkdir(scratch,{recursive:true});const dir=await fs.mkdtemp(path.join(scratch,'synthetic-')),f=sceneFixture();
  if(calibrated){const p=f.newSeed.packages[1];p.configuration.basis=upgradeEcommerceTargetLimitedBasis(p.configuration.basis);p.configuration.ruleBindings=p.configuration.basis.rules.map(r=>({ruleId:r.id,ruleVersion:r.version}));for(const col of p.template.columns)if(col.ruleId)col.ruleVersion=p.configuration.ruleBindings.find(r=>r.ruleId===col.ruleId).ruleVersion;}
- let store=await createWorkspaceStore({dataDir:dir,nativeLanguageStage:4});let ai;
+ let store=await createWorkspaceStore({dataDir:dir,nativeLanguageStage:4,...(fsOps?{fsOps}:{})});let ai;
  t.after(async()=>{await ai?.close();await store.close();assert.ok(dir.startsWith(scratch+path.sep));await fs.rm(dir,{recursive:true,force:true});});
  await store.save({baseRevision:0,mutationId:'setup',state:installSceneSeed(createBusinessState(),f.catalog,f.newSeed,{now}),catalog:f.catalog});
  await store.enableLanguageGovernance();let view=await store.read();await store.selectLanguage({baseRevision:view.revision,operationId:'language',language,actor:auth.actor});
@@ -39,16 +42,56 @@ async function setup(t,language='en',{calibrated=false}={}){
   const base=scene===sceneId?[rawMaterial('glossary','EC-GLOSSARY',null,['terms']),rawMaterial('policy','NATIVE-CONFIG',nativeSourceConfiguration(snapshot),['configuration']),...basis.rules.map(r=>rawMaterial('rule',r.id,r,['pass','fail','exception'])),...basis.policies.map(p=>rawMaterial('policy',p.id,p,p.sections.map(s=>s.id)))]:materialSet(basis,snapshot).filter(m=>m.kind!=='prompt'),heading=syntheticMaterial('template',template.id);heading.sourceHash=languageHash(template);heading.shared.parameterRefs=[];heading.clauses=['title',...template.sections.map(s=>'section.'+s.key),...template.columnGroups.map(g=>'group.'+g.id),...template.columns.map(c=>'column.'+c.id)].map(clauseId=>({clauseId,kind:'instruction',locales:{zh:'合成试用标题',en:'Synthetic pilot heading'}}));
   bundle.materials.push(...[...base,heading,nativePilotPromptDraft(scene)].map(m=>authorizePilotMaterial({...m,scene},auth)));
  }
- await store.installNativePilotMaterials(bundle);
- const create=async(scene=sceneId,{unreplied=false,count=1,administrator=''}={})=>{
+ if(install)await store.installNativePilotMaterials(bundle);
+ if(activate){const current=await store.read();await store.activateNativePilotMaterials(bundle,{baseRevision:current.revision,operationId:'activate-synthetic-pilot',actor:auth.actor,reason:auth.reason,acknowledgeUnreviewed:true,bundleHash:languageHash(bundle)});}
+ const create=async(scene=sceneId,{unreplied=false,count=1,administrator='',frozenSnapshot}={})=>{
   const rows=Array.from({length:count},(_,i)=>{const raw=row({reply:unreplied?'':'The agent gives specific battery troubleshooting steps.',replyAt:unreplied?'':'2026-11-22 10:00:00'}).ecommerce.raw;raw[0]='SYNTHETIC-'+i;raw[11]=administrator;return raw;});
   const bytes=Buffer.from(await workbook([{name:'Sheet4',headers:[...EC_HEADERS],rows:[Array(22).fill(''),...rows]}])),parsed=await parseEcommerceFile({name:'synthetic.xlsx',size:bytes.length,arrayBuffer:async()=>bytes});assert.equal(parsed.valid,true,JSON.stringify(parsed.errors));
   const source=await store.putSource(bytes,'synthetic.xlsx'),view=await store.read(),sessions=scene===sceneId?parsed.sessions:[{id:'NP-synthetic',scene,startedAt:now,agent:'Synthetic agent',customer:'Synthetic customer',product:'Synthetic product',topic:'Synthetic question',channel:'Synthetic channel',completeness:'完整',missingNote:'',turns:[{id:1,role:'客户',text:'هل توجد نسخة زرقاء؟'},{id:2,role:'客服',text:'Sí, existe una versión azul.'}]}];
   const state=createImportedTask(view.state,{name:'Synthetic '+scene,source,sessions,basisSnapshot:sceneBasisForTask(view.state,view.catalog,scene,now),reviewer:auth.actor,now,executionSettings:{concurrency:1}});
+  if(frozenSnapshot)state.tasks.find(t=>!view.state.tasks.some(old=>old.id===t.id)).executionSnapshot=structuredClone(frozenSnapshot);
   const saved=await store.save({baseRevision:view.revision,mutationId:crypto.randomUUID(),state,catalog:view.catalog});return saved.state.tasks.find(t=>!view.state.tasks.some(old=>old.id===t.id));
  };
  return{bundle,dir,create,get store(){return store;},async reopen(){await store.close();store=await createWorkspaceStore({dataDir:dir,nativeLanguageStage:4});},async service(client){ai=await createAiService({store,client,modelConfig:{getPrivate:()=>config},maxAttempts:2,retryDelayMs:0});return ai;}};
 }
+test('historical installation alone cannot authorize new native tasks or selected freezes',async t=>{
+ const f=await setup(t,'en',{activate:false}),view=await f.store.read(),materials=f.bundle.materials.filter(m=>m.scene==='新品产品咨询');
+ assert.equal((await f.store.nativeReadiness()).status,'blocked');
+ await assert.rejects(f.create('新品产品咨询'),{code:'NATIVE_PILOT_ACTIVATION_REQUIRED'});
+ await assert.rejects(f.store.freezeLanguageMaterial({baseRevision:view.revision,operationId:'bypass-freeze',materialHashes:materials.map(m=>m.contentHash),promptId:'NP-NATIVE-PROMPTS',glossaryId:'NP-GLOSSARY',actor:auth.actor,reason:'Synthetic bypass attempt'}),{code:'NATIVE_PILOT_ACTIVATION_REQUIRED'});
+ const basis=sceneBasisForTask(view.state,view.catalog,'新品产品咨询',now),task={scene:'新品产品咨询',basisSnapshot:basis,executionSnapshot:freezeSceneExecution(view.state,'新品产品咨询',{basis})},frozen=freezeNativeLanguage(view.state.workspaceSettings.languagePolicy,{materials,promptId:'NP-NATIVE-PROMPTS',glossaryId:'NP-GLOSSARY',languageValidatorVersion:NATIVE_LANGUAGE_VALIDATOR});
+ assert.throws(()=>resolveNativeTaskMaterial(view.state,task,materials,frozen),{code:'NATIVE_PILOT_ACTIVATION_REQUIRED'});
+ assert.deepEqual(await f.store.read(),view);
+});
+test('local activation requires explicit confirmation and binds exact bytes with replay and restart safety',async t=>{
+ const f=await setup(t,'en',{activate:false,install:false}),view=await f.store.read(),input={baseRevision:view.revision,operationId:'local-explicit-activation',actor:'SYNTHETIC local maintainer',reason:'Synthetic trial with business review pending',acknowledgeUnreviewed:true,bundleHash:languageHash(f.bundle)};
+ assert.equal(view.state.languageMaterials,undefined);
+ for(const change of [{acknowledgeUnreviewed:false},{actor:' '},{reason:''},{bundleHash:'0'.repeat(64)},{materials:f.bundle.materials}])await assert.rejects(f.store.activateNativePilotMaterials(f.bundle,{...input,...change}));
+ assert.deepEqual(await f.store.read(),view);
+ const saved=await f.store.activateNativePilotMaterials(f.bundle,input),audit=saved.state.languageAudit.at(-1);assert.equal(saved.revision,view.revision+1);assert.equal(audit.action,'activate-pilot-materials');assert.equal(audit.actor,input.actor);assert.equal(audit.reason,input.reason);assert.equal(audit.after.bundleHash,input.bundleHash);assert.deepEqual(audit.after.materialHashes,f.bundle.materials.map(m=>m.contentHash));assert.equal(audit.after.materialStatus,'pilot-unreviewed');
+ assert.deepEqual(await f.store.activateNativePilotMaterials(f.bundle,input),saved);await f.reopen();assert.deepEqual(await f.store.activateNativePilotMaterials(f.bundle,input),saved);
+ await assert.rejects(f.store.activateNativePilotMaterials(f.bundle,{...input,reason:'Changed'}),{code:'LANGUAGE_OPERATION_CONFLICT'});
+ await f.create('新品产品咨询');assert.equal((await f.store.nativeReadiness()).status,'ready');
+});
+test('pilot maintenance is discoverable in both native languages without claiming both scenes ready',async t=>{
+ const f=await setup(t,'en',{activate:false}),view=await f.store.read(),status=f.store.nativePilotStatus(f.bundle),readiness=await f.store.nativeReadiness();
+ assert.equal(status.status,'inactive');assert.equal(status.bundleHash,languageHash(f.bundle));
+ for(const language of ['en','zh']){const state=structuredClone(view.state);state.workspaceSettings.languagePolicy.contentLanguage=language;const html=nativeReadinessNotice(state,readiness,status);assert.match(html,/data-act="native-pilot-open"/);assert.match(html,language==='en'?/Pilot material maintenance/:/试用材料维护/);const dialog=nativePilotMaintenanceDialog(state,status,readiness);assert.match(dialog,/id="native-pilot-actor"/);assert.match(dialog,/id="native-pilot-reason"/);assert.match(dialog,/id="native-pilot-acknowledge" type="checkbox"/);assert.match(dialog,/data-act="native-pilot-activate" disabled/);assert.match(dialog,language==='en'?/have not completed.*business review/:/尚未完成.*业务核对/);assert.match(dialog,language==='en'?/does not make every scene ready/:/不保证所有场景可用/);}
+});
+test('0.11.26 installed frozen tasks remain readable while every new task path requires local activation',async t=>{
+ const f=await setup(t),np=await f.create('新品产品咨询'),ec=await f.create(),npFrozen=await f.store.readNativeMaterial(np),ecFrozen=await f.store.readNativeMaterial(ec);
+ await f.store.close();const file=path.join(f.dir,'workspace.json'),disk=JSON.parse(await fs.readFile(file,'utf8'));disk.state.languageAudit=disk.state.languageAudit.filter(e=>e.action!=='activate-pilot-materials');disk.mutations=disk.mutations.filter(m=>m.id!=='activate-synthetic-pilot');await fs.writeFile(file,JSON.stringify(disk));await f.reopen();
+ assert.deepEqual(await f.store.readNativeMaterial(np),npFrozen);assert.deepEqual(await f.store.readNativeMaterial(ec),ecFrozen);
+ assert.equal((await f.store.nativeReadiness()).status,'blocked');
+ await assert.rejects(f.create('新品产品咨询'),{code:'NATIVE_PILOT_ACTIVATION_REQUIRED'});await assert.rejects(f.create('新品产品咨询',{frozenSnapshot:np.executionSnapshot}),{code:'NATIVE_PILOT_ACTIVATION_REQUIRED'});
+ const view=await f.store.read();await f.store.save({baseRevision:view.revision,mutationId:'save-historical-tasks',state:view.state,catalog:view.catalog});assert.deepEqual(await f.store.readNativeMaterial(ec),ecFrozen);
+});
+test('failed activation leaves visible state unchanged and retries exact bytes atomically',async t=>{
+ let fail=false;const fsOps={...fs,rename:async(from,to)=>{if(fail&&path.basename(to)==='workspace.json'){fail=false;throw Error('SYNTHETIC activation write failure');}return fs.rename(from,to);}};
+ const f=await setup(t,'en',{activate:false,install:false,fsOps}),view=await f.store.read(),input={baseRevision:view.revision,operationId:'atomic-activation',actor:auth.actor,reason:auth.reason,acknowledgeUnreviewed:true,bundleHash:languageHash(f.bundle)};
+ fail=true;await assert.rejects(f.store.activateNativePilotMaterials(f.bundle,input),/SYNTHETIC activation write failure/);assert.deepEqual(await f.store.read(),view);assert.equal(f.store.nativePilotStatus(f.bundle).status,'inactive');
+ const saved=await f.store.activateNativePilotMaterials(f.bundle,input);assert.equal(saved.revision,view.revision+1);assert.equal(f.store.nativePilotStatus(f.bundle).status,'active');await f.reopen();await f.create('新品产品咨询');
+});
 test('pilot authorization binds both languages and does not masquerade as approved publication',()=>{
  const m=authorizePilotMaterial(nativePilotPromptDraft(),auth);assert.equal(m.review.status,'pilot-unreviewed');assert.equal(m.review.reviewer,undefined);assert.equal(m.review.reviewedAt,undefined);validateBilingualMaterial(m);
  for(const change of [x=>x.clauses[0].locales.en+=' changed',x=>x.clauses[0].locales.zh+='更改',x=>x.shared.dependencyIds.push('changed')]){const bad=structuredClone(m);change(bad);assert.throws(()=>validateBilingualMaterial(bad),{code:'BILINGUAL_REVIEW_STALE'});}
