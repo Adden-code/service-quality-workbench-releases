@@ -1,5 +1,15 @@
 # 会话质检工作台
 
+## 0.11.25 · 需求39第4步程序验收包
+
+**[免登录下载完整安装器](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.25-r39-stage4/QualityWorkbench-0.11.25-R39-Stage4-Full-Setup-Windows-x64.exe)** · [验收步骤](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.25-r39-stage4/Stage4-Acceptance-Guide-zh.txt) · [发布记录](https://github.com/Adden-code/service-quality-workbench-releases/releases/tag/v0.11.25-r39-stage4)
+
+**用途是第4步安装/升级验收，一线生产基线仍为下方0.11.24。全新原生工作区选定语言后暂不能跑正式批次：NP双语业务材料、V1.1/V1.2提示词与EC英文仲裁材料未获批，不在本包内，新建任务受材料发布门禁阻止。**已有任务的旧工作区升级后继续原有模式，历史依据与结果保持；17条旧规则及两场景兼容种子与0.11.24逐文件SHA一致，不代表新的原生材料获批。
+
+程序已接通中文/英文语言锁、精确材料冻结、原生审核/HTML/Excel及完整备份恢复。3062项合成回归通过、0失败、1项Windows条件跳过；真实安装升级/卸载重装与已安装代码合成流程通过。未调用真实业务模型，内网第4步验收仍待回传。审计附页标签双语化为后续非阻塞项。
+
+buildId `0.11.25-2436d6d548488354`；[源码](https://github.com/Adden-code/service-quality-workbench-releases/commit/6c6b7ff5d5f9ac3f500d0d0577b081a4e05bf06b)；安装器98,049,248字节；SHA256 `31063cdcd9e22ca6c1986075dcd8e104ee5d592e43272f20d7b377d198c0ce48`。
+
 ## 0.11.24 英文界面检查与升级自愈 · 完整内置版
 
 **[免登录下载完整安装包（17条规则＋两场景）](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.24-full/QualityWorkbench-0.11.24-Full-Setup-Windows-x64.exe)**
