@@ -1,3 +1,4 @@
+import {startupMaintenanceNotice} from './startup-maintenance-view.mjs';
 import {createAdminDraftTranslationController} from './admin-draft-translation.mjs';
 import {createReasonTranslationController} from './reason-translation.mjs';
 import {workspaceRecoveryDelay} from './workspace-read-budget.mjs';
@@ -214,7 +215,7 @@ async function saveCatalogToWorkspace(next){
 }
 function renderStorageWarning(){
   const slot=document.getElementById('workspace-warning');if(!slot)return;
-  const upgrade=workspace.snapshot?.builtinUpgrade,upgradeNotice=upgrade&&['upgraded','failed'].includes(upgrade.status)?`<div class="notice-banner ${upgrade.status==='failed'?'warning':''}" role="status" data-builtin-upgrade>${e(getLocale()==='en'?(upgrade.messageEn||(upgrade.status==='failed'?'The bundled criteria upgrade failed. Your existing workspace remains available. Retry from Scenario management → Load bundled update.':'Bundled criteria upgraded. Existing tasks retain their original snapshots.')):upgrade.message)}${upgrade.status==='failed'?`<button class="text-btn" data-act="scenario-manage">${getLocale()==='en'?'Scenario management':'场景管理'}</button>`:''}</div>`:'';
+  const upgradeNotice=startupMaintenanceNotice(workspace.snapshot?.builtinUpgrade);
   slot.innerHTML=upgradeNotice+(storageWarning?uiHtml`<div class="storage-warning" role="alert">${e(uiError(storageWarning))} <button class="text-btn" data-act="${workspace.hasPending?'workspace-retry':'workspace-reload'}">${workspace.hasPending?uiT('重试保存'):uiT('重新加载工作区')}</button></div>`:'');
 }
 function reviewNow(){return new Date().toISOString();}

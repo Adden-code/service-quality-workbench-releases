@@ -43,6 +43,9 @@ test('English node errors use English messages and original AI execution records
  const html=englishBusinessExportView(state,ui,model,state.tasks),primary=html.replace(/<details\b[^>]*>[\s\S]*?<\/details>/g,'');
  for(const text of ['模型输出无法解析','请求失败请重试','报告已更新','翻译失败',reason])assert.ok(!primary.includes(text));
  assert.ok(html.includes('Original AI output'));assert.ok(html.includes(reason));assert.doesNotMatch(html,/<details[^>]*data-disclosure="bd-node-[^>]*\bopen\b/);
+ const snapshots=[...html.matchAll(/<details data-disclosure="bd-node-[^"]*"><summary>([^<]*)<\/summary><pre data-business-original>([\s\S]*?)<\/pre><\/details>/g)];
+ assert.equal(snapshots.length,3);assert.deepEqual(snapshots.map(match=>match[1]),['Original execution attempts','Original node input','Original AI output']);
+ assert.ok(snapshots.some(match=>match[2].includes(reason)),'raw AI prose is explicitly identified inside its original audit snapshot');
 });
 
 test('configured AI grouping and unplanned non-Latin text use English status instead of an Original inline fallback',()=>{

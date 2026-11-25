@@ -14,7 +14,9 @@ import {PENDING0105_EN} from './pending0105-locale-en.mjs';
 import {WORKFLOW0107_EN} from './workflow0107-locale-en.mjs';
 import {OPERATOR01122_EN} from './operator01122-locale-en.mjs';
 import {OPERATOR01123_EN} from './operator01123-locale-en.mjs';
-const UI_EN=Object.freeze({...BASE_UI_EN,...UI_EXTRA_EN,...ONBOARDING_EN,...TRIAGE_EN,...WORKFLOW096_EN,...WORKFLOW097_EN,...IMPORT098_EN,...RAW_EN,...RULE0104_EN,...TASK0104_EN,...REVIEW0105_EN,...OPERATIONS0105_EN,...PENDING0105_EN,...WORKFLOW0107_EN,...OPERATOR01122_EN,...OPERATOR01123_EN});
+import {OPERATOR01124_EN} from './operator01124-locale-en.mjs';
+import {STARTUP_MAINTENANCE_EN} from './startup-maintenance-locale-en.mjs';
+const UI_EN=Object.freeze({...BASE_UI_EN,...UI_EXTRA_EN,...ONBOARDING_EN,...TRIAGE_EN,...WORKFLOW096_EN,...WORKFLOW097_EN,...IMPORT098_EN,...RAW_EN,...RULE0104_EN,...TASK0104_EN,...REVIEW0105_EN,...OPERATIONS0105_EN,...PENDING0105_EN,...WORKFLOW0107_EN,...OPERATOR01122_EN,...OPERATOR01123_EN,...OPERATOR01124_EN,...STARTUP_MAINTENANCE_EN});
 
 export const LOCALE_STORAGE_KEY='service-quality-workbench:locale';
 const browserStorage=()=>{try{return globalThis.localStorage;}catch{return undefined;}};

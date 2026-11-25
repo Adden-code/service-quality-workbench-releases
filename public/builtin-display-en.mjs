@@ -22,8 +22,19 @@ export function builtinDisplayName(record){
  return null;
 }
 
+// Exact standard headings also occur in legacy policy titles and categories.
+// This projects labels only; policy text, IDs and frozen sources stay original.
+export const STANDARD_POLICY_TITLES_EN=Object.freeze({
+ '整体判定原则':'Overall decision principles',
+ '服务礼仪与沟通规范':'Service etiquette and communication standards',
+ '是否有探需动作':'Needs discovery',
+ '是否有主动导购和转化意识':'Proactive sales guidance and conversion awareness',
+});
+
 // Exact bundled source metadata only; custom edits remain source content.
 export const BUNDLED_DISPLAY_EN=Object.freeze({
+ ...STANDARD_POLICY_TITLES_EN,
+ "电商评论回复五项测试口径说明（非正式制度）": "Ecommerce five-check testing criteria (not formal policy)",
  "电商评论回复首轮测试；北京时间UTC+08:00；仅核对本次导入批次，不作为正式制度。": "Initial ecommerce reply testing; Beijing time UTC+08:00; applies only to this imported batch and is not formal policy.",
  "新品产品咨询": "New-product consultation: applicable sales and retention scenarios",
  "新品产品咨询；针对售前场景；已明确需求且有购买意向的用户。": "New-product consultation: applicable sales and retention scenarios",

@@ -4,11 +4,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
-test('可访问的中文页面骨架和六个业务入口存在',()=>{
+test('英文冷启动页面骨架与中英文六个业务入口存在',()=>{
   const p=path.join(root,'public/index.html');
   assert.ok(fs.existsSync(p),'Demo页面尚未实现');
   const html=fs.readFileSync(p,'utf8');
-  assert.match(html,/lang="zh-CN"/);
+  assert.match(html,/lang="en"/);
+  assert.doesNotMatch(html,/\p{Script=Han}/u);
   assert.match(html,/id="app"/);
   assert.match(html,/app\.mjs/);
   const app=fs.readFileSync(path.join(root,'public/app.mjs'),'utf8');

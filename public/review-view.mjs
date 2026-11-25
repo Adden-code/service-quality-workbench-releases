@@ -75,7 +75,7 @@ function resultCard(result,ui,confirmed){
 
 export function humanFooter(session,overall,ui,state){
   if(!session)return reviewWaitingView(reviewQueue(state,{...ui,reviewStatus:'全部'}),ui);
- if(isInactiveTask(state?.tasks.find(t=>t.id===session.taskId)))return '<p class="hint">历史只读 · 已移出审核工作流</p>';
+ if(isInactiveTask(state?.tasks.find(t=>t.id===session.taskId)))return uiLiteral('<p class="hint">历史只读 · 已移出审核工作流</p>');
   if(isProcessedUnknown(session))return processedUnknownFooter(session,ui);
   if(isRawTranscriptSession(session))return rawHumanFooter(session,ui,state);
   if(isAIFinal(session))return aiFinalFooter(session,ui);
