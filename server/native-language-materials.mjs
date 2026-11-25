@@ -15,12 +15,13 @@ export const LANGUAGE_FIELD_ROLES=Object.freeze({localizedProse:['reason','summa
 const keys=(v,fields,label)=>{if(!obj(v)||Object.keys(v).some(k=>!fields.includes(k)))languageError('BILINGUAL_INVALID',`${label}: unknown or invalid fields.`);};
 export function bilingualHashes(material){
   validateBilingualMaterial(material,{published:false});
-  const shared={id:material.id,version:material.version,scene:material.scene,kind:material.kind,semanticRevision:material.semanticRevision,shared:material.shared,clauses:material.clauses.map(c=>({clauseId:c.clauseId,kind:c.kind}))};
+  const shared={id:material.id,version:material.version,scene:material.scene,kind:material.kind,semanticRevision:material.semanticRevision,shared:material.shared,...(material.sourceHash?{sourceHash:material.sourceHash}:{}),clauses:material.clauses.map(c=>({clauseId:c.clauseId,kind:c.kind}))};
   const locale=lang=>({metadata:material.locales[lang],clauses:material.clauses.map(c=>({clauseId:c.clauseId,text:c.locales[lang]}))});
   return {zhHash:languageHash(locale('zh')),enHash:languageHash(locale('en')),sharedHash:languageHash(shared)};
 }
 export function validateBilingualMaterial(material,{published=true}={}){
-  keys(material,['id','version','scene','kind','semanticRevision','shared','clauses','locales','review','contentHash'],'material');
+  keys(material,['id','version','scene','kind','semanticRevision','shared','sourceHash','clauses','locales','review','contentHash'],'material');
+  if(material.sourceHash!==undefined&&!/^[a-f0-9]{64}$/.test(material.sourceHash))languageError('BILINGUAL_INVALID','Invalid source content hash.');
   for(const k of ['id','version','scene','semanticRevision'])text(material[k],k);
   if(!BILINGUAL_MATERIAL_KINDS.includes(material.kind))languageError('BILINGUAL_INVALID','Unknown bilingual material kind.');
   keys(material.shared,['applicabilityIds','exceptionIds','parameterRefs','dependencyIds'],'shared');

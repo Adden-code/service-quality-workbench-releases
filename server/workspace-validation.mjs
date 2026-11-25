@@ -225,8 +225,9 @@ function validateRawReinspection(task,tasks,sessions){
  const visited=new Set([task.id]);let current=parent;
  while(current){if(visited.has(current.id))fail('原文重检父任务关系不能循环。');visited.add(current.id);current=current.reinspectionOf?tasks.get(current.reinspectionOf):null;}
 }
-export function validateWorkspace(state,catalog,previous=null,{authenticateNewSnapshots=false,trustedAI=false,trustedLifecycle=false,trustedCalibration=false,trustedScene=false,trustedReview=false,trustedLanguage=false}={}){
-  validateLanguageTransition(state,previous,{trustedLanguage});validateLanguageRegistry(state,previous,{trustedLanguage});
+export function validateWorkspace(state,catalog,previous=null,{authenticateNewSnapshots=false,trustedAI=false,trustedLifecycle=false,trustedCalibration=false,trustedScene=false,trustedReview=false,trustedLanguage=false,allowNativeTaskCreation=false}={}){
+  validateLanguageTransition(state,previous,{trustedLanguage,allowNativeTaskCreation});
+  if(!trustedAI)for(const session of state.sessions||[]){const old=previous?.sessions?.find(s=>s.id===session.id);if(!equal(session.nativeLanguageRetryHistory||[],old?.nativeLanguageRetryHistory||[]))fail('Native language retry history is server-owned and append-only.');}validateLanguageRegistry(state,previous,{trustedLanguage});
   const priorSessions=new Map((previous?.sessions||[]).map(s=>[s.id,s]));
   if(trustedReview){
     if(!previous||Object.keys(previous).some(k=>!['tasks','sessions','activity'].includes(k)&&state[k]!==previous[k])||state.tasks.length!==previous.tasks.length||state.sessions.length!==previous.sessions.length)fail('审核命令不能改变工作区范围。');
@@ -312,7 +313,7 @@ export function validateWorkspace(state,catalog,previous=null,{authenticateNewSn
       if(authenticateNewSnapshots&&!previous?.tasks.some(record=>record.id===task.id&&record.mode==='manual')){
         if(latestSceneConfiguration(state,task.scene)){
           const frozen=task.executionSnapshot;if(!frozen)fail('新任务必须保存完整场景配置快照。');
-          try{const basis=sceneBasisForTask(state,catalog,task.scene,task.basisSnapshot.capturedAt);if(!equal(basis,task.basisSnapshot)||!equal(freezeSceneExecution(state,task.scene,{basis,overrides:frozen.overrides,overrideReason:frozen.overrideReason,ecReportMetadata:task.ecReportMetadata}),frozen))fail('新任务完整快照必须匹配场景发布版本。');}catch(error){fail(error.message);}
+          try{const basis=sceneBasisForTask(state,catalog,task.scene,task.basisSnapshot.capturedAt);const expected=freezeSceneExecution(state,task.scene,{basis,overrides:frozen.overrides,overrideReason:frozen.overrideReason,ecReportMetadata:task.ecReportMetadata});if(frozen.languageExecution&&allowNativeTaskCreation){expected.configuration.inspectionLanguage=frozen.languageExecution.contentLanguage;expected.languageExecution=frozen.languageExecution;expected.languageMaterialRef=frozen.languageMaterialRef;}if(!equal(basis,task.basisSnapshot)||!equal(expected,frozen))fail('新任务完整快照必须匹配场景发布版本。');}catch(error){fail(error.message);}
         }else authenticateSnapshot(task.basisSnapshot,catalog);
         try{assertTaskCatalogScene({state,catalog,scene:task.scene,basisSnapshot:task.basisSnapshot});}catch(error){fail(error.message);}
       }
@@ -439,16 +440,24 @@ export function validateWorkspace(state,catalog,previous=null,{authenticateNewSn
       for(const id of oldTask.sessionIds){
         const before=previous.sessions.find(session=>session.id===id),after=state.sessions.find(session=>session.id===id);
         if(trustedReview&&before===after)continue;
-        if(!after||!equal(without(before,trustedAI?['aiResults','aiExecution','aiDecision','aiDecisionHistory','calibrationAssignments','sceneCapabilities']:trustedCalibration?['review','ruleCalibrationRevocations']:['review']),without(after,trustedAI?['aiResults','aiExecution','aiDecision','aiDecisionHistory','calibrationAssignments','sceneCapabilities']:trustedCalibration?['review','ruleCalibrationRevocations']:['review'])))fail('业务会话原文、标识与初始结果不可改写。');
+        if(!after||!equal(without(before,trustedAI?['aiResults','aiExecution','aiDecision','aiDecisionHistory','calibrationAssignments','sceneCapabilities','nativeLanguageRetryHistory']:trustedCalibration?['review','ruleCalibrationRevocations']:['review']),without(after,trustedAI?['aiResults','aiExecution','aiDecision','aiDecisionHistory','calibrationAssignments','sceneCapabilities','nativeLanguageRetryHistory']:trustedCalibration?['review','ruleCalibrationRevocations']:['review'])))fail('业务会话原文、标识与初始结果不可改写。');
         if(isRawTranscriptSession(before))validateRawReviewTimeTransition(before,after,trustedAI);
         try{validatePendingResolutionTransition(before,after,previous,state,{trustedAI});}catch(error){fail(error.message);}
         let sceneRecovery=false;try{sceneRecovery=validateDependencyRecoveryHistory(before,after,{trustedAI});}catch(error){fail(error.message);}
-        if(trustedAI&&!sceneRecovery)try{validateDecisionHistoryTransition(before,after);}catch(error){fail(error.message);}
+        const oldNative=before.nativeLanguageRetryHistory||[],newNative=after.nativeLanguageRetryHistory||[];
+        let nativeRecovery=false;
+        if(!equal(oldNative,newNative)){
+          const a=newNative.at(-1);if(!trustedAI||newNative.length!==oldNative.length+1||!equal(newNative.slice(0,-1),oldNative)||!a||typeof a.protected!=='boolean'||!validZonedTime(a.at)||!a.traceId||a.originalRunId!==before.aiExecution?.runId||!equal(a.beforeResults,before.aiResults)||!equal(a.beforeCapabilities,before.sceneCapabilities))fail('Invalid native language retry audit.');
+          if(a.protected?!equal(before.aiResults,after.aiResults)||!equal(before.sceneCapabilities,after.sceneCapabilities):!equal(a.afterResults,after.aiResults)||!equal(a.afterCapabilities,after.sceneCapabilities))fail('Native retry results disagree with the retained audit.');
+          if(!oldTask.executionSnapshot?.languageExecution||!equal(before.aiExecution,after.aiExecution)||!equal(before.review,after.review)||!equal(a.beforeDecision,before.aiDecision??null)||!equal(a.afterDecision,after.aiDecision??null)||!equal(after.aiDecisionHistory||[],a.protected||!before.aiDecision?before.aiDecisionHistory||[]:[...(before.aiDecisionHistory||[]),before.aiDecision]))fail('Native retry must preserve execution, human review and prior routing decisions.');
+          nativeRecovery=!a.protected;
+        }
+        if(trustedAI&&!sceneRecovery&&!nativeRecovery)try{validateDecisionHistoryTransition(before,after);}catch(error){fail(error.message);}
         const oldClassification=before.sceneCapabilities?.judgmentClassificationSnapshot,newClassification=after.sceneCapabilities?.judgmentClassificationSnapshot;
         if(!sceneRecovery&&!equal(oldClassification,newClassification)&&(oldClassification||!trustedAI||before.aiExecution?.status!=='completed'||!equal(before.aiResults,after.aiResults)||!equal(newClassification,{runId:before.aiExecution.runId,output:before.sceneCapabilities?.outputs?.ecommerceClassification??null})))fail('既有时效判定的分类依据只能由恢复流程原样冻结，不可改写。');
         if(!trustedAI&&!trustedCalibration)try{validateReturnTransition(before,after);}catch(error){fail(error.message);}
         const comparisonRecovery=trustedAI&&before.ecommerce&&before.review.status==='待审核'&&!Object.keys(before.review.drafts).length&&!before.review.notes?.trim()&&!before.review.history?.length&&before.aiResults.some(r=>r.ruleId==='EC-TARGET'&&r.comparisonAssessment?.status==='incomplete')&&after.aiExecution?.status==='completed'&&before.aiExecution.runId===after.aiExecution.runId&&equal(before.aiResults.filter(r=>r.ruleId!=='EC-TARGET'),after.aiResults.filter(r=>r.ruleId!=='EC-TARGET'));
-        if(!sceneRecovery&&!comparisonRecovery&&before.aiDecision!==undefined&&before.aiExecution?.status==='completed'&&!equal(before.aiDecision,after.aiDecision))fail('已完成的AI终判审计记录不可改写。');
+        if(!sceneRecovery&&!nativeRecovery&&!comparisonRecovery&&before.aiDecision!==undefined&&before.aiExecution?.status==='completed'&&!equal(before.aiDecision,after.aiDecision))fail('已完成的AI终判审计记录不可改写。');
         if(!trustedAI&&before.review.status!=='已确认'&&after.review.status==='已确认'&&requiresEcommerceClassification(before)&&!classificationReviewed(after))fail('请先完成人工评价分类复核，再确认五项检查。');
         if(!trustedAI&&before.aiExecution?.status==='running'&&!equal(before.review,after.review))fail('AI正在运行，完成后才能修改人工审核。');
         if(!trustedAI&&!trustedCalibration)for(const [ruleId,draft] of Object.entries(after.review.drafts)){if(draft.source==='AI接受'&&!equal(draft,before.review.drafts[ruleId])){const original=before.aiResults.find(r=>r.ruleId===ruleId);if(!original||!equal(draft,{...original,source:'AI接受'}))fail('接受AI必须完整保留AI原判；修改结论请使用人工改判并说明理由。');}}
@@ -456,7 +465,7 @@ export function validateWorkspace(state,catalog,previous=null,{authenticateNewSn
           if(Object.values(after.review.drafts).some(draft=>draft.source==='AI接受'))fail('AI尚未完整完成，不能接受AI判定。');
           if(before.aiExecution?.errorCode==='dependency_incomplete'&&after.review.status==='已确认'&&Object.values(after.review.drafts).some(draft=>draft.source!=='人工独立审核'))fail('完整批次比较尚未完成；只能明确逐项人工独立审核，不能确认未完整的AI结论。');
         }
-        if(trustedAI&&!sceneRecovery&&!comparisonRecovery&&before.aiExecution?.status==='completed'&&(!equal(before.aiResults,after.aiResults)||!equal(before.aiExecution,after.aiExecution)))fail('已完成AI执行及初始结果不可改写。');
+        if(trustedAI&&!sceneRecovery&&!nativeRecovery&&!comparisonRecovery&&before.aiExecution?.status==='completed'&&(!equal(before.aiResults,after.aiResults)||!equal(before.aiExecution,after.aiExecution)))fail('已完成AI执行及初始结果不可改写。');
       }
     }
   }

@@ -1,3 +1,4 @@
+import {nativeMessage,nativeAssurance} from './native-language-execution.mjs';
 import {hasUnverifiedEvidence} from '../public/evidence-status.mjs';
 import {createHash} from 'node:crypto';
 import {setTimeout as delay} from 'node:timers/promises';
@@ -105,8 +106,9 @@ export function calculateSceneTiming(session,snapshot,site,extracted){
  });
  return completed({metrics},extracted.evidence,{...(hasUnverifiedEvidence(extracted)||hasUnverifiedEvidence(site)?{origin:'unverified',evidenceValidation:{version:1,status:'unverified',dependencies:['site','timing']}}:{}),metrics,siteId,events:clone(events),siteOrigin:site.origin,confidence:Math.min(extracted.confidence??0,site.confidence??1)});
 }
-export async function executeSceneCapabilities({session,snapshot,client,config,signal,trace,previous,phase='pre',maxAttempts=3,retryDelayMs=500}){
+export async function executeSceneCapabilities({session,snapshot,client,config,signal,trace,previous,phase='pre',maxAttempts=3,retryDelayMs=500,nativeContext}){
  if(!snapshot||snapshot.configuration.executionMode!=='configured')return null;
+ const message=(key,fallback,parameters={})=>nativeContext?nativeMessage(nativeContext,key,parameters):fallback;
  const fingerprint=hash({session:sceneSourceBlocks(session),fields:session.contextFields??session.rawTranscript?.raw,snapshot,model:config.model,effort:config.reasoningEffort,revision:config.deploymentRevision,reasoningVersion:config.reasoningConfigVersion});
  const sitePolicy=snapshot.configuration.basis?.businessProfile?{...snapshot.configuration.timingPolicy,...snapshot.configuration.basis.businessProfile.timing}:snapshot.configuration.timingPolicy;
  const outputs=previous?.fingerprint===fingerprint?clone(previous.outputs):{},enabled=snapshot.configuration.capabilities,blocks=sceneSourceBlocks(session),runtime=snapshot.runtime.values,visited=new Set();
@@ -118,29 +120,33 @@ export async function executeSceneCapabilities({session,snapshot,client,config,s
   const a=enabled.find(a=>a.key===key);if(!a)throw error(`缺少能力执行器：${key}`,'CAPABILITY_EXECUTOR_MISSING');
   // A built-in capability is available before the local custodian supplies standards.
   // Never spend a model call guessing standards, or count missing configuration as a provider failure.
-  if(key==='timing'&&snapshot.configuration.timingPolicy.standardsStatus==='pending')return outputs[key]=uncertain('站点时效标准尚未由质检人员维护，本项转人工；未套用基准示例数值。',{origin:'configuration-pending'});
-  if(key==='site'&&!sitePolicy.sites.length)return outputs[key]=uncertain('站点字典尚未维护，不能让模型猜测站点键。',{origin:'configuration-pending'});
+  if(key==='timing'&&snapshot.configuration.timingPolicy.standardsStatus==='pending')return outputs[key]=uncertain(message('program.timing-pending','站点时效标准尚未由质检人员维护，本项转人工；未套用基准示例数值。'),{origin:'configuration-pending'});
+  if(key==='site'&&!sitePolicy.sites.length)return outputs[key]=uncertain(message('program.site-pending','站点字典尚未维护，不能让模型猜测站点键。'),{origin:'configuration-pending'});
   for(const dep of a.dependsOn)await execute(dep);
-  if(a.dependsOn.some(dep=>outputs[dep]?.status!=='completed'))return outputs[key]=uncertain('依赖能力未确定，本项未使用空结果。',{dependencyBlocked:true});
-  if(key==='salesStage'){const parent=snapshot.taxonomy?.labels.find(l=>l.id===outputs.intent.value.labelId)?.parentId;const label=snapshot.taxonomy?.labels.find(l=>l.id===parent);return outputs[key]=label?completed({id:label.id,label:label.label},outputs.intent.evidence,{origin:hasUnverifiedEvidence(outputs.intent)?'unverified':'taxonomy-parent',...(hasUnverifiedEvidence(outputs.intent)?{evidenceValidation:clone(outputs.intent.evidenceValidation)}:{})}):uncertain('二级意图没有有效父级。');}
-  if(key==='site'){const direct=resolveSiteField(session,sitePolicy);if(direct){outputs.site=direct;return fallbackSite();}}
+  if(a.dependsOn.some(dep=>outputs[dep]?.status!=='completed'))return outputs[key]=uncertain(message('program.dependency','依赖能力未确定，本项未使用空结果。',{capabilities:a.dependsOn.join(', ')}),{dependencyBlocked:true});
+  if(key==='salesStage'){const parent=snapshot.taxonomy?.labels.find(l=>l.id===outputs.intent.value.labelId)?.parentId;const label=snapshot.taxonomy?.labels.find(l=>l.id===parent);return outputs[key]=label?completed({id:label.id,label:nativeContext?nativeContext.frozen.selected.find(m=>m.kind==='taxonomy')?.clauses.find(c=>c.clauseId===label.id)?.text||label.id:label.label},outputs.intent.evidence,{...(outputs.intent.languageValidation?{languageValidation:clone(outputs.intent.languageValidation)}:{}),origin:hasUnverifiedEvidence(outputs.intent)?'unverified':'taxonomy-parent',...(hasUnverifiedEvidence(outputs.intent)?{evidenceValidation:clone(outputs.intent.evidenceValidation)}:{})}):uncertain(message('program.parent-missing','二级意图没有有效父级。'));}
+  if(key==='site'){const direct=resolveSiteField(session,sitePolicy);if(direct){if(nativeContext&&direct.reason)direct.reason=message(direct.origin==='source-conflict'?'program.site-conflict':'program.site-unmapped',direct.reason);outputs.site=direct;return fallbackSite();}}
   if(typeof client.inspectSceneCapability!=='function')throw error('模型客户端缺少辅助能力执行器。','CAPABILITY_EXECUTOR_MISSING');
   const input={contract:CAPABILITY_VERSION,capability:key,blocks:key==='ecommerceClassification'?blocks.filter(b=>['客户','用户','customer','user'].includes(String(b.role).toLowerCase())):blocks,...(key==='ecommerceClassification'?{rating:Number(session.ecommerce?.raw[10])||null}:{}),sites:sitePolicy.sites,taxonomy:key==='intent'?snapshot.taxonomy:null,targetLanguage:snapshot.configuration.inspectionLanguage||'zh',dependencies:Object.fromEntries(a.dependsOn.map(d=>[d,outputs[d]])),timePolicy:session.rawTranscript?.timePolicy||{mode:'structured-source'}};
   let retryFeedback;
   for(let attempt=1;attempt<=maxAttempts;attempt++)try{
    signal?.throwIfAborted();
-   outputs[key]={...await client.inspectSceneCapability({config,input,signal,retryFeedback,trace:trace?.step?{step:(node,data,op)=>trace.step(`cap-${phase}-${key}-${attempt}-${node}`,{capability:key,capabilityAttempt:attempt,...data},op)}:undefined}),attempts:attempt};break;
+   outputs[key]={...await client.inspectSceneCapability({config,input,signal,retryFeedback,nativeContext:nativeContext?{...nativeContext,attempt,maxAttempts}:undefined,trace:trace?.step?{step:(node,data,op)=>trace.step(`cap-${phase}-${key}-${attempt}-${node}`,{capability:key,capabilityAttempt:attempt,...data},op)}:undefined}),attempts:attempt};break;
   }catch(e){
    const code=String(e.code||'PROVIDER_ERROR').toUpperCase();
    if(signal?.aborted||code.startsWith('TRACE_')||['AUTH','UNAUTHORIZED','FORBIDDEN','AUTHENTICATION','PERMISSION','REQUEST_REJECTED','NOT_CONFIGURED','CAPABILITY_EXECUTOR_MISSING','INVALID_INPUT'].includes(code))throw e;
    retryFeedback={code};
-   if(attempt===maxAttempts&&code==='INVALID_OUTPUT'&&['evidence_ambiguous','evidence_unverified'].includes(e.validationReason)&&e.unverifiedCandidate)outputs[key]={...clone(e.unverifiedCandidate),attempts:attempt};
-   else if(attempt===maxAttempts)outputs[key]={status:'failed',reason:`能力最终技术失败（已尝试${maxAttempts}次），依赖项转人工。${e.message?.startsWith('能力置信度无效：')?' confidence须为0至1的数值或规范数值字符串，不能为空白或等级文字。':e.message?.startsWith('能力结果引文')?e.message:''}`,errorCode:code,attempts:attempt};
+   if(attempt===maxAttempts&&e.nativeCandidate)outputs[key]={...clone(e.nativeCandidate),attempts:attempt};
+   else if(attempt===maxAttempts&&code==='INVALID_OUTPUT'&&['evidence_ambiguous','evidence_unverified'].includes(e.validationReason)&&e.unverifiedCandidate)outputs[key]={...clone(e.unverifiedCandidate),attempts:attempt};
+   else if(attempt===maxAttempts)outputs[key]={status:'failed',reason:nativeContext?message('program.capability-failed','',{capability:key,attempts:maxAttempts}):`能力最终技术失败（已尝试${maxAttempts}次），依赖项转人工。${e.message?.startsWith('能力置信度无效：')?' confidence须为0至1的数值或规范数值字符串，不能为空白或等级文字。':e.message?.startsWith('能力结果引文')?e.message:''}`,errorCode:code,attempts:attempt};
    else await delay(retryDelayMs*2**(attempt-1),undefined,{signal});
   }
-  if(key==='site'){const r=outputs.site;if(r.status==='completed'&&r.confidence<runtime.regionConfidenceThreshold)outputs.site=uncertain('站点识别置信度低于独立门槛。',{candidate:r.value,confidence:r.confidence,evidence:r.evidence,origin:'low-confidence'});return fallbackSite();}
-  if(key==='translation'&&outputs[key].status==='completed'&&outputs[key].confidence<runtime.translationConfidenceThreshold)outputs[key]=uncertain('翻译置信度低于独立门槛。',{confidence:outputs[key].confidence,evidence:outputs[key].evidence});
-  if(key==='timing'&&outputs[key].status!=='failed')outputs[key]=calculateSceneTiming(session,snapshot,outputs.site||uncertain('缺少站点能力。'),outputs[key]);
+  if(key==='site'){const r=outputs.site;if(r.status==='completed'&&r.confidence<runtime.regionConfidenceThreshold)outputs.site=uncertain(message('program.site-low-confidence','站点识别置信度低于独立门槛。'),{candidate:r.value,confidence:r.confidence,evidence:r.evidence,origin:'low-confidence'});return fallbackSite();}
+  if(key==='translation'&&outputs[key].status==='completed'&&outputs[key].confidence<runtime.translationConfidenceThreshold)outputs[key]=uncertain(message('program.translation-low-confidence','翻译置信度低于独立门槛。'),{confidence:outputs[key].confidence,evidence:outputs[key].evidence});
+  if(key==='timing'&&outputs[key].status!=='failed'){
+   const extracted=outputs[key];outputs[key]=calculateSceneTiming(session,snapshot,outputs.site||uncertain(message('program.site-pending','缺少站点能力。')),extracted);
+   if(nativeContext){outputs[key].languageValidation=extracted.languageValidation;for(const m of outputs[key].metrics||[])m.reason=message('program.metric-'+(m.status==='uncertain'?(m.standard?'source-unavailable':'standard-missing'):'calculated'),'');}
+  }
   return outputs[key];
  }
  function fallbackSite(){if(outputs.site.origin==='evidence-ambiguous')return outputs.site;const value=outputs.site,policy=sitePolicy,defaultSite=runtime.defaultSite||policy.defaultSite;if(value.status==='uncertain'&&policy.missingSite==='batch-default'&&policy.sites.some(s=>s.id===defaultSite)){outputs.site=completed({siteId:defaultSite},value.evidence||[],{origin:'batch-default',fallbackReason:value.reason,originalOutcome:value});}else if(!value.origin)value.origin='ai-grounded';return outputs.site;}
@@ -176,8 +182,8 @@ export function enforceSceneResults(results,snapshot,capabilities,session){
 }
 export function recordCapabilityOutcomes(monitor={},sessionId,capabilities,policy){
  const next=clone(monitor);for(const [key,value] of Object.entries(capabilities?.outputs||{})){
-  if(value.dependencyBlocked)continue;const rows=(next[key]?.rows||[]).filter(r=>r.sessionId!==sessionId);const legacyAmbiguity=value.status==='failed'&&value.errorCode==='INVALID_OUTPUT'&&/^能力最终技术失败（已尝试[1-3]次），依赖项转人工。能力结果引文在声明文本块内多处命中，无法唯一修复偏移；请人工核对。$/.test(value.reason||''),legacyQuote=value.status==='failed'&&value.errorCode==='INVALID_OUTPUT'&&/^能力最终技术失败（已尝试[1-3]次），依赖项转人工。(?:能力结果引文未在声明的原始文本块逐字命中。|能力结果引文偏移无效：start\/end须为非负整数或规范整数字符串，且end大于start。|能力结果引文缺少有效的原始文本块或原文。)$/.test(value.reason||''),ambiguous=legacyAmbiguity||value.status==='uncertain'&&value.origin==='evidence-ambiguous';rows.push({sessionId,status:legacyAmbiguity||legacyQuote?'uncertain':value.status,...(ambiguous?{origin:'evidence-ambiguous'}:legacyQuote||hasUnverifiedEvidence(value)?{origin:'unverified'}:{})});const window=rows.slice(-policy.window),technicalFailures=window.filter(r=>r.status==='failed').length,businessUncertain=window.filter(r=>r.status==='uncertain').length;
-  next[key]={rows:window,total:window.length,technicalFailures,businessUncertain,evidenceAmbiguities:window.filter(r=>r.origin==='evidence-ambiguous').length,unverifiedEvidence:window.filter(r=>r.origin==='unverified').length,rate:technicalFailures/window.length,paused:window.length>=policy.minimum&&technicalFailures/window.length>policy.rate};
+  if(value.dependencyBlocked)continue;const rows=(next[key]?.rows||[]).filter(r=>r.sessionId!==sessionId);const legacyAmbiguity=value.status==='failed'&&value.errorCode==='INVALID_OUTPUT'&&/^能力最终技术失败（已尝试[1-3]次），依赖项转人工。能力结果引文在声明文本块内多处命中，无法唯一修复偏移；请人工核对。$/.test(value.reason||''),legacyQuote=value.status==='failed'&&value.errorCode==='INVALID_OUTPUT'&&/^能力最终技术失败（已尝试[1-3]次），依赖项转人工。(?:能力结果引文未在声明的原始文本块逐字命中。|能力结果引文偏移无效：start\/end须为非负整数或规范整数字符串，且end大于start。|能力结果引文缺少有效的原始文本块或原文。)$/.test(value.reason||''),ambiguous=legacyAmbiguity||value.status==='uncertain'&&value.origin==='evidence-ambiguous';rows.push({sessionId,...(value.languageValidation?{languageValidation:value.languageValidation}:{}),status:legacyAmbiguity||legacyQuote?'uncertain':value.status,...(ambiguous?{origin:'evidence-ambiguous'}:legacyQuote||hasUnverifiedEvidence(value)?{origin:'unverified'}:{})});const window=rows.slice(-policy.window),technicalFailures=window.filter(r=>r.status==='failed').length,businessUncertain=window.filter(r=>r.status==='uncertain').length;
+  next[key]={rows:window,total:window.length,technicalFailures,businessUncertain,languageUnverified:window.filter(r=>r.languageValidation&&r.languageValidation.status!=='verified').length,evidenceAmbiguities:window.filter(r=>r.origin==='evidence-ambiguous').length,unverifiedEvidence:window.filter(r=>r.origin==='unverified').length,rate:technicalFailures/window.length,paused:window.length>=policy.minimum&&technicalFailures/window.length>policy.rate};
  }return next;
 }
 

@@ -37,21 +37,22 @@ export function languageCalibrationScope(task){
   validateLanguageExecution(value);
   return {languageExecution:structuredClone(value)};
 }
-export function assertNativeStageReady(state){
+export function assertNativeStageReady(state,{stage=1}={}){
   const policy=workspaceLanguage(state);
   if(policy?.mode==='pending-selection')languageError('LANGUAGE_SELECTION_REQUIRED','Choose a workspace language before creating tasks.');
-  if(policy?.mode==='native-v1')languageError('NATIVE_LANGUAGE_STAGE_PENDING','Stage 1 verification only. Native AI execution will open after the next stages pass business acceptance.');
+  if(policy?.mode==='native-v1'&&stage<2)languageError('NATIVE_LANGUAGE_STAGE_PENDING','Native execution is not enabled in this implementation stage.');
 }
-export function validateLanguageTransition(state,previous,{trustedLanguage=false}={}){
+export function validateLanguageTransition(state,previous,{trustedLanguage=false,allowNativeTaskCreation=false}={}){
   const policy=workspaceLanguage(state),old=workspaceLanguage(previous);
   if(policy)validateLanguagePolicy(policy);
   if(!trustedLanguage&&previous&&(!equal(policy,old)||!equal(state.languageMaterials,previous.languageMaterials)||!equal(state.languageAudit,previous.languageAudit)))languageError('LANGUAGE_LOCKED','Language settings and bilingual releases can only be changed through their dedicated audited operation.');
   if(previous&&policy?.mode!=='legacy-display-v1'&&policy){
     const ids=new Set((previous.tasks||[]).map(t=>t.id));
-    if((state.tasks||[]).some(t=>!ids.has(t.id)))assertNativeStageReady(state);
+    if((state.tasks||[]).some(t=>!ids.has(t.id)))assertNativeStageReady(state,{stage:allowNativeTaskCreation?2:1});
   }
   for(const task of state?.tasks||[]){
     const value=task.executionSnapshot?.languageExecution;
+    if(policy?.mode==='native-v1'&&!value)languageError('LANGUAGE_FREEZE_INVALID','Native tasks require reviewed frozen execution materials.');
     if(value){
       validateLanguageExecution(value);
       const s=task.executionSnapshot,ref=state.languageMaterials?.freezes?.find(r=>r.hash===s.languageMaterialRef);

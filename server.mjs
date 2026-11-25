@@ -45,8 +45,8 @@ async function body(req,max){
   for await(const chunk of req){size+=chunk.length;if(size>max)throw new WorkspaceError('请求内容超过大小限制。',413);parts.push(chunk);}
   return Buffer.concat(parts,size);
 }
-export async function createWorkbenchServer({dataDir=process.env.DEMO_DATA_DIR||path.join(project,'data'),publicDir=path.join(project,'public'),maxBodyBytes=32*1024*1024,fsOps,modelConfig,arkClient,catalogSeed=()=>loadBundledCatalogSeed(path.join(project,'resources')),sceneSeed=()=>loadBundledSceneSeed(path.join(project,'resources')),executionEngine=process.env.QA_AI_ENGINE||'native-node',bridgeToken=process.env.WORKBENCH_BRIDGE_TOKEN,workerPort=process.env.WORKBENCH_WORKER_PORT||4192,storageMode='single',automaticBuiltinUpgrade=true,nativeLanguageStage=process.env.WORKBENCH_NATIVE_LANGUAGE_STAGE==='1'?1:0}={}){
-  if(![0,1].includes(nativeLanguageStage))throw new WorkspaceError('Unsupported native language implementation stage.');
+export async function createWorkbenchServer({dataDir=process.env.DEMO_DATA_DIR||path.join(project,'data'),publicDir=path.join(project,'public'),maxBodyBytes=32*1024*1024,fsOps,modelConfig,arkClient,catalogSeed=()=>loadBundledCatalogSeed(path.join(project,'resources')),sceneSeed=()=>loadBundledSceneSeed(path.join(project,'resources')),executionEngine=process.env.QA_AI_ENGINE||'native-node',bridgeToken=process.env.WORKBENCH_BRIDGE_TOKEN,workerPort=process.env.WORKBENCH_WORKER_PORT||4192,storageMode='single',automaticBuiltinUpgrade=true,nativeLanguageStage=Number(process.env.WORKBENCH_NATIVE_LANGUAGE_STAGE||0)}={}){
+  if(![0,1,2].includes(nativeLanguageStage))throw new WorkspaceError('Unsupported native language implementation stage.');
   if(!['native-node','spring-ai'].includes(executionEngine))throw new WorkspaceError('不支持的模型执行引擎。');
   const client=arkClient||createArkClient(executionEngine==='spring-ai'?{fetchImpl:createSpringAiFetch({bridgeToken,workerPort})}:{});
   const transport=createWorkspaceTransport();
@@ -61,14 +61,15 @@ export async function createWorkbenchServer({dataDir=process.env.DEMO_DATA_DIR||
   async function openServices(){
     transport.clear();store=null;config=null;ai=null;traces=null;reportJobs=null;translationJobs=null;adminDrafts=null;importDrafts=null;rawStructureJobs=null;
     let openingPath='.workspace.lock';try{
-      store=await createWorkspaceStore({dataDir:resolvedData,catalogSeed,sceneSeed,storageMode,...(fsOps?{fsOps}:{})});
+      store=await createWorkspaceStore({dataDir:resolvedData,catalogSeed,sceneSeed,storageMode,nativeLanguageStage,...(fsOps?{fsOps}:{})});
       openingPath='workflow-runs/.workflow.lock';
       let startupRecovery;
       traces=await createWorkflowTraceStore({dataDir:resolvedData,...(startupMaintenancePending?{beforeLoad:async traceLock=>{startupRecovery=await recoverStartupCreatingFiles({dataDir:resolvedData,ownedLocks:[recovery.lockIdentity(),store.lockIdentity(),traceLock]});}}:{})});
       openingPath='.';
       builtinUpgrade=automaticBuiltinUpgrade?await upgradeBuiltinOnStartup({store,dataDir:resolvedData,catalogSeed,sceneSeed,productVersion:PRODUCT_VERSION,recovery:startupRecovery}):{status:'current',recovery:startupRecovery};
-      if(nativeLanguageStage===1)await store.enableLanguageGovernance();
-      if(workspaceLanguage(store.transportSnapshot().state)?.mode==='native-v1'&&store.transportSnapshot().state.tasks.length)languageError('NATIVE_LANGUAGE_STAGE_PENDING','This stage 1 build cannot execute native tasks from a later-stage workspace. Restore its pre-upgrade backup or use the matching later build.');
+      if(nativeLanguageStage>=1)await store.enableLanguageGovernance();
+      if(nativeLanguageStage<2&&workspaceLanguage(store.transportSnapshot().state)?.mode==='native-v1'&&store.transportSnapshot().state.tasks.length)languageError('NATIVE_LANGUAGE_STAGE_PENDING','This stage 1 build cannot execute native tasks from a later-stage workspace. Restore its pre-upgrade backup or use the matching later build.');
+      if(nativeLanguageStage===2)for(const task of store.transportSnapshot().state?.tasks||[])if(task.executionSnapshot?.languageExecution)await store.readNativeMaterial(task);
       importDrafts=await createImportDraftStore({dataDir:resolvedData,workspaceStore:store});config=modelConfig||await createModelConfig({dataDir:resolvedData});ai=await createAiService({store,modelConfig:config,client,traceStore:traces});reportJobs=await createReportJobs({maxAttempts:3,dataDir:resolvedData,store,modelConfig:config,client,traceStore:traces});adminDrafts=await createAdminDraftStore({dataDir:resolvedData});translationJobs=await createTranslationJobs({maxAttempts:3,dataDir:resolvedData,store,modelConfig:config,client,traceStore:traces,reportJobs,adminDrafts});rawStructureJobs=await createRawStructureJobs({dataDir:resolvedData,store,modelConfig:config,client,traceStore:traces});
     }
     catch(error){error.path??=openingPath;await closeServices();throw error;}
@@ -121,7 +122,7 @@ export async function createWorkbenchServer({dataDir=process.env.DEMO_DATA_DIR||
       }
       // Stage 1 deliberately has no native execution. A stale tab or direct API
       // cannot bypass the acceptance boundary. Legacy workspaces keep working.
-      if(!['GET','HEAD','OPTIONS'].includes(req.method)&&(/^\/api\/(ai|report-jobs|translation-jobs|raw-structure-jobs)(?:\/|$)/.test(pathname)||/^\/api\/tasks\/[^/]+\/ai(?:\/|$)/.test(pathname)||['/api/scene-config/prepare','/api/rules/prepare','/api/imports/prepare-mapping','/api/conversations/clean'].includes(pathname)))assertNativeStageReady(store.transportSnapshot().state);
+      if(!['GET','HEAD','OPTIONS'].includes(req.method)&&(/^\/api\/(ai|report-jobs|translation-jobs|raw-structure-jobs)(?:\/|$)/.test(pathname)||/^\/api\/tasks\/[^/]+\/ai(?:\/|$)/.test(pathname)||['/api/scene-config/prepare','/api/rules/prepare','/api/imports/prepare-mapping','/api/conversations/clean'].includes(pathname)))assertNativeStageReady(store.transportSnapshot().state,{stage:/^\/api\/(?:ai|tasks\/[^/]+\/ai)(?:\/|$)/.test(pathname)?nativeLanguageStage:1});
       if(releasePart&&req.method==='POST'){if(req.headers.origin!==origin)throw new WorkspaceError('修改操作必须来自当前页面。',403);transport.release(releasePart[1]);res.writeHead(204,safeHeaders);res.end();return;}
       const part=pathname.match(/^\/api\/workspace\/parts\/([a-f0-9]{32})\/([a-f0-9]{64})\/(\d+)$/);
       if(part&&req.method==='GET'){const bytes=transport.page(part[1],part[2],Number(part[3]));res.writeHead(200,{...safeHeaders,'Content-Type':'application/octet-stream','Content-Length':bytes.length,'X-Response-Bytes':String(bytes.length),'X-Response-Budget':String(2*1024*1024)});res.end(bytes);return;}
@@ -409,14 +410,14 @@ export async function createWorkbenchServer({dataDir=process.env.DEMO_DATA_DIR||
         if(input.action==='void'){if(input.administratorConfirmed!==true||typeof input.actor!=='string'||!input.actor.trim())throw new WorkspaceError('请确认本机管理员操作并填写操作人。');if([reportJobs,translationJobs,rawStructureJobs].some(service=>service.isBusy()))throw new WorkspaceError('请先结束正在生成的交付或文件解析任务，再作废。',409);}
         const {taskIds,action,...options}=input;await json(res,200,{...await(action==='void'?ai.voidTask(taskIds[0],options):store.updateTaskLifecycle(taskIds,action,options)),token,aiRuntime:ai.runtime()});return;
       }
-      const aiTaskRoute=pathname.match(/^\/api\/tasks\/([^/]+)\/ai(?:\/(pause|resume|cancel|retry-dependencies))?$/);
+      const aiTaskRoute=pathname.match(/^\/api\/tasks\/([^/]+)\/ai(?:\/(pause|resume|cancel|retry-dependencies|retry-native-language))?$/);
       if(pathname.startsWith('/api/ai/tasks/')||aiTaskRoute){
         if(req.method!=='POST')throw new WorkspaceError('Method not allowed',405);
         requireMutation('application/json');const input=await parseJson(1024);
         const action=aiTaskRoute?.[2],taskId=aiTaskRoute?.[1]??pathname.slice('/api/ai/tasks/'.length);
-        if(!input||Array.isArray(input)||typeof input!=='object'||Object.keys(input).some(key=>!(action==='retry-dependencies'?['sessionId']:action?[]:['runId','settings']).includes(key)))throw new WorkspaceError('AI任务请求字段无效。');
-        if(action==='retry-dependencies'&&(typeof input.sessionId!=='string'||!input.sessionId.trim()))throw new WorkspaceError('请选择需要重试依赖项的会话。');
-        const saved=action==='retry-dependencies'?await ai.retryDependencies(taskId,input.sessionId):action?await ai[action](taskId):await ai.start(taskId,input.runId,input.settings);await json(res,action?200:202,{...saved,token,aiRuntime:ai.runtime()});return;
+        if(!input||Array.isArray(input)||typeof input!=='object'||Object.keys(input).some(key=>!(['retry-dependencies','retry-native-language'].includes(action)?['sessionId']:action?[]:['runId','settings']).includes(key)))throw new WorkspaceError('AI任务请求字段无效。');
+        if(['retry-dependencies','retry-native-language'].includes(action)&&(typeof input.sessionId!=='string'||!input.sessionId.trim()))throw new WorkspaceError('请选择需要重试依赖项的会话。');
+        const saved=action==='retry-native-language'?await ai.retryNativeLanguage(taskId,input.sessionId):action==='retry-dependencies'?await ai.retryDependencies(taskId,input.sessionId):action?await ai[action](taskId):await ai.start(taskId,input.runId,input.settings);await json(res,action?200:202,{...saved,token,aiRuntime:ai.runtime()});return;
       }
       if(pathname==='/api/workspace'){
         if(req.method==='GET'&&req.headers['x-workspace-sync']==='records-v1'){await json(res,200,{initialized:true});return;}

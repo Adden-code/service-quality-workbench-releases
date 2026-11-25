@@ -1,3 +1,4 @@
+import {validateLanguageAssurance} from '../public/native-language-validation.mjs';
 import {deriveAIDecision,normalizeReviewPolicy,isAIFinal} from '../public/ai-triage.mjs';
 import {isRawTranscriptSession} from '../public/raw-transcript.mjs';
 import {validateRawResultAssurance,rawTimeRuleIds} from '../public/raw-evidence.mjs';
@@ -7,6 +8,8 @@ const equal=(a,b)=>stable(a)===stable(b);
 const fail=message=>{throw new Error(message);};
 const time=value=>typeof value==='string'&&/(?:Z|[+-]\d\d:\d\d)$/.test(value)&&Number.isFinite(Date.parse(value));
 export function validateResultAssurance(result,session){
+ validateLanguageAssurance(result.languageValidation);
+ if(result.nativeContract&&!result.languageValidation)fail('Native result is missing its language assurance.');
  if(result.evidenceValidation!==undefined&&(!object(result.evidenceValidation)||result.evidenceValidation.version!==1||result.evidenceValidation.status!=='unverified'||!Array.isArray(result.evidenceValidation.rejectedQuotes)&&!Array.isArray(result.evidenceValidation.dependencies)))fail('证据核验标注无效。');
  if(result.confidence!==undefined&&(typeof result.confidence!=='number'||!Number.isFinite(result.confidence)||result.confidence<0||result.confidence>1))fail('AI置信度须为0至1有限数值。');
  if(result.conflictsWith!==undefined&&(!Array.isArray(result.conflictsWith)||new Set(result.conflictsWith).size!==result.conflictsWith.length||result.conflictsWith.some(id=>!session.expectedRuleIds?.includes(id)||id===result.ruleId)))fail('AI冲突规则必须属于本会话预期检核项。');

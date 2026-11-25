@@ -1,3 +1,4 @@
+import {nativeMessages,nativeCapabilityMessages,adaptNativeRuleOutput,assureNativeResults,assureNativeCapability,nativeAssurance,nativeMessage} from './native-language-execution.mjs';
 import {isBusinessEcommerceBasis,replyStructureFacts} from '../public/ecommerce-business-profile.mjs';
 import {hasTargetCalibrationPolicy} from '../public/ecommerce-semantic-policy.mjs';
 import {ecommerceSemanticPolicy,ecommerceSemanticFacts,ecommerceSemanticGuidance,ecommerceTargetPolicy,ecommerceTargetGuidance,EC_SEMANTIC_POLICY_VERSION} from './ecommerce-semantic-prompt.mjs';
@@ -201,11 +202,11 @@ export function createArkClient({fetchImpl=fetch,timeoutMs=120000,maxResponseByt
   }
   return {
     engine:fetchImpl.engine||'native-node',
-    async inspectSceneCapability({config,input,signal,trace,retryFeedback}={}){
-      const prepared=prepareSceneCapability(input,retryFeedback),{content,...meta}=await request(config,prepared.messages,prepared.maxTokens,signal,trace,prepared.responseFormat);
+    async inspectSceneCapability({config,input,signal,trace,retryFeedback,nativeContext}={}){
+      let prepared=prepareSceneCapability(input,retryFeedback);if(nativeContext)prepared=nativeCapabilityMessages(input,prepared,nativeContext);const {content,...meta}=await request(config,prepared.messages,prepared.maxTokens,signal,trace,prepared.responseFormat);
       return traced(trace,'validation',{capability:input.capability,contract:input.contract,required:prepared.outputSchema.required},async()=>{
-        try{return {...parseSceneCapability(content,input),modelId:meta.modelId||config.model};}
-        catch(error){error.traceOutput={capability:input.capability,code:'INVALID_OUTPUT',message:error.message,...(error.validationReason?{validationReason:error.validationReason}:{})};throw error;}
+        try{let value=parseSceneCapability(content,input);if(nativeContext)value=assureNativeCapability(value,nativeContext,input);return {...value,modelId:meta.modelId||config.model};}
+        catch(error){if(nativeContext&&error.unverifiedCandidate)error.unverifiedCandidate={...error.unverifiedCandidate,languageValidation:nativeAssurance(error.unverifiedCandidate,nativeContext,{capability:input.capability,sourceQuotes:(error.unverifiedCandidate.evidence||[]).map(e=>e.quote)})};error.traceOutput={...error.traceOutput,capability:input.capability,code:'INVALID_OUTPUT',message:error.message,...(error.validationReason?{validationReason:error.validationReason}:{})};throw error;}
       });
     },
     async prepareScenePackage({config,input,signal,trace}={}){
@@ -280,25 +281,25 @@ export function createArkClient({fetchImpl=fetch,timeoutMs=120000,maxResponseByt
         return {candidates:parseRuleCandidates(content,prepared.input),...meta,promptVersion:RULE_PREPARATION_PROMPT_VERSION};
       }catch(error){if(error instanceof RulePreparationError)throw new ArkError(error.code,error.message,error.status);throw error;}
     },
-    async inspectRaw({config,session,basis,inspectionAt,outputLanguage='zh',allowDegraded=false,retryFeedback,signal,trace,sceneSnapshot,sceneCapabilities}={}) {
+    async inspectRaw({config,session,basis,inspectionAt,outputLanguage='zh',allowDegraded=false,retryFeedback,signal,trace,sceneSnapshot,sceneCapabilities,nativeContext}={}) {
       try{
-        const prepared=prepareRawInspection(session,basis,{inspectionAt,outputLanguage,retryFeedback});addSceneContext(prepared.messages,sceneSnapshot,sceneCapabilities);
+        let prepared=prepareRawInspection(session,basis,{inspectionAt,outputLanguage,retryFeedback});if(nativeContext)prepared=nativeMessages(prepared,basis,nativeContext,{kind:'inspection.raw',sceneCapabilities,snapshot:sceneSnapshot});else addSceneContext(prepared.messages,sceneSnapshot,sceneCapabilities);
         if(!prepared.input.basis.rules.length){
           if(signal?.aborted)fail('ABORTED','模型请求已取消。',499);
-          return await traced(trace,'validation',{kind:'rawSourceTime',expectedSessionId:session.id,textSha256:session.rawTranscript.textSha256,timeRuleIds:prepared.input.timeRuleIds,basis:prepared.input.basis,promptVersion:RAW_INSPECTION_PROMPT_VERSION},()=>({results:parseRawInspectionResult(JSON.stringify({recordId:session.id,results:[]}),{session,basis,outputLanguage},{allowDegraded}),modelId:'local-source-time',promptVersion:RAW_INSPECTION_PROMPT_VERSION}));
+          return await traced(trace,'validation',{kind:'rawSourceTime',expectedSessionId:session.id,textSha256:session.rawTranscript.textSha256,timeRuleIds:prepared.input.timeRuleIds,basis:prepared.input.basis,promptVersion:RAW_INSPECTION_PROMPT_VERSION},()=>({results:(()=>{const rows=parseRawInspectionResult(JSON.stringify({recordId:session.id,results:[]}),{session,basis,outputLanguage},{allowDegraded});return nativeContext?assureNativeResults(rows.map(r=>({...r,reason:nativeMessage(nativeContext,'program.metric-source-unavailable')})),nativeContext):rows;})(),modelId:'local-source-time',promptVersion:nativeContext?.execution.promptBundleRef.hash||RAW_INSPECTION_PROMPT_VERSION}));
         }
         const {content,...meta}=await request(config,prepared.messages,prepared.maxTokens,signal,trace);
-        return await traced(trace,'validation',{content,expectedSessionId:session.id,textSha256:session.rawTranscript.textSha256,basis:prepared.input.basis,promptVersion:RAW_INSPECTION_PROMPT_VERSION},()=>({results:parseRawInspectionResult(content,{session,basis,outputLanguage},{allowDegraded}),...meta,promptVersion:RAW_INSPECTION_PROMPT_VERSION}));
+        return await traced(trace,'validation',{content,expectedSessionId:session.id,textSha256:session.rawTranscript.textSha256,basis:prepared.input.basis,promptVersion:RAW_INSPECTION_PROMPT_VERSION},()=>({results:(()=>{const results=parseRawInspectionResult(nativeContext?adaptNativeRuleOutput(content):content,{session,basis,outputLanguage},{allowDegraded});return nativeContext?assureNativeResults(results,nativeContext,{sourceQuotes:results.flatMap(r=>r.evidenceQuotes?.map(q=>q.quote)||[]),names:[session.product]}):results;})(),...meta,promptVersion:nativeContext?.execution.promptBundleRef.hash||RAW_INSPECTION_PROMPT_VERSION}));
       }catch(error){
         if(error instanceof RawInspectionError){const failure=new ArkError(error.code,error.message,error.status);if(error.diagnostic)failure.diagnostic=error.diagnostic;if(error.traceOutput)failure.traceOutput=error.traceOutput;throw failure;}
         if(error instanceof ArkError&&error.traceOutput)error.traceOutput={...error.traceOutput,promptVersion:RAW_INSPECTION_PROMPT_VERSION};
         throw error;
       }
     },
-    async inspect({config,session,basis,signal,trace,sceneSnapshot,sceneCapabilities}={}) {
-      const prepared=prepareInspection(session,basis,{sceneCapabilities});addSceneContext(prepared.messages,sceneSnapshot,sceneCapabilities);
+    async inspect({config,session,basis,signal,trace,sceneSnapshot,sceneCapabilities,nativeContext}={}) {
+      let prepared=prepareInspection(session,basis,{sceneCapabilities});if(nativeContext)prepared=nativeMessages(prepared,basis,nativeContext,{sceneCapabilities,snapshot:sceneSnapshot});else addSceneContext(prepared.messages,sceneSnapshot,sceneCapabilities);
       const {content,...meta}=await request(config,prepared.messages,16384,signal,trace);
-      return traced(trace,'validation',{content,expectedSessionId:session.id,basis:JSON.parse(prepared.messages[1].content).basis},()=>({results:parseResults(content,prepared),...meta,...(prepared.ecommerceSemanticPolicy?{promptVersion:prepared.ecommerceTargetPolicy||EC_SEMANTIC_POLICY_VERSION}:{})}));
+      return traced(trace,'validation',{content,expectedSessionId:session.id,basis:JSON.parse(prepared.messages[1].content).basis},()=>({results:(()=>{const results=parseResults(nativeContext?adaptNativeRuleOutput(content):content,prepared);return nativeContext?assureNativeResults(results,nativeContext,{sourceQuotes:results.flatMap(r=>r.evidenceQuotes?.map(q=>q.quote)||[]),names:[session.product]}):results;})(),...meta,...(nativeContext?{promptVersion:nativeContext.execution.promptBundleRef.hash}:{}),...(prepared.ecommerceSemanticPolicy?{promptVersion:prepared.ecommerceTargetPolicy||EC_SEMANTIC_POLICY_VERSION}:{})}));
     },
     async test({config,signal}={}) {
       const messages=[{role:'system',content:'这是一项虚构的连接测试。只回复 OK。'},{role:'user',content:'虚构测试：1 + 1 = 2。请只回复 OK。'}];

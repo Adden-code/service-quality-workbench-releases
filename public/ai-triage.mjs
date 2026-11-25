@@ -1,3 +1,4 @@
+import {nativeLanguageIssue} from './native-language-validation.mjs';
 import {hasUnverifiedEvidence} from './evidence-status.mjs';
 import {aggregateRuleId} from './scene-aggregate.mjs';
 import {hasCompletedAI,hasRawFallback} from './session-result-availability.mjs';
@@ -43,6 +44,7 @@ export function deriveAIDecision(session,input,{at=new Date().toISOString(),runI
  if(session.aiExecution?.status!=='completed')issue('output_failure','AI未形成完整有效输出，须由人工核对。');
  if(!expected.length||new Set(expected).size!==expected.length||results.length!==expected.length||new Set(results.map(r=>r.ruleId)).size!==expected.length||results.some(r=>!expected.includes(r.ruleId)))issue('missing_checks','检核结果未完整覆盖冻结规则。');
  for(const result of results){
+  if(nativeLanguageIssue(result))issue('language_unverified','AI理由语种尚未核验，须人工确认，不能免审。');
   if(hasUnverifiedEvidence(result))issue('quote_unverified','本项依据未核验，可由人工确认，不能免审。');
   const localTime=result.ruleId==='EC-TIME'&&Boolean(session.ecommerce);
   const value=localTime?1:result.confidence;

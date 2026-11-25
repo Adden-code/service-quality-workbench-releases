@@ -1,3 +1,5 @@
+import {nativeExecutionContext,nativeProgramResults} from './native-language-execution.mjs';
+import {nativeLanguageIssue} from '../public/native-language-validation.mjs';
 import {assertTaskWritable,isInactiveTask,taskHasPendingAI} from '../public/task-lifecycle.mjs';
 import {isBusinessEcommerceBasis} from '../public/ecommerce-business-profile.mjs';
 import {hasTargetCalibrationPolicy,hasTargetLimitedPolicy} from '../public/ecommerce-semantic-policy.mjs';
@@ -117,8 +119,9 @@ export async function createAiService(options={}){
   if(modelConfigFingerprint(config)!==modelConfigFingerprint(run.modelConfig??modelConfigSnapshot({model:run.modelId})))throw new WorkspaceError('当前模型设置与本行原运行冻结配置不同，不能重算旧行依赖。',409);
   const beforeResults=copy(session.aiResults),beforeReview=copy(session.review),source=isBusinessEcommerceBasis(task.basisSnapshot)?copy(session):workflowInput(session);delete source.source;
   const trace={step:(node,input,op)=>step(`r${index}-recovery-${node}`,{sessionId:session.id,...input},op)};
-  let repaired=await executeSceneCapabilities({session:source,snapshot:task.executionSnapshot,client,config,signal,trace,previous:prior,retryDelayMs});
-  repaired=await executeSceneCapabilities({session:source,snapshot:task.executionSnapshot,client,config,signal,trace,previous:repaired,phase:'post',retryDelayMs});
+  const nativeContext=task.executionSnapshot?.languageExecution?nativeExecutionContext(task,await store.readNativeMaterial(task)):undefined;
+  let repaired=await executeSceneCapabilities({session:source,snapshot:task.executionSnapshot,nativeContext,client,config,signal,trace,previous:prior,retryDelayMs});
+  repaired=await executeSceneCapabilities({session:source,snapshot:task.executionSnapshot,nativeContext,client,config,signal,trace,previous:repaired,phase:'post',retryDelayMs});
   const targetRecovery=hasTargetLimitedPolicy(task.basisSnapshot)&&targetClassificationRecoveryNeeded(session,repaired),ruleIds=[...classificationBlockedRuleIds(session),...(targetRecovery?['EC-TARGET']:[])],candidateResults=[],canRecompute=repaired?.outputs?.ecommerceClassification?.status==='completed'&&isBusinessEcommerceBasis(task.basisSnapshot)&&(!human(session)||trigger==='row-retry');
   let ruleRecoveryError;
   if(canRecompute){
@@ -222,7 +225,7 @@ export async function createAiService(options={}){
    nodes.push({id:'merge',label:'逐行合并程序结果与全批次证据'});
    const dynamicTrace=typeof traceStore?.appendNodes==='function',definitions=new Map(nodes.map(n=>[n.id,n])),nodeRuns=new Map();let traceAllocation=Promise.resolve(),partNodeCount=1;
    const traceMeta={queue:true,runId:job.id,parentRunId:job.traceId,targetSessionIds:q.rows.filter(r=>r.runId===job.id).map(r=>r.sessionId),comparisonCount:sessions.length,settings:q.settings,modelConfig:modelConfigSnapshot(job.config),modelConfigFingerprint:modelConfigFingerprint(job.config),...(raw?{inputMode:RAW_INPUT_MODE,promptVersion:RAW_INSPECTION_PROMPT_VERSION,inspectionAt:task.aiRun.inspectionAt,outputLanguage:task.rawImportOptions.outputLanguage}:isStageATimeBasis(task.basisSnapshot)?{executorVersion:TIME_EXECUTOR_VERSION,inspectionAt:task.aiRun.inspectionAt,ruleSet:copy(task.basisSnapshot.ruleSetSnapshot)}:{})};
-   const beginPart=(id,part,definitions)=>traceStore.begin({id,taskId,engine:client.engine||'native-node',kind:raw?'raw-transcript-rows':ecommerce?'ecommerce-rows':'conversation-rows',nodes:definitions,meta:{...traceMeta,part}});
+   const beginPart=(id,part,definitions)=>traceStore.begin({id,taskId,engine:client.engine||'native-node',kind:raw?'raw-transcript-rows':ecommerce?'ecommerce-rows':'conversation-rows',nodes:definitions,meta:{...traceMeta,part,...(task.executionSnapshot?.languageExecution?{languageExecution:copy(task.executionSnapshot.languageExecution),promptVersion:task.executionSnapshot.languageExecution.promptBundleRef.hash}:{})}});
    if(traceStore){await beginPart(job.traceId,1,dynamicTrace?[nodes[0]]:nodes.slice(0,4096));traceParts.push(job.traceId);nodeRuns.set('source',job.traceId);traceStarted=true;}
    const redact=value=>typeof value==='string'?(job.config.apiKey?value.split(job.config.apiKey).join('[已隐藏密钥]'):value):Array.isArray(value)?value.map(redact):value&&typeof value==='object'?Object.fromEntries(Object.entries(value).filter(([k])=>!['apikey','authorization','proxyauthorization'].includes(k.toLowerCase().replace(/[\s_-]/g,''))).map(([k,v])=>[k,redact(v)])):value??null;
    const bounded=(value,hints)=>{const safe=redact(value),json=JSON.stringify(safe),bytes=Buffer.byteLength(json);return bytes<=65536?JSON.parse(json):{truncated:true,bytes,limitBytes:65536,sha256:digest(safe),source:{sessionId:hints?.sessionId??null,sourceRow:hints?.sourceRow??null,segmentId:hints?.segmentId??null,blockId:hints?.blockId??null},reason:'快照超过64KiB；完整原文保留在原文件与行检查点，未截断模型输入。'};};
@@ -248,20 +251,22 @@ export async function createAiService(options={}){
    async function inspectRow(index){
     let initial=await store.read(),current=initial.state.tasks.find(t=>t.id===taskId),row=current.aiQueue.rows[index],session=initial.state.sessions.find(s=>s.id===row.sessionId);
     if(!canDispatch()||row.status==='protected'||session.aiExecution?.status==='completed'||human(session)||row.semanticResult)return;
+    const nativeBase=current.executionSnapshot?.languageExecution?nativeExecutionContext(current,await store.readNativeMaterial(current)):undefined;
     let rawRetryFeedback;
     for(let attempt=1;attempt<=maxAttempts&&canDispatch();attempt++){
      const startedAt=now();await update(taskId,(state,t)=>{const r=t.aiQueue.rows[index],s=state.sessions.find(s=>s.id===r.sessionId);if(human(s)){r.status='protected';return;}r.status='running';r.attempts++;r.startedAt=startedAt;r.completedAt=null;delete r.error;delete r.errorCode;archiveFailedAIDecision(s);if(raw)s.aiResults=[];s.aiExecution={status:'running',runId:job.id,modelId:job.config.model,requestedModel:job.config.model,startedAt,completedAt:null,inputSha256:r.inputSha256,basisSha256:digest(t.basisSnapshot)};refresh(t,state);});
      initial=await store.read();current=initial.state.tasks.find(t=>t.id===taskId);row=current.aiQueue.rows[index];session=initial.state.sessions.find(s=>s.id===row.sessionId);if(row.status==='protected')return;
+     const nativeContext=nativeBase?{...nativeBase,attempt,maxAttempts}:undefined;
      const checkBasis=inspectionBasis(current.basisSnapshot,current.executionSnapshot);
      const projected=workflowInput(session);delete projected.source;
      const scoped={step:(node,input,operation)=>step(`r${index}-a${attempt}-${node}`,{segmentId:row.batchId,sourceRow:row.sourceRow,attempt:row.attempts,...input},operation)};
      let result,failure,sceneCapabilities,localUnreplied=false,localRawOnly=false;try{
-      sceneCapabilities=await executeSceneCapabilities({session:isBusinessEcommerceBasis(current.basisSnapshot)?session:projected,snapshot:current.executionSnapshot,client,config:job.config,signal:job.controller.signal,trace:scoped,previous:row.sceneCapabilities});
+      sceneCapabilities=await executeSceneCapabilities({session:isBusinessEcommerceBasis(current.basisSnapshot)?session:projected,snapshot:current.executionSnapshot,nativeContext,client,config:job.config,signal:job.controller.signal,trace:scoped,previous:row.sceneCapabilities});
       scoped.sceneSnapshot=current.executionSnapshot;scoped.sceneCapabilities=sceneCapabilities;
       localUnreplied=ecommerce&&(isStageATimeBasis(current.basisSnapshot)||isBusinessEcommerceBasis(current.basisSnapshot))&&computeEcommerceTimeFacts(session,current.basisSnapshot,{inspectionAt:current.aiRun.inspectionAt,runtime:current.executionSnapshot?.runtime}).replyStatus==='unreplied';
       localRawOnly=raw&&session.rawTranscript.timePolicy.mode==='unavailable'&&rawTimeRuleIds(checkBasis).length===checkBasis.rules.length;
-      result=raw?await client.inspectRaw({config:job.config,session:copy(projected),basis:copy(checkBasis),inspectionAt:current.aiRun.inspectionAt,outputLanguage:current.rawImportOptions.outputLanguage,allowDegraded:attempt===maxAttempts,...(rawRetryFeedback?{retryFeedback:rawRetryFeedback}:{}),signal:job.controller.signal,trace:scoped,sceneSnapshot:current.executionSnapshot,sceneCapabilities}):localUnreplied?{results:unrepliedSemanticResults(),modelId:'local-unreplied',promptVersion:'ec-local-unreplied-v1'}:ecommerce?await client.inspectEcommerceRow({config:job.config,session:copy(projected),basis:{...copy(current.basisSnapshot),rules:copy(current.basisSnapshot.rules.filter(r=>r.id!=='EC-TIME'))},signal:job.controller.signal,trace:scoped,sceneSnapshot:current.executionSnapshot,sceneCapabilities}):await client.inspect({config:job.config,session:copy(projected),basis:copy(checkBasis),signal:job.controller.signal,trace:scoped,sceneSnapshot:current.executionSnapshot,sceneCapabilities});
-      if(sceneCapabilities){result.results=enforceSceneResults(result.results,current.executionSnapshot,sceneCapabilities,session);sceneCapabilities=await executeSceneCapabilities({session:isBusinessEcommerceBasis(current.basisSnapshot)?session:projected,snapshot:current.executionSnapshot,client,config:job.config,signal:job.controller.signal,trace:scoped,previous:sceneCapabilities,phase:'post'});}
+      result=raw?await client.inspectRaw({config:job.config,session:copy(projected),basis:copy(checkBasis),inspectionAt:current.aiRun.inspectionAt,outputLanguage:current.rawImportOptions.outputLanguage,allowDegraded:attempt===maxAttempts,...(rawRetryFeedback?{retryFeedback:rawRetryFeedback}:{}),signal:job.controller.signal,trace:scoped,sceneSnapshot:current.executionSnapshot,sceneCapabilities,nativeContext}):localUnreplied?{results:unrepliedSemanticResults(),modelId:'local-unreplied',promptVersion:'ec-local-unreplied-v1'}:ecommerce?await client.inspectEcommerceRow({config:job.config,session:copy(projected),basis:{...copy(current.basisSnapshot),rules:copy(current.basisSnapshot.rules.filter(r=>r.id!=='EC-TIME'))},signal:job.controller.signal,trace:scoped,sceneSnapshot:current.executionSnapshot,sceneCapabilities,nativeContext}):await client.inspect({config:job.config,session:copy(projected),basis:copy(checkBasis),signal:job.controller.signal,trace:scoped,sceneSnapshot:current.executionSnapshot,sceneCapabilities,nativeContext});
+      if(sceneCapabilities){const before=result.results;result.results=enforceSceneResults(before,current.executionSnapshot,sceneCapabilities,session);if(nativeContext)result.results=nativeProgramResults(before,result.results,nativeContext,current.executionSnapshot,sceneCapabilities);sceneCapabilities=await executeSceneCapabilities({session:isBusinessEcommerceBasis(current.basisSnapshot)?session:projected,snapshot:current.executionSnapshot,nativeContext,client,config:job.config,signal:job.controller.signal,trace:scoped,previous:sceneCapabilities,phase:'post'});}
      }catch(error){if(String(error?.code||'').toLowerCase().startsWith('trace_'))throw error;failure=safeFailure(error,closing||job.controller.signal.aborted);if(raw)rawRetryFeedback=rawInspectionRetryFeedback(error.diagnostic??error.traceOutput?.diagnostic,checkBasis);if(stopsQueue(failure.errorCode)){job.stopped=true;if(current.executionSnapshot?.configuration.executionMode==='configured')job.paused=true;}}
      const completedAt=now();
      const willRetry=failure&&retryable(failure.errorCode)&&attempt<maxAttempts&&canDispatch();
@@ -320,6 +325,38 @@ export async function createAiService(options={}){
    await dispatchNext();return read();
   }
   const api={
+   retryNativeLanguage(taskId,sessionId){return serialized(async()=>{
+    ensureOpen();if(active.size)throw new WorkspaceError('Wait for active AI requests before retrying this native-language row.',409);
+    const doc=await read(),task=doc.state.tasks.find(t=>t.id===taskId),session=doc.state.sessions.find(s=>s.id===sessionId&&s.taskId===taskId);
+    if(!task?.executionSnapshot?.languageExecution||!session||human(session)||!(session.aiResults?.some(nativeLanguageIssue)||Object.values(session.sceneCapabilities?.outputs||{}).some(nativeLanguageIssue)))throw new WorkspaceError('Select an unreviewed native row with an unresolved output-language finding.',409);
+    writable(doc.state,task);const run=dependencyRecoveryRun(session,task);
+    if(!run||!task.aiQueue?.rows.some(r=>r.sessionId===sessionId))throw new WorkspaceError('The original run checkpoint is unavailable; create a new inspection task.',409);
+    const config=resumeConfig(modelConfig.getPrivate(),run),context=nativeExecutionContext(task,await store.readNativeMaterial(task));
+    const beforeReview=copy(session.review),beforeResults=copy(session.aiResults),beforeCapabilities=copy(session.sceneCapabilities),prior=copy(session.sceneCapabilities);
+    for(const [key,value] of Object.entries(prior?.outputs||{}))if(nativeLanguageIssue(value))delete prior.outputs[key];
+    const source=workflowInput(session);delete source.source;const basis=inspectionBasis(task.basisSnapshot,task.executionSnapshot);
+    const traceId=`native-language-${Date.now()}-${digest([taskId,sessionId,doc.revision]).slice(0,12)}`,nodes=new Set(['source']);
+    const step=async(id,input,op)=>{if(!traceStore)return op();if(!nodes.has(id)){await traceStore.appendNodes(traceId,[{id,label:id}]);nodes.add(id);}return traceStore.step(traceId,id,input,op);};
+    if(traceStore)await traceStore.begin({id:traceId,taskId,engine:client.engine||'native-node',kind:'native-language-retry',nodes:[{id:'source',label:'Frozen native input'}],meta:{sessionId,originalRunId:run.id,languageExecution:context.execution}});
+    try{
+     await step('source',{sessionId,originalRunId:run.id},async()=>({source,languageExecution:context.execution}));
+     let capabilities=await executeSceneCapabilities({session:source,snapshot:task.executionSnapshot,client,config,nativeContext:context,previous:prior,trace:{step},retryDelayMs}),result;
+     for(let attempt=1;attempt<=maxAttempts;attempt++)try{
+      const request={config,session:source,basis,inspectionAt:run.inspectionAt,outputLanguage:context.language,allowDegraded:attempt===maxAttempts,nativeContext:{...context,attempt,maxAttempts},sceneSnapshot:task.executionSnapshot,sceneCapabilities:capabilities,trace:{step:(id,input,op)=>step(`a${attempt}-${id}`,input,op)}};
+      result=await client[session.rawTranscript?'inspectRaw':'inspect'](request);break;
+     }catch(e){if(e.code!=='INVALID_OUTPUT'||attempt===maxAttempts)throw e;}
+     result.results=nativeProgramResults(result.results,enforceSceneResults(result.results,task.executionSnapshot,capabilities,session),context,task.executionSnapshot,capabilities);
+     capabilities=await executeSceneCapabilities({session:source,snapshot:task.executionSnapshot,client,config,nativeContext:context,previous:capabilities,phase:'post',trace:{step},retryDelayMs});
+     let protectedRow=false;
+     await update(taskId,(state,t)=>{const s=state.sessions.find(s=>s.id===sessionId),row=t.aiQueue.rows.find(r=>r.sessionId===sessionId);
+      protectedRow=human(s)||canonical(s.review)!==canonical(beforeReview)||canonical(s.aiResults)!==canonical(beforeResults);
+      const beforeDecision=copy(s.aiDecision??null);
+      if(!protectedRow){s.aiResults=copy(result.results);s.sceneCapabilities=copy(capabilities);row.semanticResult=copy(result);row.sceneCapabilities=copy(capabilities);t.capabilityMonitor=recordCapabilityOutcomes(t.capabilityMonitor,s.id,capabilities,t.executionSnapshot.configuration.failurePolicy);if(s.aiDecision)s.aiDecisionHistory=[...(s.aiDecisionHistory||[]),copy(s.aiDecision)];delete s.aiDecision;applyAIDecisions(state,t);}
+      s.nativeLanguageRetryHistory=[...(s.nativeLanguageRetryHistory||[]),{at:now(),traceId,originalRunId:run.id,protected:protectedRow,beforeResults,beforeCapabilities,beforeDecision,afterDecision:copy(s.aiDecision??null),afterResults:copy(result.results),afterCapabilities:copy(capabilities)}];
+     });
+     if(traceStore)await traceStore.finish(traceId,{status:'completed',summary:{sessionId,protected:protectedRow,languageFindings:result.results.filter(nativeLanguageIssue).length}});return read();
+    }catch(error){if(traceStore)await traceStore.finish(traceId,{status:'failed',error}).catch(()=>{});throw error;}
+   });},
    retryDependencies(taskId,sessionId){return serialized(async()=>{
     ensureOpen();if(active.size)throw new WorkspaceError('请等待当前AI请求结束后单行重试依赖项。',409);
     const doc=await read(),task=doc.state.tasks.find(t=>t.id===taskId),session=doc.state.sessions.find(s=>s.id===sessionId&&s.taskId===taskId),index=task?.aiQueue?.rows?.findIndex(r=>r.sessionId===sessionId);

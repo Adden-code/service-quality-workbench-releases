@@ -1,3 +1,5 @@
+import {nativeExecutionContext} from './native-language-execution.mjs';
+import {NATIVE_LANGUAGE_VALIDATOR} from '../public/native-language-validation.mjs';
 import {workspaceLanguage,languageError,assertNativeStageReady} from '../public/workspace-language.mjs';
 import {initializeLanguageGovernance,selectWorkspaceLanguage,diskLanguageHistory,verifyLanguageFiles} from './workspace-language-service.mjs';
 import {validateBilingualMaterial,assertMaterialReleaseAllowed,freezeNativeLanguage,languageHash,languageCanonical,languageDiff} from './native-language-materials.mjs';
@@ -54,7 +56,7 @@ async function acquireLock(fsOps,lockPath){
   finally{await recovery.close();await fsOps.unlink(recoveryPath).catch(()=>{});}
 }
 
-export async function createWorkspaceStore({dataDir,fsOps=fs,catalogSeed=null,sceneSeed=null,storageMode='single'}={}){
+export async function createWorkspaceStore({dataDir,fsOps=fs,catalogSeed=null,sceneSeed=null,storageMode='single',nativeLanguageStage=0}={}){
   if(typeof dataDir!=='string'||!dataDir.trim())throw new WorkspaceError('请指定工作区数据目录。');
   const directory=path.resolve(dataDir),file=path.join(directory,'workspace.json'),lockPath=path.join(directory,'.workspace.lock'),sources=path.join(directory,'sources');
   await fsOps.mkdir(directory,{recursive:true});
@@ -143,7 +145,18 @@ export async function createWorkspaceStore({dataDir,fsOps=fs,catalogSeed=null,sc
       await atomicWrite(path.join(sources,`${item.sha256}.json`),JSON.stringify({sha256:item.sha256,name:item.name,size:item.size,createdAt:new Date().toISOString()}));
     }
   }
+  const nativeMaterialCache=new Map();
+  async function readNativeMaterial(task){
+    const hash=task?.executionSnapshot?.languageMaterialRef;
+    if(!HASH.test(hash||''))languageError('NATIVE_MATERIAL_INVALID','Missing frozen material reference.');
+    const frozen=nativeMaterialCache.get(hash)||JSON.parse(await fsOps.readFile(path.join(directory,'language-materials',hash+'.json'),'utf8'));
+    nativeExecutionContext(task,frozen);nativeMaterialCache.set(hash,frozen);return clone(frozen);
+  }
   async function checkSources(state,catalog){
+    for(const task of state.tasks||[])if(task.executionSnapshot?.languageExecution){
+      if(nativeLanguageStage!==2)languageError('NATIVE_LANGUAGE_STAGE_PENDING','Use the stage 2 interpreter for native task data.');
+      await readNativeMaterial(task);
+    }
     const sceneSources=[...(state.sceneConfigurations||[]).flatMap(c=>c.sourceRefs||[]),...(state.scenePackageDrafts||[]).flatMap(d=>d.package?.configuration?.sourceRefs||[])];
     for(const expected of sceneSources){const saved=(await sourceRecord(expected.sha256)).metadata;if(saved.name!==expected.name||saved.size!==expected.size)throw new WorkspaceError('场景规则文档与归档原件不一致。');}
     for(const task of state.tasks)if(task.source){
@@ -243,14 +256,14 @@ export async function createWorkspaceStore({dataDir,fsOps=fs,catalogSeed=null,sc
       if(input.baseRevision!==document.revision)languageError('LANGUAGE_REVISION_CONFLICT','Reload before freezing language materials.');
       const registry=clone(document.state.languageMaterials||{schemaVersion:1,releases:[],freezes:[]}),materials=[];
       for(const hash of input.materialHashes){if(!registry.releases.some(r=>r.contentHash===hash))languageError('LANGUAGE_MATERIAL_MISSING','Only published materials may enter an execution snapshot.');materials.push(JSON.parse(await fsOps.readFile(path.join(directory,'language-materials',hash+'.json'),'utf8')));}
-      const frozen=freezeNativeLanguage(workspaceLanguage(document.state),{materials,promptId:input.promptId,glossaryId:input.glossaryId}),hash=languageHash(frozen),state=clone(document.state);
+      const frozen=freezeNativeLanguage(workspaceLanguage(document.state),{materials,promptId:input.promptId,glossaryId:input.glossaryId,...(nativeLanguageStage===2?{languageValidatorVersion:NATIVE_LANGUAGE_VALIDATOR}:{})}),hash=languageHash(frozen),state=clone(document.state);
       if(!registry.freezes.some(r=>r.hash===hash))registry.freezes.push({hash,languageExecution:frozen.languageExecution});state.languageMaterials=registry;
       state.languageAudit.push({id:input.operationId,action:'freeze-material',actor:input.actor,at:new Date().toISOString(),reason:input.reason,before:null,after:{hash,languageExecution:frozen.languageExecution}});
       validateWorkspace(state,document.catalog,document.state,{trustedLanguage:true});await writeLanguageArtifact(hash,frozen);
       return persist({...document,state,revision:document.revision+1,mutations:[...document.mutations,{id:input.operationId,digest:fingerprint}]});
     });},
     lockIdentity:()=>({path:lockPath,pid:process.pid,nonce}),
-    read,changesSince,
+    read,changesSince,readNativeMaterial,
     // Internal immutable view: callers must never mutate or expose it to plugins.
     transportSnapshot:()=>({initialized:document.revision>0,revision:document.revision,state:document.state,catalog:document.catalog}),
     reviewCommand(input,{snapshot=true}={}){const request=clone(input);return serial(async()=>{
@@ -338,7 +351,7 @@ export async function createWorkspaceStore({dataDir,fsOps=fs,catalogSeed=null,sc
         const deletedEvents=catalog=>(catalog?.events||[]).filter(event=>(document.catalog?.deletedRules||[]).some(entry=>event.kind==='rules'&&entry.id===event.id&&entry.version===event.version));
         if(canonical(deletedEvents(request.catalog))!==canonical(deletedEvents(document.catalog)))throw new WorkspaceError('已删除规则的历史操作记录不可改写。');
         if((document.catalog?.rules||[]).some(old=>!request.catalog?.rules?.some(next=>next.id===old.id&&next.version===old.version)))throw new WorkspaceError('删除规则须使用专用入口并检查任务引用。');
-        validateWorkspace(request.state,request.catalog,document.state,{authenticateNewSnapshots:true});
+        validateWorkspace(request.state,request.catalog,document.state,{authenticateNewSnapshots:true,allowNativeTaskCreation:nativeLanguageStage===2});
         try{validateRuleSetCatalogTransition(document.catalog,request.catalog);}catch(error){throw new WorkspaceError(error.message);}
         await checkSources(request.state,request.catalog);
         const monitored=monitorCalibrations(request.state);
