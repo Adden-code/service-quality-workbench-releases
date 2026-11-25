@@ -13,7 +13,10 @@ const guides={
 
 test('current shipped guides distinguish calibrated administrator groups and fixed timing from historical snapshots',()=>{
  for(const text of guides.en){
-  assert.match(text,/ec-target-calibration-v2/);
+  assert.match(text,/ec-target-calibration-v3/);
+  assert.match(text,/Complaint criteria are unchanged from ec-target-calibration-v2 and remain pending business arbitration/);
+  assert.match(text,/additional information is not mandatory in that case/);
+  assert.match(text,/batch duplicate checks still run and can fail/);
   assert.match(text,/at least 3 distinct source rows from the same administrator/);
   assert.match(text,/every pair reaching >=85%/);
   assert.match(text,/Two replies are advisory/);
@@ -26,7 +29,7 @@ test('current shipped guides distinguish calibrated administrator groups and fix
   assert.match(text,/Historical tasks keep their frozen policy/);
  }
  for(const text of guides.zh){
-  for(const phrase of ['ec-target-calibration-v2','同一管理员至少3条','组内每对','2条仅作建议','不同管理员不合并','缺管理员不猜测','不强制详细方案或承诺时限','ec-first-reply-fixed24-v1','恰好24小时通过','回复结构（EC-STEPS）','保留固定时效（EC-TIME）原判','历史任务依冻结版本'])assert.ok(text.includes(phrase),phrase);
+  for(const phrase of ['ec-target-calibration-v3','仍待业务仲裁','不再强制增量信息','批次重复仍独立检查','同一管理员至少3条','组内每对','2条仅作建议','不同管理员不合并','缺管理员不猜测','不强制详细方案或承诺时限','ec-first-reply-fixed24-v1','恰好24小时通过','回复结构（EC-STEPS）','保留固定时效（EC-TIME）原判','历史任务依冻结版本'])assert.ok(text.includes(phrase),phrase);
  }
 });
 
@@ -40,11 +43,17 @@ test('guide upgrade, repeat import and language instructions no longer contradic
   assert.match(text,/cross-batch statistics separate repeat imports by default/);
   assert.match(text,/cache miss may (?:call|request) the configured translation model/);
   assert.match(text,/never reruns inspection/);
+  assert.match(text,/English translation status/);
+  assert.match(text,/audit area/);
+  assert.doesNotMatch(text,/shows (?:the |a )?labeled original|shows the original and translating/);
  }
  for(const text of guides.zh){
   assert.match(text,/跨批次统计默认将重复导入分开/);
   assert.match(text,/无缓存时可能(?:调用已配置|请求已配置)翻译模型/);
   assert.match(text,/不重跑质检/);
+  assert.match(text,/英文翻译状态/);
+  assert.match(text,/审计区/);
+  assert.doesNotMatch(text,/明确标记原文及翻译|明确原文＋翻译/);
  }
 });
 

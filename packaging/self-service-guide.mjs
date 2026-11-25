@@ -86,16 +86,16 @@ export function acceptanceChecklist(language='zh',{factoryReady=false,catalogSee
 □ 5 新品合成跑批：原始列完整，单翻译列、5打标列、规则映射、整体结论及原因/正确做法；两行列组，NP-R14进入销售意识组。NA、无法判定、未执行分别展示。
 □ 6 电商合成跑批：原始列完整、评价/回复双翻译列、五项检核及整体结论/原因；同语标记（同原文）。
 □ 7 新品报告五部分、电商六部分；电商评价类型分布独立成节；10个错误案例按维度覆盖与严重程度选取，5个优秀案例展示原文与点评；无足够样本时说明数量，不编造。
-□ 8 合成边界：同一管理员至少3条不同源记录，组内每对Dice均≥85%；2条仅建议，不同管理员不合并，缺管理员不猜。好评须增量信息，复述夸赞／感谢／祝福不通过；负向诉求的具体解释＋可用正式渠道可以通过，泛泛道歉＋转渠道不通过，不强制承诺时限。另核对200字符结束语豁免、掩码个人信息及低信息量负面VOC。历史任务按冻结口径。
+□ 8 合成边界：同一管理员至少3条不同源记录，组内每对Dice均≥85%；2条仅建议，不同管理员不合并，缺管理员不猜。好评回应任一具体夸赞点或有相关增量即可，模板措辞中明确复述具体夸赞可通过；仅完全未回应具体夸赞且无相关增量才不通过；无效评价语义NA但重复子项独立检查；负向口径仍待业务仲裁、本次沿用v2：具体解释＋可用正式渠道可以通过，泛泛道歉＋转渠道不通过，不强制承诺时限。另核对200字符结束语豁免、掩码个人信息及低信息量负面VOC。历史任务按冻结口径。
 □ 9 完整Excel/HTML保留固定声明与审计附页；规则/分类/例外/模板/运行参数随任务冻结，修改只影响新任务；升级保留本机维护参数、历史任务与已有结果。
 □ 10 已有工作区启动时自动升级内置新版：先完整.sqwb备份，再发布新版本并记录system-upgrade审计；历史任务不变。失败仍可用旧工作区并按提示手动重试，手动装载入口保留。
-□ 11 电商评价分类人工复核并纠正：固定24小时口径仅重审EC-STEPS回复结构，EC-TIME原判保留；旧任务依冻结依赖。检查译文置信度附页。
+□ 11 电商评价分类人工复核并纠正：固定24小时口径重审EC-STEPS回复结构，EC-TIME原判保留；v3改为或改出无效评价时还须重审EC-TARGET及其重复子项；旧任务依冻结依赖。检查译文置信度附页。
 □ 12 相似块失败只影响关联记录的模板化③维度；逐行其他判定可查看和审核，重跑仅补未完成块。五项内联审核，符合免填理由，异常须说明；页面打开不会自动确认。
 □ 13 新任务B6每规则每批抽检5%、至少5条且不超过候选量；旧任务保留冻结20%策略。17条新品规则英文标题/摘要/范围可查看，中文证据与审计不改写。
 □ 14 旧安装包及外置数据目录保留，确认材料传播授权；合成测试不代表内网模型或译文效果。
 □ 15 默认QualityWorkbench.exe独立窗口；托盘“打开／停止”可用，无后台工作关窗优雅停机。有AI、交付、翻译或结构化任务时提示确认，取消继续，确认后核对已保存进度。
 □ 16 核对系统WebView2 Runtime；缺失时从https://developer.microsoft.com/microsoft-edge/webview2/获取Evergreen Standalone Installer x64离线安装。主包不内置Chromium，不联网自动安装。浏览器启动／停止exe及http://127.0.0.1:4186兜底可用；桌面首次本地首选独立，服务端工作区／模型保留，来源原文不改。
-□ 17 中英文操作页、弹窗与报告系统文案可核对；来源原文明确标识。AI判断和分类理由缓存命中即时切换，缺失时明确原文＋翻译中／不可用；翻译只作展示，不重跑质检、不改原文／判定／审核。核对英文报告理由与原判语义一致。
+□ 17 中英文操作页、弹窗与报告系统文案可核对；来源原文明确标识。AI判断和分类理由缓存命中即时切换，缺失时英文理由主区域仅显示英文翻译状态，原始AI文本仅在审计区保留；翻译只作展示，不重跑质检、不改原文／判定／审核。核对英文报告理由与原判语义一致。
 □ 18 同内容文件可再次导入为独立任务，来源关联与重复导入标记保留；各任务结果独立，跨批次统计默认分开，不通过改原文规避校验。
 记录：程序版本____ 数据／规则版本____ 模型____ 日期____ 执行人____ 未通过项与处理____
 `: `Two built-in scenarios - acceptance checklist
@@ -107,14 +107,14 @@ Resources: ${factoryReady?'complete built-in resources declared; execute and rec
 [ ] NP: preserve source columns, one translation column, five tags, mapped rule/group columns, overall result and handling guidance; two header rows, separate NA/undetermined/not executed.
 [ ] EC: preserve source columns, separate comment/reply translations, five checks, overall result and reasons; mark same-language text.
 [ ] NP has five report sections; EC has six including review-type distribution. Check failing/excellent source excerpts, coverage, comments and recommendations.
-[ ] Duplicate boundaries: at least 3 distinct rows from the same administrator with every pair reaching >=85% Dice; two replies are advisory. Do not combine administrators or infer missing identities. Positive replies need relevant incremental information; praise echo/thanks/wishes alone fail. For negative issues, a specific explanation plus a usable formal channel qualifies; generic apology/referral fails. Promised deadlines are not mandatory. Also check the 200-character closing exception, masked personal data and low-information negative VOC. Historical tasks keep their frozen policy.
+[ ] Duplicate boundaries: at least 3 distinct rows from the same administrator with every pair reaching >=85% Dice; two replies are advisory. Do not combine administrators or infer missing identities. Positive replies may address any specific praised point or provide relevant additional information; concrete praise repeated in template wording may pass. Fail only when neither condition is met. Invalid-review semantic targeting is NA, while duplicate checks remain independent. Complaint criteria remain v2 pending business arbitration. For negative issues, a specific explanation plus a usable formal channel qualifies; generic apology/referral fails. Promised deadlines are not mandatory. Also check the 200-character closing exception, masked personal data and low-information negative VOC. Historical tasks keep their frozen policy.
 [ ] Preserve declarations, full audit appendices and frozen task versions. Existing-workspace startup makes a full .sqwb backup, publishes newer built-in versions and retains system-upgrade audit, local settings and historical tasks. Upgrade failure keeps the old workspace available with manual retry.
-[ ] Classification correction under fixed 24-hour timing requires fresh EC-STEPS review only and retains EC-TIME; historical dependencies remain frozen. Check translation confidence and reason meaning against the original.
+[ ] Classification correction under fixed 24-hour timing requires fresh EC-STEPS review and retains EC-TIME; v3 changes to or from invalid reviews also require fresh EC-TARGET review. Historical dependencies remain frozen. Check translation confidence and reason meaning against the original.
 [ ] Verify partial-block recovery and five-check inline review. Opening a review does not confirm drafts. New B6 tasks sample 5% per rule/batch, minimum 5, capped at candidate count; old tasks keep their frozen policy.
 [ ] Retain earlier installers and data. Real standards/model quality require intranet acceptance; confirm distribution rights before publishing business materials.
 [ ] Default QualityWorkbench.exe standalone window, tray Open/Stop, graceful idle-window shutdown, and confirmation with active AI/deliverable/translation/structuring work. Cancel must keep work running; verify saved progress after confirming shutdown.
 [ ] Check system WebView2 Runtime. If missing, obtain the Evergreen Standalone Installer x64 offline package from https://developer.microsoft.com/microsoft-edge/webview2/. No bundled Chromium or automatic network installation. Verify browser launch/stop exe and http://127.0.0.1:4186 fallback, separate initial desktop preferences, preserved server-side workspace/model settings and unchanged originals.
-[ ] Verify English/Chinese controls, dialogs and report labels; mark original content. Cached AI/classification reasons switch immediately; a cache miss shows the original and translating/unavailable status. Display translation never reruns inspection or changes originals, verdicts or reviews.
+[ ] Verify English/Chinese controls, dialogs and report labels; mark original content. Cached AI/classification reasons switch immediately; a cache miss shows only English translation status in the main AI reason area until a verified English translation is ready. Original AI text remains in the audit area. Display translation never reruns inspection or changes originals, verdicts or reviews.
 [ ] Repeat-import the same content as separate tasks, retaining source lineage and repeat labels; results stay independent and cross-batch statistics separate repeat imports by default. Do not alter originals to bypass validation.
 Record version____ Data/rule versions____ Model____ Date____ Tester____ Failed checks/actions____
 `;

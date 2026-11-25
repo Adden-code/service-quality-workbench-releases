@@ -1,9 +1,16 @@
 // A technical classification gap is different from missing business evidence.
 // Only these two explicitly identified outcomes may be superseded after recovery.
 import {EC_FIXED24_TIMING_POLICY_VERSION} from './ecommerce-timing-policy.mjs';
+import {EC_TARGET_LIMITED_POLICY_VERSION} from './ecommerce-semantic-policy.mjs';
 export const CLASSIFICATION_DEPENDENT_RULE_IDS=Object.freeze(['EC-TIME','EC-STEPS']);
 const same=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
 const classification=capabilities=>capabilities?.outputs?.ecommerceClassification;
+// Only an actually recovered invalid classification enables this v3 correction.
+// Unknown/normal classifications do not add a TARGET blocker or a model request.
+export function targetClassificationRecoveryNeeded(session,capabilities){
+ const target=session?.aiResults?.find(r=>r.ruleId==='EC-TARGET');
+ return Boolean(target?.comparisonAssessment?.targetPolicyVersion===EC_TARGET_LIMITED_POLICY_VERSION&&classification(session.sceneCapabilities)?.status!=='completed'&&classification(capabilities)?.status==='completed'&&classification(capabilities)?.value?.evaluationType==='无效评价'&&session.ecommerce?.raw?.[8]?.trim()&&session.ecommerce?.raw?.[9]?.trim());
+}
 export const hasHumanDependencyReview=s=>Boolean(s.review&&(s.review.status!=='待审核'||Object.keys(s.review.drafts||{}).length||s.review.notes?.trim()||s.review.history?.length||s.review.classification||s.review.returned||s.review.completedAt));
 export const dependencyRecoveryRun=(session,task)=>[task?.aiRun,...(task?.aiRunHistory||[])].find(run=>run?.id===session?.aiExecution?.runId);
 const classificationUnknown=reason=>/(?:分类|归类).*(?:未知|未确定|不确定|缺失|失败|无法|未完成)|(?:未知|未确定|缺失|失败|无法).*(?:分类|归类)|classification.*(?:unknown|missing|unavailable|failed)|(?:unknown|missing|unavailable|failed).*classification/i.test(reason||'');
@@ -26,7 +33,7 @@ export function dependencyStaleness(session,task){
  const output=classification(session?.sceneCapabilities),candidate=last?.candidateCapabilities&&classification(last.candidateCapabilities);
  const recovered=Boolean(candidate?.status==='completed'||output?.status==='completed'),protectedRow=hasHumanDependencyReview(session);
  const failed=output?.status==='failed'||output?.dependencyBlocked===true;
- const affected=ruleIds.length?ruleIds:last?.ruleIds||[],review=session?.review,c=review?.classification,recoveryAt=Date.parse(last?.at),checkpoint=last?.humanReviewCheckpoint;
+ const affected=ruleIds.length?[...ruleIds,...(targetClassificationRecoveryNeeded(session,last?.candidateCapabilities)?['EC-TARGET']:[])]:last?.ruleIds||[],review=session?.review,c=review?.classification,recoveryAt=Date.parse(last?.at),checkpoint=last?.humanReviewCheckpoint;
  const resolvedByHuman=Boolean(protectedRow&&recovered&&review.status==='已确认'&&c?.runId===session.aiExecution?.runId&&Date.parse(c.at)>=recoveryAt&&(!checkpoint||c.at!==checkpoint.classificationAt)&&affected.length&&affected.every(id=>review.drafts?.[id]&&review.drafts[id].source!=='AI接受'&&(review.history||[]).slice(checkpoint?.historyLength||0).some(h=>h.ruleId===id&&Date.parse(h.at)>=recoveryAt&&h.after?.source!=='AI接受')));
  const relevant=!resolvedByHuman&&Boolean(ruleIds.length&&(failed||recovered)||protectedRow&&candidate?.status==='completed'&&last?.ruleIds?.length);
  const canRetry=Boolean(relevant&&task?.executionSnapshot?.configuration.executionMode==='configured'&&dependencyRecoveryRun(session,task)&&!task.lifecycle?.archivedAt&&!task.lifecycle?.voidedAt);
@@ -39,9 +46,10 @@ export function dependencyStaleness(session,task){
 export function isDependencyRecoveryTransition(before,after){
  const old=before.sceneCapabilities?.dependencyRecoveryHistory||[],next=after.sceneCapabilities?.dependencyRecoveryHistory||[];
  if(next.length!==old.length+1||!same(old,next.slice(0,-1)))return false;
- const audit=next.at(-1),ids=classificationBlockedRuleIds(before),changed=before.aiResults.filter((result,index)=>!same(result,after.aiResults[index])).map(result=>result.ruleId);
+ const targetRecovery=targetClassificationRecoveryNeeded(before,after.sceneCapabilities),audit=next.at(-1),ids=[...classificationBlockedRuleIds(before),...(targetRecovery?['EC-TARGET']:[])],changed=before.aiResults.filter((result,index)=>!same(result,after.aiResults[index])).map(result=>result.ruleId);
  if(!audit||audit.version!==1||!['automatic-recovery','row-retry'].includes(audit.trigger)||!audit.at||!Number.isFinite(Date.parse(audit.at))||audit.runId!==before.aiExecution?.runId||before.aiExecution?.status!=='completed'||!same(before.aiExecution,after.aiExecution)||hasHumanDependencyReview(before)||hasHumanDependencyReview(after)||!same(before.review,after.review)||before.aiResults.length!==after.aiResults.length||!changed.length||changed.some(id=>!ids.includes(id))||!same(audit.ruleIds,changed))return false;
  if(!same(audit.beforeResults,before.aiResults.filter(r=>changed.includes(r.ruleId)))||!same(audit.afterResults,after.aiResults.filter(r=>changed.includes(r.ruleId)))||!same(audit.beforeClassification,classification(before.sceneCapabilities)??null)||!same(audit.afterClassification,classification(after.sceneCapabilities)??null)||audit.afterClassification?.status!=='completed')return false;
+ if(changed.includes('EC-TARGET')){const oldTarget=before.aiResults.find(r=>r.ruleId==='EC-TARGET'),target=after.aiResults.find(r=>r.ruleId==='EC-TARGET');if(!targetRecovery||target.comparisonAssessment?.targetPolicyVersion!==EC_TARGET_LIMITED_POLICY_VERSION||target.comparisonAssessment?.semanticVerdict!=='不适用'||!same(oldTarget.batchEvidence??[],target.batchEvidence??[])||target.verdict!==(target.batchEvidence?.length?'不符合':target.comparisonAssessment.status==='incomplete'?'无法判定':'不适用'))return false;}
  if(!same(audit.beforeJudgmentClassificationSnapshot,before.sceneCapabilities?.judgmentClassificationSnapshot??null)||!same(audit.afterJudgmentClassificationSnapshot,after.sceneCapabilities?.judgmentClassificationSnapshot??null))return false;
  const oldFrozen=before.sceneCapabilities?.judgmentClassificationSnapshot,newFrozen=after.sceneCapabilities?.judgmentClassificationSnapshot;
  if(changed.includes('EC-TIME')?newFrozen!==undefined:oldFrozen?!same(oldFrozen,newFrozen):newFrozen!==undefined&&!same(newFrozen,{runId:before.aiExecution.runId,output:classification(before.sceneCapabilities)??null}))return false;

@@ -4,6 +4,7 @@ export const EC_SEMANTIC_POLICY_VERSION='ec-human-aligned-v1';
 export const EC_SEMANTIC_RULE_VERSION='V3.2';
 export const EC_TARGET_POLICY_VERSION='ec-specific-response-v1';
 export const EC_TARGET_CALIBRATION_POLICY_VERSION='ec-target-calibration-v2';
+export const EC_TARGET_LIMITED_POLICY_VERSION='ec-target-calibration-v3';
 const BUSINESS_PROFILE='ec-business-v1';
 const POLICY_ID='EC-BUSINESS-POLICY';
 const RULE_IDS=['EC-TEXT','EC-TARGET','EC-STEPS','EC-PRIVACY'];
@@ -16,9 +17,10 @@ export function validateEcommerceSemanticPolicy(policy){
 }
 
 export function hasSpecificResponsePolicy(basis){return basis?.executionProfile===BUSINESS_PROFILE&&basis.businessProfile?.targetPolicyVersion===EC_TARGET_POLICY_VERSION;}
-export function hasTargetCalibrationPolicy(basis){return basis?.executionProfile===BUSINESS_PROFILE&&basis.businessProfile?.targetPolicyVersion===EC_TARGET_CALIBRATION_POLICY_VERSION;}
+export function hasTargetLimitedPolicy(basis){return basis?.executionProfile===BUSINESS_PROFILE&&basis.businessProfile?.targetPolicyVersion===EC_TARGET_LIMITED_POLICY_VERSION;}
+export function hasTargetCalibrationPolicy(basis){return basis?.executionProfile===BUSINESS_PROFILE&&[EC_TARGET_CALIBRATION_POLICY_VERSION,EC_TARGET_LIMITED_POLICY_VERSION].includes(basis.businessProfile?.targetPolicyVersion);}
 export function validateEcommerceTargetPolicy(basis){
- if(![EC_TARGET_POLICY_VERSION,EC_TARGET_CALIBRATION_POLICY_VERSION].includes(basis.businessProfile?.targetPolicyVersion)||!basis.businessProfile.semanticPolicy)throw new Error('电商具体诉求回应口径无效：须使用受支持的冻结版本并保留已校准语义策略。');
+ if(![EC_TARGET_POLICY_VERSION,EC_TARGET_CALIBRATION_POLICY_VERSION,EC_TARGET_LIMITED_POLICY_VERSION].includes(basis.businessProfile?.targetPolicyVersion)||!basis.businessProfile.semanticPolicy)throw new Error('电商具体诉求回应口径无效：须使用受支持的冻结版本并保留已校准语义策略。');
  validateEcommerceSemanticPolicy(basis.businessProfile.semanticPolicy);return true;
 }
 
@@ -37,6 +39,37 @@ export const EC_TARGET_CALIBRATION_CRITERIA={
  failCriteria:'好评仅复述夸赞＋感谢＋祝福，或堆砌卖点、礼貌套话而无相关增量信息，不符合。负向回复仅泛泛道歉＋联系渠道，或复述问题关键词而没有触及具体问题的解释/澄清/情况/动作，不符合。批次内同一非空管理员至少3个不同来源行的回复彼此归一化字符二元组Dice相似度均达到85%时不符合；不同管理员不能合并，链式相似不能连坐。',
  exceptionCriteria:'同管理员仅2条相似回复只给改进建议，不作批次硬扣分；管理员缺失时不猜测归属，标记该批次子项无法完成，单条语义失败仍保留。原评论或回复缺失为无法判定；已有空泛回复为不符合。不因含WhatsApp、热线、私信等渠道词机械判Fail；渠道的可用性依据回复与冻结资料，不外查也不臆测。reason简要列明评价要点、回复增量/具体回应与满足或缺失之处；建议与硬失败分开，不新增必填字段。',
 };
+
+// v2 remains immutable. This revision changes only praise and invalid-review
+// applicability; the complaint wording and deterministic duplicate policy stay v2.
+export const EC_TARGET_LIMITED_CRITERIA={
+ summary:'好评仅在完全未回应具体夸赞点且无相关增量信息时判不符合；无效评价的单条语义子项不适用；负向与同管理员至少3条逐对85%重复规则沿用v2。',
+ passCriteria:'好评：回应任一具体夸赞点，或给出结合实际评价的相关增量信息，即可符合。模板化措辞中明确复述具体夸赞点也可通过，仅作表达改进建议，不再强制增加产品解释、使用建议、个性化处理或后续安排；泛泛感谢、祝福或孤立关键词不等于回应具体夸赞点。'+EC_TARGET_CALIBRATION_CRITERIA.passCriteria.slice(EC_TARGET_CALIBRATION_CRITERIA.passCriteria.indexOf('中差评/负向诉求：')),
+ failCriteria:'好评只有在回复完全未回应任何具体夸赞点，并且缺乏与实际评价相关的增量信息时，单条语义才不符合；两项须同时成立。只有笼统好评且回复仅泛泛感谢、祝福、礼貌套话时仍不符合，不编造产品事实或问题。'+EC_TARGET_CALIBRATION_CRITERIA.failCriteria.slice(EC_TARGET_CALIBRATION_CRITERIA.failCriteria.indexOf('负向回复')),
+ exceptionCriteria:'评价分类已完成且为“无效评价”时，EC-TARGET单条语义/针对性子项判不适用，不因未回应无意义内容判不符合；不推测未完成或失败的分类。批次重复子项仍独立执行，语义不适用不能覆盖重复失败。原评论或回复缺失仍为无法判定。同管理员仅2条相似回复只给改进建议，不作批次硬扣分；管理员缺失时不猜测归属，标记该批次子项无法完成，单条语义失败仍保留。不因含WhatsApp、热线、私信等渠道词机械判Fail；渠道的可用性依据回复与冻结资料，不外查也不臆测。reason简要列明评价要点、回复具体回应/相关增量与满足或缺失之处；建议与硬失败分开，不新增必填字段。本轮未调整负向口径，负向边界仍待业务仲裁。',
+};
+
+export function upgradeEcommerceTargetLimitedBasis(basis){
+ let next=structuredClone(basis);if(next?.executionProfile!==BUSINESS_PROFILE)return next;
+ if(Object.hasOwn(next.businessProfile??{},'targetPolicyVersion'))validateEcommerceTargetPolicy(next);
+ if(hasTargetLimitedPolicy(next))return next;
+ next=upgradeEcommerceTargetCalibrationBasis(next);
+ const rule=next.rules.find(r=>r.id==='EC-TARGET'),previous=rule.version;
+ rule.version=upgradedVersion(previous);Object.assign(rule,EC_TARGET_LIMITED_CRITERIA);
+ if(rule.english)rule.english.summary='Positive replies pass when they address a specific praised point or provide relevant additional information. Invalid reviews are not applicable to semantic targeting; complaint criteria and same-administrator pairwise duplicate checks remain v2.';
+ rule.changeNote=`需求21有限校准：${previous} → ${rule.version}；${EC_TARGET_LIMITED_POLICY_VERSION}；仅好评与无效评价边界，负向口径未调整。`;
+ next.businessProfile.targetPolicyVersion=EC_TARGET_LIMITED_POLICY_VERSION;
+ for(const record of next.policies.filter(p=>p.id===POLICY_ID)){
+  const previousVersion=record.version;record.version=upgradedVersion(previousVersion);
+  const section=record.sections.find(s=>s.id==='EC-TARGET-BUSINESS-1');
+  section.text=`通过：${rule.passCriteria}\n不通过：${rule.failCriteria}\n例外：${rule.exceptionCriteria}`;
+  if(Object.hasOwn(section,'version'))section.version=record.version;
+  record.content=record.sections.map(s=>`${s.id} ${s.title}\n${s.text}`).join('\n\n');
+  record.summary=(record.summary||'').replace(' 需求21第二轮：好评增量信息、负向具体说明与正式渠道、同管理员至少3条彼此85%相似。','')+' 需求21有限校准：好评回应具体夸赞或有相关增量即可；无效评价语义不适用，重复子项仍检查；负向沿用v2。';
+  record.changeNote=`需求21有限校准：${previousVersion} → ${record.version}；${EC_TARGET_LIMITED_POLICY_VERSION}；仅更新EC-TARGET章节。`;
+ }
+ return next;
+}
 
 export function upgradeEcommerceTargetCalibrationBasis(basis){
  const next=structuredClone(basis);if(next?.executionProfile!==BUSINESS_PROFILE)return next;

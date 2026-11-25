@@ -1,5 +1,5 @@
 import {isBusinessEcommerceBasis,businessDuplicateGroups,businessDuplicateAssessment,validateBusinessDuplicateGroups} from '../public/ecommerce-business-profile.mjs';
-import {hasTargetCalibrationPolicy} from '../public/ecommerce-semantic-policy.mjs';
+import {hasTargetCalibrationPolicy,hasTargetLimitedPolicy} from '../public/ecommerce-semantic-policy.mjs';
 import {EC_RULE_IDS,ecommerceTimeValues,ecommerceSourceColumn,validateEcommerceRecord,validateEcommerceSource} from '../public/ecommerce-schema.mjs';
 import {isEcommerceBasis} from '../public/ecommerce-catalog.mjs';
 import {workflowInput} from './workflow-contract.mjs';
@@ -65,11 +65,15 @@ export function mergeEcommerceResults({sessions,semanticResults,duplicateGroups,
     if(!semantic.has(s.id))continue;
     const matches=groups.filter(g=>g.sessionIds.includes(s.id)),seen=new Set();
     const unique=matches.filter(g=>{const key=JSON.stringify([...g.sessionIds].sort());if(seen.has(key))return false;seen.add(key);return true;});
-    const localTime=timeJudgment(s,{basis,inspectionAt,runtime});
+    const frozenTimeClassification=hasTargetLimitedPolicy(basis)&&s.sceneCapabilities?.judgmentClassificationSnapshot;
+    const timeSession=frozenTimeClassification?{...s,sceneCapabilities:{...s.sceneCapabilities,outputs:{...s.sceneCapabilities.outputs,ecommerceClassification:frozenTimeClassification.output}}}:s;
+    const localTime=timeJudgment(timeSession,{basis,inspectionAt,runtime});
     const results=[structuredClone((isStageATimeBasis(basis)||business)?localTime:deterministic?.times?.find(t=>t.sessionId===s.id)?.result??localTime),...semantic.get(s.id).map(item=>{
       const r=structuredClone(item),hasReply=Boolean(reply(s).trim());
-      if(r.verdict==='不适用')r.verdict='符合';
-      if(r.ruleId==='EC-TARGET'){const pending=pendingComparisons[s.id]||[];r.comparisonAssessment={status:pending.length?'incomplete':'completed',pendingBlockIds:pending,semanticVerdict:r.verdict,semanticReason:r.reason};if(pending.length&&r.verdict!=='不符合'){r.semanticReason=r.reason;r.verdict='无法判定';r.reason=`模板化回复③尚有 ${pending.length} 个相似比较块未完成，仅该子维度待人工/重跑；逐行针对性①②：${r.semanticReason}`;}}
+      const invalidReview=hasTargetLimitedPolicy(basis)&&r.ruleId==='EC-TARGET'&&hasReply&&Boolean(record(s).raw[8].trim())&&s.sceneCapabilities?.outputs?.ecommerceClassification?.status==='completed'&&s.sceneCapabilities.outputs.ecommerceClassification.value?.evaluationType==='无效评价';
+      if(invalidReview){r.verdict='不适用';r.reason='已完成分类为无效评价；单条语义/针对性子项不适用，不要求回应无意义内容。批次重复子项仍按冻结规则独立检查。';}
+      else if(r.verdict==='不适用')r.verdict='符合';
+      if(r.ruleId==='EC-TARGET'){const pending=pendingComparisons[s.id]||[];r.comparisonAssessment={status:pending.length?'incomplete':'completed',pendingBlockIds:pending,semanticVerdict:r.verdict,semanticReason:r.reason,...(hasTargetLimitedPolicy(basis)?{targetPolicyVersion:basis.businessProfile.targetPolicyVersion}:{})};if(pending.length&&r.verdict!=='不符合'){r.semanticReason=r.reason;r.verdict='无法判定';r.reason=`模板化回复③尚有 ${pending.length} 个相似比较块未完成，仅该子维度待人工/重跑；逐行针对性①②：${r.semanticReason}`;}}
       if(r.ruleId==='EC-TARGET'&&unique.length){
         r.semanticReason=r.reason;
         r.verdict='不符合';r.reason=`本批次${business&&!calibrated?'不同来源行':'同一管理员'}回复重复/高度相似：${unique.map(g=>`${g.sessionIds.length}条记录，${g.reason}`).join('；')} 本条语义检查：${r.reason}`;

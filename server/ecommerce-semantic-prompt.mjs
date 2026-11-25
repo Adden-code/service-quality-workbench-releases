@@ -1,5 +1,5 @@
 import {isBusinessEcommerceBasis,replyStructureFacts} from '../public/ecommerce-business-profile.mjs';
-import {EC_SEMANTIC_POLICY_VERSION,validateEcommerceSemanticPolicy,EC_TARGET_POLICY_VERSION,EC_TARGET_CALIBRATION_POLICY_VERSION,validateEcommerceTargetPolicy,EC_TARGET_SPECIFIC_CRITERIA,EC_TARGET_CALIBRATION_CRITERIA} from '../public/ecommerce-semantic-policy.mjs';
+import {EC_SEMANTIC_POLICY_VERSION,validateEcommerceSemanticPolicy,EC_TARGET_POLICY_VERSION,EC_TARGET_CALIBRATION_POLICY_VERSION,EC_TARGET_LIMITED_POLICY_VERSION,validateEcommerceTargetPolicy,EC_TARGET_SPECIFIC_CRITERIA,EC_TARGET_CALIBRATION_CRITERIA,EC_TARGET_LIMITED_CRITERIA} from '../public/ecommerce-semantic-policy.mjs';
 
 export {EC_SEMANTIC_POLICY_VERSION};
 
@@ -8,6 +8,18 @@ export function ecommerceTargetPolicy(basis){
  validateEcommerceTargetPolicy(basis);return basis.businessProfile.targetPolicyVersion;
 }
 export function ecommerceTargetGuidance(version=EC_TARGET_POLICY_VERSION){
+ if(version===EC_TARGET_LIMITED_POLICY_VERSION)return `\n独立冻结针对性口径 ${version}（有限校准；单条语义与程序批次子项分别执行）：${Object.values(EC_TARGET_LIMITED_CRITERIA).join('\n')}
+以下均为合成对照，不是当前记录，不可借用示例事实；只根据当前评论与回复原文判断：
+例1 好评“屏幕清晰，续航不错”；回复“感谢认可，屏幕确实清晰，续航也很好，祝您生活愉快！”→针对性符合：明确回应具体夸赞点；即使措辞模板化、没有增量信息，也不能硬判失败，可给表达改进建议。
+例2 同一好评；回复“感谢认可。您日常阅读时可在显示设置中按环境调整亮度，兼顾清晰度与续航。”→针对性符合：结合夸赞点给出使用建议；以当前冻结资料和原文为准，不核定示例产品能力。
+例3 同一具体好评或笼统好评“很好”；回复“感谢支持，祝您生活愉快！”→不符合：完全未回应任何具体夸赞点，并且没有相关增量信息；两项同时成立。
+例4 同一具体好评；回复“很高兴您喜欢清晰的屏幕，感谢支持！”→针对性符合：回应一个具体夸赞点即可，不要求逐一复述所有夸赞，也不强制额外增量信息。
+例5 负向“充电时反复中断”；回复“抱歉给您添麻烦，请联系官方客服。”→不符合：泛泛道歉＋渠道，没有触及中断原因、情况或动作。
+例6 同一负向；回复“抱歉充电反复中断。插头接触不稳时可能出现间歇充电，请通过商城订单页联系官方客服，说明中断频率以便核查。”→针对性符合：致歉＋对应问题的具体情况说明＋可用正式渠道，不强制提供详细方案或承诺处理时限。
+例7 负向“包装缺少充电线”；回复“抱歉没有充电线，请自行联系购买渠道。”→不符合：只复述缺件，没有具体解释或处理说明。
+例8 同一负向；回复“抱歉缺件。该套装应包含充电线，缺件情况需要核对发货记录；请在商城订单页向官方客服发起缺件核查。”→针对性符合：明确包装配置与核查情况，并有正式渠道，不以转介本身判失败。
+例9 已完成分类为无效评价“asdfgh”；有回复“感谢支持！”→单条EC-TARGET语义不适用，不因未回应无意义内容判失败。即使语义不适用，同管理员3条回复彼此达到85%仍由程序判批次不符合；2条只建议，管理员缺失不得凑组。
+仅EC-TARGET的reason写“评价要点：…；回复具体回应/相关增量：…；满足或缺失：…”，只给简短原文依据，不输出思维链、不新增必填字段。负向口径沿用v2，待业务仲裁。重试保持本版本：回应具体夸赞点即可；好评完全未回应具体夸赞点且无相关增量信息才不符合；无效评价语义不适用不能抹除批次重复失败；泛泛道歉＋渠道=不符合；具体说明＋正式渠道不要求额外详细方案。\n`;
  if(version===EC_TARGET_CALIBRATION_POLICY_VERSION)return `\n独立冻结针对性口径 ${version}（第二轮校准；单条语义与程序批次子项分别执行）：${Object.values(EC_TARGET_CALIBRATION_CRITERIA).join('\n')}
 以下均为合成对照，不是当前记录，不可借用示例事实；只根据当前评论与回复原文判断：
 例1 好评“屏幕清晰，续航不错”；回复“感谢认可，屏幕确实清晰，续航也很好，祝您生活愉快！”→不符合：复述夸赞＋感谢＋祝福，无增量信息。
@@ -57,6 +69,6 @@ export function ecommerceSemanticGuidance(policy,targetVersion){
 EC-TEXT：仍核对拼写、语法、标点/表情、通顺/歧义，但只有影响理解或专业形象的显著错误才计入不通过。重音/变音符号、阿语变音与连写差异、专有名词合理写法变体、照录客户原有拼写、无碍理解的轻微语法或标点问题仅作改进建议，不计入显著错误；不得主动搜罗这些正字法小问题凑数。按不同文本位置的显著错误处数计数，同一文本位置的错误被重复引用或归入多个类别只计一次；不同位置的显著错误按处数计入，不能按错误类别凑数。当前冻结阈值为${minimum}处显著错误：处数达到${minimum}才判不符合，少于${minimum}判符合；不能将未达阈值的显著错误或轻微问题转移到其他规则扣分。reason须说明显著错误处数、阈值、具体原文和影响理解/专业形象的严重性依据；存在仅建议的问题时分开说明，即使判符合也保留这些建议。不得仅凭陌生词或外部推测认定拼写错误。
 EC-STEPS：好评正向、好评负向不因缺少开头语、致歉、产品价值表达或结束语判不符合；这些缺项只在reason中作为改进建议，不能借字符数或其他规则恢复硬扣分。源评分为4或5星（ecommercePolicyFacts.positiveRating=true）时，无论正向/负向均应用好评段落建议边界，分类尚未知也不能因此对缺段落判不符合。3步及以上操作指导仍须完整顺序编号，接受第一步/第二步/第三步、①/②/③、1./2./3.等；缺号、跳号或部分未编号判不符合。少于3步只免编号要求。好评正向/好评负向已有回复但完全缺乏实质回应或明显无关时，EC-STEPS仍判不符合。差评与中评继续按该任务冻结规则检查原有步骤编号要求，不套用好评类型的固定结构要求，不新增开头语、致歉、产品价值或结束语义务，也不新增EC-STEPS空泛/无实质回应的硬判条件；其针对性仍由EC-TARGET核查。字符统计和closingOptional不为中差评新增结构要求。评价类型未知且判定依赖分类时用无法判定，不能猜测分类。整条回复正文缺失按缺失材料用无法判定，不把无回复与已有空泛回复混为一谈。
 EC-PRIVACY：仅用客户名字作礼貌称呼（如Hi Sara），且未同时披露其他个人信息时，适用称呼例外，不因该称呼扣分。客户姓名超出单纯礼貌称呼使用，或与其他个人信息同时公开，不适用称呼例外，须按冻结隐私规则及实际公开回复证据判断，不能一概放行姓名。公开回复中的电话、邮箱、住址、订单号等其他可关联个人的信息仍禁止，包括掩码或部分隐藏形式；称呼例外不豁免这些信息。敏感/违规内容仍按原限制处理。仅输入字段含个人信息不构成公开回复违规。
-${targetVersion===EC_TARGET_CALIBRATION_POLICY_VERSION?'EC-TARGET：执行下列独立冻结的第二轮针对性口径；好评增量信息、负向具体说明和批次三条同管理员的硬边界不能降为建议。':'EC-TARGET：必须实质回应用户的具体问题、诉求或夸赞点；可提供与其相关的解释、处理进度、解决方案、具体步骤，纯好评也可对用户认可的卖点作实质互动，不强制给没有问题的评价编造问题或解决方案。原评价没有具体问题、诉求或具体夸赞点时（如只有“很好”），按评价实际可回应的内容判断，不凭空要求问题解决方案、产品卖点段或固定段落，不通过EC-TARGET恢复已降为建议的EC-STEPS段落义务；已有具体问题、诉求或夸赞点时仍须实质回应。仅复述问题关键词、表示道歉/倾听，再给通用客服渠道而无对应问题的具体回应，判不符合；关键词命中、礼貌或泛泛承诺不能替代对具体内容的实质针对性。具体问题、诉求或夸赞点获得实质回应即可，不能另加必有开头/致歉/结束语要求。批次重复比较的现有规则和程序保持不变。'}
+${targetVersion===EC_TARGET_LIMITED_POLICY_VERSION?'EC-TARGET：执行下列独立冻结的有限校准口径。好评回应具体夸赞点或有相关增量信息即可；模板化地复述具体夸赞点不能仅因缺增量判失败。已完成分类为无效评价的单条语义不适用，重复子项独立执行。负向口径保持v2，待业务仲裁。':targetVersion===EC_TARGET_CALIBRATION_POLICY_VERSION?'EC-TARGET：执行下列独立冻结的第二轮针对性口径；好评增量信息、负向具体说明和批次三条同管理员的硬边界不能降为建议。':'EC-TARGET：必须实质回应用户的具体问题、诉求或夸赞点；可提供与其相关的解释、处理进度、解决方案、具体步骤，纯好评也可对用户认可的卖点作实质互动，不强制给没有问题的评价编造问题或解决方案。原评价没有具体问题、诉求或具体夸赞点时（如只有“很好”），按评价实际可回应的内容判断，不凭空要求问题解决方案、产品卖点段或固定段落，不通过EC-TARGET恢复已降为建议的EC-STEPS段落义务；已有具体问题、诉求或夸赞点时仍须实质回应。仅复述问题关键词、表示道歉/倾听，再给通用客服渠道而无对应问题的具体回应，判不符合；关键词命中、礼貌或泛泛承诺不能替代对具体内容的实质针对性。具体问题、诉求或夸赞点获得实质回应即可，不能另加必有开头/致歉/结束语要求。批次重复比较的现有规则和程序保持不变。'}
 重试执行提醒：再次按同一冻结策略与阈值检查；修复输出格式或补齐证据不等于要求寻找更多错误，不得为了产出Fail而搜罗重音/变音符号、连写、专名变体、照录客户拼写或无碍理解的小语法问题。建议始终留在reason，不升级为硬失败。`;
 }

@@ -1,4 +1,5 @@
 // Explicitly published, frozen timing semantics. Absence means legacy behavior.
+import {hasTargetLimitedPolicy,EC_TARGET_LIMITED_POLICY_VERSION} from './ecommerce-semantic-policy.mjs';
 export const EC_FIXED24_TIMING_POLICY_VERSION='ec-first-reply-fixed24-v1';
 export const isFixed24EcommerceBasis=basis=>basis?.executionProfile==='ec-business-v1'&&basis.businessProfile?.timing?.policyVersion===EC_FIXED24_TIMING_POLICY_VERSION;
 export function validateEcommerceTimingPolicy(timing){
@@ -7,7 +8,9 @@ export function validateEcommerceTimingPolicy(timing){
 }
 export function classificationDependentRuleIds(session,basis){
  const fixed=isFixed24EcommerceBasis(basis)||session?.aiResults?.some(r=>r.ruleId==='EC-TIME'&&r.timeFacts?.timingPolicyVersion===EC_FIXED24_TIMING_POLICY_VERSION);
- return fixed?['EC-STEPS']:['EC-TIME','EC-STEPS'];
+ const limited=hasTargetLimitedPolicy(basis)||session?.aiResults?.some(r=>r.ruleId==='EC-TARGET'&&r.comparisonAssessment?.targetPolicyVersion===EC_TARGET_LIMITED_POLICY_VERSION);
+ const invalidBoundary=[session?.sceneCapabilities?.outputs?.ecommerceClassification?.value?.evaluationType,session?.review?.classification?.evaluationType,session?.review?.classificationHistory?.at(-1)?.before?.evaluationType].includes('无效评价');
+ return [...(fixed?['EC-STEPS']:['EC-TIME','EC-STEPS']),...(limited&&invalidBoundary?['EC-TARGET']:[])];
 }
 const nextVersion=version=>{
  const m=typeof version==='string'&&version.match(/^V(\d+)\.(\d+)$/);

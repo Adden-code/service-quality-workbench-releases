@@ -398,7 +398,7 @@ export function acceptAI(state, sessionId, now) {
 }
 
 export function confirmReview(state, sessionId, now) {
-  const classified=getSession(state,sessionId);if(requiresEcommerceClassification(classified)&&!classificationReviewed(classified))throw new Error('请先在回复时效项中保存评价分类人工复核。');if(['EC-TIME','EC-STEPS'].some(id=>classificationNeedsJudgment(classified,id)))throw new Error('评价分类已改判，请重新记录时效与回复结构的人工判断。');
+  const classified=getSession(state,sessionId);if(requiresEcommerceClassification(classified)&&!classificationReviewed(classified))throw new Error('请先在回复时效项中保存评价分类人工复核。');if(['EC-TIME','EC-STEPS','EC-TARGET'].some(id=>classificationNeedsJudgment(classified,id)))throw new Error(classificationNeedsJudgment(classified,'EC-TARGET')?'评价分类涉及无效评价变更，请重新记录针对性及其他受影响项目的人工判断。':'评价分类已改判，请重新记录时效与回复结构的人工判断。');
   const existing = getSession(state, sessionId);
   assertReviewAvailable(state,existing);
   if(isUnrepliedSession(state,existing))throw new Error('未回复须使用独立的未回复事实确认，不作为质量通过或不通过。');

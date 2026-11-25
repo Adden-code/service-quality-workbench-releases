@@ -23,7 +23,7 @@ function isOlderBundle(pkg,event){
  const old=event?.after?.configuration;if(!old)return false;
  const incoming=pkg.configuration,oldRules=new Map((old.basis?.rules||[]).map(r=>[r.id,r]));
  if((incoming.basis?.rules||[]).some(r=>oldRules.has(r.id)&&newer(oldRules.get(r.id).version,r.version)))return true;
- const rank={'ec-specific-response-v1':1,'ec-target-calibration-v2':2};
+ const rank={'ec-specific-response-v1':1,'ec-target-calibration-v2':2,'ec-target-calibration-v3':3};
  if((rank[old.basis?.businessProfile?.targetPolicyVersion]||0)>(rank[incoming.basis?.businessProfile?.targetPolicyVersion]||0))return true;
  if(old.basis?.businessProfile?.timing?.policyVersion==='ec-first-reply-fixed24-v1'&&incoming.basis?.businessProfile?.timing?.policyVersion!=='ec-first-reply-fixed24-v1')return true;
  return old.aggregatePolicy==='fail-only.v2'&&incoming.aggregatePolicy!=='fail-only.v2';

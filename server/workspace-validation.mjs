@@ -340,7 +340,7 @@ export function validateWorkspace(state,catalog,previous=null,{authenticateNewSn
     validateRawReviewTime(session,task);
     try{validatePendingResolution(session,task,state);}catch(error){fail(error.message);}
     if(session.review.classification){const c=session.review.classification;if(c.origin!==undefined&&!['manual-row-failed','human-review'].includes(c.origin))fail('评价分类人工来源无效。');if(!requiresEcommerceClassification(session)||!['好评正向','好评负向','中评','差评','无效评价'].includes(c.evaluationType)||!['substantive','strong-negative','none'].includes(c.vocKind)||!validZonedTime(c.at)||!c.reason?.trim()||c.reason.length>2000||c.reviewer!==session.review.reviewer||typeof c.changed!=='boolean'||c.changed!==(c.evaluationType!==session.sceneCapabilities?.outputs?.ecommerceClassification?.value?.evaluationType||c.vocKind!==session.sceneCapabilities?.outputs?.ecommerceClassification?.value?.vocKind)||!Array.isArray(session.review.classificationHistory))fail('评价分类人工复核记录无效。');}
-    if(session.review.status==='已确认'&&requiresEcommerceClassification(session)&&(!classificationReviewed(session)||['EC-TIME','EC-STEPS'].some(id=>classificationNeedsJudgment(session,id))))fail('确认前须复核评价归类及改判后受影响的检核项。');
+    if(session.review.status==='已确认'&&requiresEcommerceClassification(session)&&(!classificationReviewed(session)||['EC-TIME','EC-STEPS','EC-TARGET'].some(id=>classificationNeedsJudgment(session,id))))fail('确认前须复核评价归类及改判后受影响的检核项。');
     const basis=task.basisSnapshot||{rules:demoRules,policies:demoPolicies};
     if(task.mode==='manual'&&!session.ecommerce&&basis.rules.some(rule=>rule.id.startsWith('EC-')))fail('电商专用规则必须使用可验证的电商来源记录。');
     if(session.ecommerce!==undefined){

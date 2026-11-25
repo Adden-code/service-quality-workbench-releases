@@ -1,6 +1,6 @@
 import {assertTaskWritable,isInactiveTask,taskHasPendingAI} from '../public/task-lifecycle.mjs';
 import {isBusinessEcommerceBasis} from '../public/ecommerce-business-profile.mjs';
-import {hasTargetCalibrationPolicy} from '../public/ecommerce-semantic-policy.mjs';
+import {hasTargetCalibrationPolicy,hasTargetLimitedPolicy} from '../public/ecommerce-semantic-policy.mjs';
 import {activeDesktopJobCount} from './desktop-activity.mjs';
 import {isFixed24EcommerceBasis} from '../public/ecommerce-timing-policy.mjs';
 import {createHash} from 'node:crypto';
@@ -21,7 +21,7 @@ import {rawTimeRuleIds} from '../public/raw-evidence.mjs';
 
 import {executeSceneCapabilities,enforceSceneResults,recordCapabilityOutcomes,reconcileCapabilityOutcomes} from './scene-capabilities.mjs';
 import {inspectionBasis} from '../public/scene-aggregate.mjs';
-import {classificationBlockedRuleIds,hasHumanDependencyReview,dependencyStaleness,dependencyRecoveryRun} from '../public/scene-dependency-staleness.mjs';
+import {classificationBlockedRuleIds,hasHumanDependencyReview,dependencyStaleness,dependencyRecoveryRun,targetClassificationRecoveryNeeded} from '../public/scene-dependency-staleness.mjs';
 
 const copy=value=>structuredClone(value),now=()=>new Date().toISOString();
 const digest=value=>createHash('sha256').update(canonical(value)).digest('hex');
@@ -86,7 +86,7 @@ function publishEcommerceCheckpoints(state,task){
  const q=task.aiQueue;if(!q?.comparison)return;
  const comparison=mergeComparisonGroups(q.comparison,q.comparison.blocks),sessions=state.sessions.filter(s=>s.taskId===task.id);
  q.comparison.groups=comparison.groups;
- const judgmentSessions=sessions.map(s=>{const frozen=s.sceneCapabilities?.judgmentClassificationSnapshot;return frozen?{...s,sceneCapabilities:{...s.sceneCapabilities,outputs:{...s.sceneCapabilities.outputs,ecommerceClassification:frozen.output}}}:s;});
+ const judgmentSessions=sessions.map(s=>{const frozen=s.sceneCapabilities?.judgmentClassificationSnapshot;return frozen&&!hasTargetLimitedPolicy(task.basisSnapshot)?{...s,sceneCapabilities:{...s.sceneCapabilities,outputs:{...s.sceneCapabilities.outputs,ecommerceClassification:frozen.output}}}:s;});
  const merged=mergeEcommerceResults({sessions:judgmentSessions,semanticResults:q.rows.filter(r=>r.semanticResult).map(r=>({sessionId:r.sessionId,results:r.semanticResult.results})),duplicateGroups:comparison.groups,deterministic:{duplicateGroups:[]},allowPartial:true,basis:task.basisSnapshot,inspectionAt:task.aiRun.inspectionAt,runtime:task.executionSnapshot?.runtime,pendingComparisons:comparison.pendingBySession});
  for(const row of q.rows){const s=state.sessions.find(s=>s.id===row.sessionId),results=merged.get(row.sessionId);if(!results||human(s))continue;
   if(s.aiExecution?.status==='completed'&&canonical(s.aiResults)===canonical(results))continue;
@@ -119,7 +119,7 @@ export async function createAiService(options={}){
   const trace={step:(node,input,op)=>step(`r${index}-recovery-${node}`,{sessionId:session.id,...input},op)};
   let repaired=await executeSceneCapabilities({session:source,snapshot:task.executionSnapshot,client,config,signal,trace,previous:prior,retryDelayMs});
   repaired=await executeSceneCapabilities({session:source,snapshot:task.executionSnapshot,client,config,signal,trace,previous:repaired,phase:'post',retryDelayMs});
-  const ruleIds=classificationBlockedRuleIds(session),candidateResults=[],canRecompute=repaired?.outputs?.ecommerceClassification?.status==='completed'&&isBusinessEcommerceBasis(task.basisSnapshot)&&(!human(session)||trigger==='row-retry');
+  const targetRecovery=hasTargetLimitedPolicy(task.basisSnapshot)&&targetClassificationRecoveryNeeded(session,repaired),ruleIds=[...classificationBlockedRuleIds(session),...(targetRecovery?['EC-TARGET']:[])],candidateResults=[],canRecompute=repaired?.outputs?.ecommerceClassification?.status==='completed'&&isBusinessEcommerceBasis(task.basisSnapshot)&&(!human(session)||trigger==='row-retry');
   let ruleRecoveryError;
   if(canRecompute){
    if(ruleIds.includes('EC-TIME'))candidateResults.push(timeJudgment({...session,sceneCapabilities:repaired},{basis:task.basisSnapshot,inspectionAt:run.inspectionAt,runtime:task.executionSnapshot.runtime}));
@@ -129,6 +129,11 @@ export async function createAiService(options={}){
     if(result.results?.length!==1||result.results[0].ruleId!=='EC-STEPS')throw Object.assign(new Error('依赖重算须精确返回EC-STEPS。'),{code:'INVALID_OUTPUT'});
     candidateResults.push(...enforceSceneResults(result.results,task.executionSnapshot,repaired,session));
    }catch(error){if(signal?.aborted||String(error?.code||'').toLowerCase().startsWith('trace_'))throw error;ruleRecoveryError=safeFailure(error);}
+   if(targetRecovery&&row.semanticResult?.results){
+    const sessions=doc.state.sessions.filter(s=>s.taskId===task.id).map(s=>s.id===session.id?{...s,sceneCapabilities:repaired}:s);
+    const corrected=mergeEcommerceResults({sessions,basis:task.basisSnapshot,semanticResults:[{sessionId:session.id,results:row.semanticResult.results}],duplicateGroups:[],allowPartial:true,inspectionAt:run.inspectionAt,runtime:task.executionSnapshot.runtime}).get(session.id)?.find(r=>r.ruleId==='EC-TARGET');
+    if(corrected)candidateResults.push(corrected);
+   }
   }
   await step(`r${index}-recovery-persist`,{sessionId:session.id,outputs:repaired.outputs,ruleIds,candidateResults,ruleRecoveryError:ruleRecoveryError??null},async()=>{
    await update(taskId,(state,t)=>{
@@ -143,7 +148,7 @@ export async function createAiService(options={}){
      const classificationChanged=canonical(priorCapabilities?.outputs?.ecommerceClassification??null)!==canonical(repaired.outputs?.ecommerceClassification??null);
      const frozen=oldFrozen||(!isFixed24EcommerceBasis(t.basisSnapshot)&&classificationChanged&&s.ecommerce&&s.aiResults.some(v=>v.ruleId==='EC-TIME'&&v.timeFacts)?{runId:s.aiExecution.runId,output:copy(priorCapabilities?.outputs?.ecommerceClassification??null)}:null);
      s.sceneCapabilities={...copy(repaired),...(priorCapabilities?.dependencyRecoveryHistory?{dependencyRecoveryHistory:copy(priorCapabilities.dependencyRecoveryHistory)}:{}),...(frozen?{judgmentClassificationSnapshot:frozen}:{})};
-     const changes=candidateResults.filter(result=>canonical(result)!==canonical(s.aiResults.find(old=>old.ruleId===result.ruleId)));
+     const changes=candidateResults.filter(result=>canonical(result)!==canonical(s.aiResults.find(old=>old.ruleId===result.ruleId))).sort((a,b)=>s.aiResults.findIndex(r=>r.ruleId===a.ruleId)-s.aiResults.findIndex(r=>r.ruleId===b.ruleId));
      if(changes.length&&s.aiExecution?.status==='completed'){
       const ids=changes.map(result=>result.ruleId),beforeDecision=copy(s.aiDecision??null),oldResults=copy(s.aiResults.filter(result=>ids.includes(result.ruleId)));
       if(ids.includes('EC-TIME'))delete s.sceneCapabilities.judgmentClassificationSnapshot;

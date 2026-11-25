@@ -31,7 +31,7 @@ Workspace usage shows aggregate logical file sizes and available disk space usin
 
 ${ecommerceCurrentPolicyGuide('en')}Repeat imports and display language
 The same source content may be imported again into an independent task. Keep source identifiers/text unchanged; lineage and repeat-import labels are retained, and cross-batch statistics separate repeat imports by default. Reinspect with new rules remains the explicit parent-linked path. Within-file validation still applies.
-Fixed controls switch Chinese/English immediately. AI verdict and ecommerce classification reasons use cached display translations; a cache miss may request the configured translation model and shows a labeled original with translating/unavailable status. Cached views switch immediately. Translation never reruns inspection or edits source reasons, verdicts, human reviews or audit records.
+Fixed controls switch Chinese/English immediately. AI verdict and ecommerce classification reasons use cached display translations; a cache miss may request the configured translation model. In English mode, the main reason area shows only English translation status until a verified English translation is ready; original AI text remains in the audit area. Cached views switch immediately. Translation never reruns inspection or edits source reasons, verdicts, human reviews or audit records.
 
 Release and material boundaries
 This guide describes expected behavior and checks to execute; it is not evidence of completed acceptance. Real model quality needs an intranet golden comparison; synthetic tests cannot establish business judgment accuracy. The 49-conversation / 1,735-turn count belongs only to its legacy structured benchmark and is not a raw-import turn count. An authorized intranet custodian may add approved resources/catalog-seed.json before first start and update metadata/checksums for a program-only package. Complete built-in packages load empty workspaces automatically; existing-workspace startup first makes a full .sqwb backup, then publishes newer bundled versions with a system-upgrade audit. Local maintained settings and historical task snapshots remain intact. Failure keeps the previous workspace available and displays recovery instructions; manual loading remains available. The separate synthetic catalog self-test is not a business rule set.
@@ -78,7 +78,7 @@ Multiple tasks wait in one serial queue. Position includes the running task. Que
 
 ${ecommerceCurrentPolicyGuide('zh')}重复导入与展示语言
 同内容源文件可再次导入为独立任务，源标识和原文无需改动；保留来源关联和重复导入标记，跨批次统计默认将重复导入分开。“使用新规则重检”仍提供明确的父任务关联。单文件内部校验继续有效。
-固定操作文案即时切换中英文；AI判断理由和电商分类理由使用展示译文缓存。无缓存时可能请求已配置翻译模型，明确标记原文与翻译中／不可用；缓存命中即时切换。翻译不重跑质检，不改源理由、判定、人工审核或审计记录。
+固定操作文案即时切换中英文；AI判断理由和电商分类理由使用展示译文缓存。无缓存时可能请求已配置翻译模型；英文理由主区域仅显示英文翻译状态，合格译文就绪后再展示，原始AI文本留在审计区；缓存命中即时切换。翻译不重跑质检，不改源理由、判定、人工审核或审计记录。
 
 版本与材料边界
 本说明描述预期行为与待执行检查，不代表验收已完成。真实模型效果须在内网按金标准对照，合成测试不证明业务判断准确率。49会话／1735轮仅属于对应旧结构化基准，不作为原文导入轮次。程序包可由获准内网交付人员在首次启动前放入resources/catalog-seed.json并同步元数据和校验清单；完整内置包空工作区自动装载，存量工作区启动先完整.sqwb备份，再发布内置新版并记录system-upgrade审计。本机维护参数与历史任务冻结快照保留；失败保留旧工作区并提示恢复，手动装载入口继续可用。合成目录自检材料不得当业务规则使用。
