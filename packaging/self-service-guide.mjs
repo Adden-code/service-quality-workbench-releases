@@ -1,3 +1,4 @@
+import {startupMaintenanceGuide} from './startup-maintenance-guide.mjs';
 import {triageWorkflowGuide} from './triage-guide.mjs';
 import {rawDirectGuide} from './raw-direct-guide.mjs';
 import {desktopUsageGuide} from './builtin-guide.mjs';
@@ -16,7 +17,7 @@ Quick start
 9. A complete built-in package automatically loads an empty workspace and, when a newer bundled version exists, backs up an existing workspace to .sqwb before publishing the new version with a system-upgrade audit. Local maintained settings and historical tasks remain intact. Failure leaves the old workspace available; manual loading in Scenario Management remains a recovery option. Create a new task or reinspect to use new standards. A warning identifies incomplete frozen NP exception content. Archived tasks leave the review queue and are read-only (export allowed); restore before further review. Voided tasks cannot be edited.
 10. Open Results Export, select the task, conclusion policy and report language, generate deliverables and download Excel and the self-contained HTML report. Model-generated translation/analysis has separate progress and missing-item warnings.
 
-${desktopUsageGuide('en')}${triageWorkflowGuide('en')}Preparing a structured standard workbook (separate from raw direct inspection)
+${startupMaintenanceGuide('en')}${desktopUsageGuide('en')}${triageWorkflowGuide('en')}Preparing a structured standard workbook (separate from raw direct inspection)
 Use Download Standard Template. Keep both sheets and their headers unchanged.
 The fixed source-template labels below are retained verbatim for copying; they are not untranslated instructions. Their order corresponds to: conversation ID, scenario, start time, topic, channel, product, agent, customer, completeness, missing note; and conversation ID, turn number, role, speaker, timestamp, original text.
 [Raw template schema]
@@ -53,7 +54,7 @@ Source roles unreliable: structured tasks need corrected source roles. In raw di
 8. 有效AI终判PASS免审；FAIL、不确定和退回项结合原文与冻结依据人工确认，查看角标任务／场景构成及两类最终来源。
 9. 打开“结果导出”，选择任务、结论口径和报告语言，生成交付物后下载Excel及单文件HTML。翻译和分析另有进度，缺失项有提示。
 
-${desktopUsageGuide('zh')}${triageWorkflowGuide('zh')}结构化标准模板格式（独立于原文直判）
+${startupMaintenanceGuide('zh')}${desktopUsageGuide('zh')}${triageWorkflowGuide('zh')}结构化标准模板格式（独立于原文直判）
 请从工作台下载标准模板，保留双表名称和表头。
 “会话信息”：会话ID、业务场景、会话开始时间、会话主题、渠道、产品型号、客服标识、客户标识、会话完整性、缺失说明。
 “会话明细”：会话ID、轮次序号、发言角色、发言方标识、发言时间、原文内容。

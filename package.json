@@ -1,11 +1,13 @@
 {
   "name": "mss-presales-quality-demo",
   "private": true,
-  "version": "0.11.23",
+  "version": "0.11.24",
   "type": "module",
   "scripts": {
     "start": "node server.mjs",
     "test": "node --test tests/*.test.mjs",
-    "test:browser": "node tests/first-round-browser.mjs"
+    "test:browser": "node tests/first-round-browser.mjs",
+    "check:i18n": "node scripts/check-english-ui.mjs",
+    "test:i18n": "node scripts/check-english-ui.mjs && node tests/english-ui-release-gate.mjs && node tests/ui-i18n01124-browser.mjs"
   }
 }

@@ -7,6 +7,7 @@ import {createHash} from 'node:crypto';
 import {buildPortable} from './build-portable.mjs';
 import {productVersion,businessAppId} from './version.mjs';
 import {parseFactoryBuildArgs} from './factory-resources.mjs';
+import {requireEnglishReleaseGate} from './english-release-gate.mjs';
 
 const project=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const hashFile=async file=>{const hash=createHash('sha256');for await(const chunk of createReadStream(file))hash.update(chunk);return hash.digest('hex');};
@@ -14,6 +15,7 @@ const hashFile=async file=>{const hash=createHash('sha256');for await(const chun
 export async function stageInstallerPayload(options={}){return buildPortable({...options,archive:false,split:false});}
 
 export async function buildInstaller({outputDir,compiler,nodeExe,nodeLicense,javaRuntime,jarPath,catalogSeedFile,sceneSeedFile,sourceDir=project,sampleFile,requireFactoryMaterials=false,factoryProfile='all-scenes',materialsKind='unverified',webViewSdkDir=process.env.WEBVIEW2_SDK_DIR}={}){
+ const englishAcceptance=await requireEnglishReleaseGate({projectRoot:project,version:productVersion});
  if(!(await fs.stat(compiler)).isFile())throw new Error('Inno Setup编译器不存在。');
  const output=path.resolve(outputDir);await fs.mkdir(output,{recursive:false});
  const staged=await stageInstallerPayload({outputDir:path.join(output,'_stage'),nodeExe,nodeLicense,javaRuntime,jarPath,catalogSeedFile,sceneSeedFile,sourceDir,sampleFile,requireFactoryMaterials,factoryProfile,materialsKind,desktopShell:true,webViewSdkDir});
@@ -27,6 +29,7 @@ export async function buildInstaller({outputDir,compiler,nodeExe,nodeLicense,jav
  const bytes=(await fs.stat(installer)).size,sha256=await hashFile(installer);
  const info={schemaVersion:1,version:productVersion,appId:businessAppId,platform:'windows-x64',engine:'spring-ai',installer:installerName,payloadRoot:path.relative(output,staged.root).replaceAll('\\','/'),bytes,sha256,payloadBytes:staged.unpackedBytes,files:staged.files,sourceDataIncluded:false,credentialsIncluded:false,runtimes:{node:'24',java:'21'},jarSha256:await hashFile(jarPath),signed:false,language:'multilingual',languages:['en','zh-CN'],languageSource:'Inno Setup Default.isl; jrsoftware/issrc is-6_7_3 Files/Languages/Unofficial/ChineseSimplified.isl'};
  Object.assign(info,Object.fromEntries(['desktop','sourceDataIncluded','catalogSeedIncluded','sceneSeedIncluded','sceneSeedInfo','sampleIncluded','businessTaskDataIncluded','credentialsIncluded','factoryReady','factoryProfile','materialsKind','catalog','catalogInfo','sample'].map(key=>[key,factory[key]])));
+ info.englishAcceptance=englishAcceptance;
  await fs.writeFile(path.join(output,'package-info.json'),JSON.stringify(info,null,2)+'\n');
  await fs.writeFile(path.join(output,'SHA256.txt'),sha256+'  '+installerName+'\n');
  await fs.copyFile(path.join(staged.root,'使用说明.txt'),path.join(output,'使用说明.txt'));
