@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import path from 'node:path';
 import {createHash,randomBytes} from 'node:crypto';
 import {validateSceneSeed} from './scene-seed.mjs';
 import {installBuiltinSceneUpgrade} from './builtin-scene-upgrade.mjs';
@@ -6,6 +7,7 @@ import {migrateSceneConfigurations} from './scene-configuration-service.mjs';
 import {latestSceneConfiguration,sceneEntity,sameSceneValue} from '../public/scene-configuration.mjs';
 import {stable} from '../public/rule-calibration-policy.mjs';
 import {encodeWorkspaceArchive} from './workspace-archive.mjs';
+import {appendStartupAudit,pruneSuccessfulBuiltinBackups,resumeBuiltinBackupRetention,startupAuditPath,startupMaintenanceEvents} from './startup-maintenance.mjs';
 
 const clone=x=>structuredClone(x),digest=x=>createHash('sha256').update(x).digest('hex');
 const seedHashes=seed=>[digest(stable(seed)),digest(JSON.stringify(seed))];
@@ -80,20 +82,41 @@ export function prepareAutomaticBuiltinUpgrade(document,{catalogSeed,sceneSeed,p
  return{next,sceneIds,seedId:sceneSeed.id,reason};
 }
 
-export async function upgradeBuiltinOnStartup({store,dataDir,catalogSeed,sceneSeed,productVersion,archive=encodeWorkspaceArchive,writeFile=fs.writeFile}){
- let backupPath,backupWritten=false;
+export async function upgradeBuiltinOnStartup({store,dataDir,catalogSeed,sceneSeed,productVersion,archive=encodeWorkspaceArchive,writeFile=fs.writeFile,recovery}){
+ dataDir=path.resolve(dataDir);const operationId=randomBytes(16).toString('hex'),auditPath=startupAuditPath(dataDir),metadata={auditPath,...(recovery?{recovery}:{})};
+ const recovered=recovery?.cleaned?.length?`已自动清理或隔离 ${recovery.cleaned.length} 处中断写入残留并继续执行启动检查。`:'';
+ const recoveredEn=recovery?.cleaned?.length?`Recovered ${recovery.cleaned.length} interrupted writes and continued startup checks. `:'';
+ let backupPath,backupWritten=false,upgraded=false;
+ const audit=event=>appendStartupAudit(dataDir,{operationId,productVersion,...event});
+ const finish=async result=>({...result,maintenanceEvents:await startupMaintenanceEvents(dataDir)});
  try{
   const catalog=typeof catalogSeed==='function'?await catalogSeed():catalogSeed,seed=typeof sceneSeed==='function'?await sceneSeed():sceneSeed;
-  if(!catalog||!seed)return{status:'unavailable'};
+  if(!catalog||!seed)return finish({status:'unavailable',...metadata});
   const input={catalogSeed:catalog,sceneSeed:seed,productVersion};
-  const plan=prepareAutomaticBuiltinUpgrade(await store.read(),input);
-  if(!plan)return{status:'current',seedId:seed.id};
+  const before=await store.read(),plan=prepareAutomaticBuiltinUpgrade(before,input);
+  if(!plan){
+   let retention;try{retention=await resumeBuiltinBackupRetention(dataDir,{document:before});}catch(error){retention={limit:2,retained:[],pruned:[],preserved:[],warning:`自动备份保留检查未完成，备份已保留：${error.message}`};}
+   return finish({status:'current',seedId:seed.id,...metadata,...(retention?{retention}:{}),...(recovered?{message:recovered+'内置口径已是当前版本。',messageEn:recoveredEn+'Built-in policies are current.'}:{})});
+  }
+  if(recovery?.refused?.length)throw new Error(`以下路径未自动处理：${recovery.refused.map(item=>`${item.path}（${item.reason}）`).join('；')}`);
+  await audit({action:'upgrade-intent',seedId:seed.id});
   await store.validateIntegrity();
   const {bytes}=await archive(dataDir);
   backupPath=`${dataDir}.before-auto-builtin-${new Date().toISOString().replace(/[:.]/g,'-')}-${randomBytes(4).toString('hex')}.sqwb`;
   await writeFile(backupPath,bytes,{flag:'wx',mode:0o600});
   backupWritten=true;
+  // Flush the closed archive before recording proof or mutating the workspace.
+  const backup=await fs.open(backupPath,'r+');try{await backup.sync();}finally{await backup.close();}
+  const commitProof={beforeRevision:before.revision,events:plan.next.state.sceneConfigurationEvents.filter(event=>event.action==='system-upgrade'&&event.operationId.startsWith(`auto-${seedHashes(seed)[0].slice(0,32)}:`)).map(({id,operationId,seedHash,productVersion})=>({id,operationId,seedHash,productVersion}))};
+  await audit({action:'backup-created',backupPath,sha256:digest(bytes),seedId:seed.id,commitProof});
   await store.upgradeBuiltinAutomatically(input);
-  return{status:'upgraded',seedId:seed.id,backupPath,scenes:plan.sceneIds,message:'内置口径已自动升级并备份。新建任务直接使用新版；历史任务仍保留原口径。',messageEn:'Built-in policies were upgraded and backed up. New tasks use the new policies; existing tasks keep their frozen versions.'};
- }catch(error){return{status:'failed',...(backupWritten?{backupPath}:{}),message:`内置口径自动升级未完成，原工作区已保留。请在场景管理重试装载或联系维护人：${error.message}`,messageEn:'Automatic policy upgrade could not finish. The previous workspace is preserved. Retry loading the bundle in Scenario management or contact your maintainer.',detail:String(error.message)};}
+  upgraded=true;await audit({action:'upgrade-succeeded',backupPath,seedId:seed.id,scenes:plan.sceneIds});
+  let retention;try{retention=await pruneSuccessfulBuiltinBackups(dataDir,{operationId,document:await store.read()});}catch(error){retention={limit:2,retained:[backupPath],pruned:[],preserved:[],warning:`自动备份保留检查未完成，现有备份均未继续删除：${error.message}`};await audit({action:'retention-refused',reason:error.message});}
+  return finish({status:'upgraded',seedId:seed.id,backupPath,scenes:plan.sceneIds,...metadata,retention,message:recovered+'内置口径已自动升级并备份。新建任务直接使用新版；历史任务仍保留原口径。',messageEn:recoveredEn+'Built-in policies were upgraded and backed up. New tasks use the new policies; existing tasks keep their frozen versions.'});
+ }catch(error){
+  let auditError;try{await audit({action:upgraded?'upgrade-audit-failed':'upgrade-failed',...(backupWritten?{backupPath}:{}),reason:String(error.message)});}catch(cause){auditError=cause.message;}
+  const detail=String(error.message)+(auditError?`；审计写入失败：${auditError}`:'');
+  if(upgraded)return finish({status:'upgraded',...metadata,backupPath,warning:detail,message:recovered+`内置口径已升级，升级前备份保留于 ${backupPath}。审计或保留检查未完成，未继续清理备份，请维护人检查 ${auditPath}：${detail}`,messageEn:recoveredEn+'Policies were upgraded and the safety backup is retained. Audit or retention checks need attention. Ask your maintainer to review the paths and source details below.'});
+  return finish({status:'failed',...metadata,...(backupWritten?{backupPath}:{}),message:recovered+`内置口径自动升级未完成，原工作区已保留。请维护人检查数据目录 ${dataDir} 中下列具体原因；处理后关闭并重新启动工作台以自动重试。审计：${auditPath}。${detail}`,messageEn:recoveredEn+'Automatic policy upgrade did not finish. The previous workspace is preserved. Ask your maintainer to review the paths and source details below, resolve the issue, then close and start the workbench to retry automatically.',detail});
+ }
 }

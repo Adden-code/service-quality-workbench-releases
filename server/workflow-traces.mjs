@@ -92,7 +92,7 @@ async function readFileWithoutLinks(file){
   }finally{await handle?.close();}
 }
 
-export async function createWorkflowTraceStore({dataDir,clock=()=>new Date()}={}){
+export async function createWorkflowTraceStore({dataDir,clock=()=>new Date(),beforeLoad}={}){
   if(typeof dataDir!=='string'||!dataDir.trim()||typeof clock!=='function')throw traceError('trace_path','请指定追踪数据目录和有效时钟。');
   const directory=path.join(path.resolve(dataDir),'workflow-runs'),lockPath=path.join(directory,'.workflow.lock');
   await directoryWithoutLinks(directory,true);
@@ -168,6 +168,7 @@ export async function createWorkflowTraceStore({dataDir,clock=()=>new Date()}={}
   async function release(){if(closed)return;closed=true;await lock.close();await directoryWithoutLinks(directory);const owner=JSON.parse(await readFileWithoutLinks(lockPath));if(owner.nonce!==nonce)throw locked();await fs.unlink(lockPath);}
   try{
     await lock.writeFile(JSON.stringify({pid:process.pid,nonce}));await lock.sync();
+    if(beforeLoad)await beforeLoad({path:lockPath,pid:process.pid,nonce});
     for(const entry of await fs.readdir(directory,{withFileTypes:true})){
       if(entry.isSymbolicLink())throw traceError('trace_path','追踪目录中存在符号链接，拒绝读取。',500);
       if(!entry.name.endsWith('.json'))continue;

@@ -58,7 +58,7 @@ export async function encodeWorkspaceArchive(dataDir,{appVersion='0.10.6'}={}){
    if(stat.isSymbolicLink()||!(await fs.realpath(full)).startsWith(real+path.sep))fail('工作区包含目录链接，无法保证完整备份。');
    if(stat.isDirectory()){
     if(!relative&&!roots.has(entry.name))fail(`工作区包含未支持的目录：${entry.name}。`);
-    if(entry.name.startsWith('.creating-'))fail('工作区存在未完成的文件写入，请重新启动后检查。');
+    if(entry.name.startsWith('.creating-'))fail(`工作区存在未完成的写入目录：${name}。启动恢复未能确认其安全归属，请关闭工作台并由维护人核对该路径；保留原件并移至工作区外后重新启动以自动重试。`);
     await walk(full,name,depth+1);continue;
    }
    validateBackupPath(name);

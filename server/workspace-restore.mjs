@@ -136,7 +136,7 @@ export async function createWorkspaceRestore({dataDir,fsOps=fs,failurePoint=asyn
    throw error;
   }finally{applying=false;}
  }
- return {preflight,discard,apply,
+ return {preflight,discard,apply,lockIdentity:()=>({path:lockPath,pid:process.pid,nonce}),
   async readRetained(id){if(!identifier.test(id)||!retained.has(id))throw issue('恢复前备份不存在或不属于本次服务。',404);const item=retained.get(id),info=await stat(item.path);if(!info?.isFile()||info.isSymbolicLink())throw issue('恢复前备份无法安全读取。',500);return{name:item.name,bytes:await fsOps.readFile(item.path)};},
   async close(){if(applying)throw issue('工作区正在恢复，暂时不能关闭恢复服务。');if(!closed&&!poisoned){let journalId=null;try{const saved=await stat(journalPath);if(saved)journalId=validateJournal(JSON.parse(await fsOps.readFile(journalPath,'utf8'))).id;}catch{journalId='unknown';}for(const [id,record] of stages)if(journalId!=='unknown'&&id!==journalId){await fsOps.rm(record.public.directory,{recursive:true,force:true}).catch(()=>{});stages.delete(id);}}await release();},
  };

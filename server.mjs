@@ -22,6 +22,7 @@ import {loadBundledCatalogSeed} from './server/catalog-seed.mjs';
 import {loadBundledSceneSeed} from './server/scene-seed.mjs';
 import {installEcommercePolicyUpgrade} from './server/builtin-scene-upgrade.mjs';
 import {upgradeBuiltinOnStartup} from './server/startup-builtin-upgrade.mjs';
+import {recoverStartupCreatingFiles,auditStartupRefusal} from './server/startup-maintenance.mjs';
 import {readDesktopActivity} from './server/desktop-activity.mjs';
 import {createImportDraftStore} from './server/import-drafts.mjs';
 import {createRawStructureJobs} from './server/raw-structure-jobs.mjs';
@@ -49,17 +50,25 @@ export async function createWorkbenchServer({dataDir=process.env.DEMO_DATA_DIR||
   const root=path.resolve(publicDir),resolvedData=path.resolve(dataDir);
   const guardedRoot=process.platform==='win32'?root.toLowerCase():root,guardedData=process.platform==='win32'?resolvedData.toLowerCase():resolvedData;
   if(guardedData===guardedRoot||guardedData.startsWith(guardedRoot+path.sep))throw new WorkspaceError('工作区数据目录必须位于 public 目录之外。');
-  const recovery=await createWorkspaceRestore({dataDir:resolvedData});
-  let store,builtinUpgrade={status:'current'},token=randomBytes(32).toString('hex');
+  let recovery;try{recovery=await createWorkspaceRestore({dataDir:resolvedData});}catch(error){error.path??='.workspace-control.lock';throw await auditStartupRefusal(resolvedData,error);}
+  let store,builtinUpgrade={status:'current'},token=randomBytes(32).toString('hex'),startupMaintenancePending=true;
   const readWorkspaceUsage=createWorkspaceUsageReader(resolvedData);
   let config,ai,traces,reportJobs,translationJobs,importDrafts,adminDrafts,rawStructureJobs,serverClosing=false,maintenance=false,unavailable=false,inflight=0,mutationEpoch=0,preview=null;const connectionTests=new Set();
   async function closeServices(){await Promise.all([ai?.close(),reportJobs?.close(),translationJobs?.close(),rawStructureJobs?.close()]);await adminDrafts?.close();await importDrafts?.close();await traces?.close();await store?.close();}
   async function openServices(){
     transport.clear();store=null;config=null;ai=null;traces=null;reportJobs=null;translationJobs=null;adminDrafts=null;importDrafts=null;rawStructureJobs=null;
-    try{store=await createWorkspaceStore({dataDir:resolvedData,catalogSeed,sceneSeed,storageMode,...(fsOps?{fsOps}:{})});builtinUpgrade=automaticBuiltinUpgrade?await upgradeBuiltinOnStartup({store,dataDir:resolvedData,catalogSeed,sceneSeed,productVersion:PRODUCT_VERSION}):{status:'current'};importDrafts=await createImportDraftStore({dataDir:resolvedData,workspaceStore:store});traces=await createWorkflowTraceStore({dataDir:resolvedData});config=modelConfig||await createModelConfig({dataDir:resolvedData});ai=await createAiService({store,modelConfig:config,client,traceStore:traces});reportJobs=await createReportJobs({maxAttempts:3,dataDir:resolvedData,store,modelConfig:config,client,traceStore:traces});adminDrafts=await createAdminDraftStore({dataDir:resolvedData});translationJobs=await createTranslationJobs({maxAttempts:3,dataDir:resolvedData,store,modelConfig:config,client,traceStore:traces,reportJobs,adminDrafts});rawStructureJobs=await createRawStructureJobs({dataDir:resolvedData,store,modelConfig:config,client,traceStore:traces});}
-    catch(error){await closeServices();throw error;}
+    let openingPath='.workspace.lock';try{
+      store=await createWorkspaceStore({dataDir:resolvedData,catalogSeed,sceneSeed,storageMode,...(fsOps?{fsOps}:{})});
+      openingPath='workflow-runs/.workflow.lock';
+      let startupRecovery;
+      traces=await createWorkflowTraceStore({dataDir:resolvedData,...(startupMaintenancePending?{beforeLoad:async traceLock=>{startupRecovery=await recoverStartupCreatingFiles({dataDir:resolvedData,ownedLocks:[recovery.lockIdentity(),store.lockIdentity(),traceLock]});}}:{})});
+      openingPath='.';
+      builtinUpgrade=automaticBuiltinUpgrade?await upgradeBuiltinOnStartup({store,dataDir:resolvedData,catalogSeed,sceneSeed,productVersion:PRODUCT_VERSION,recovery:startupRecovery}):{status:'current',recovery:startupRecovery};
+      importDrafts=await createImportDraftStore({dataDir:resolvedData,workspaceStore:store});config=modelConfig||await createModelConfig({dataDir:resolvedData});ai=await createAiService({store,modelConfig:config,client,traceStore:traces});reportJobs=await createReportJobs({maxAttempts:3,dataDir:resolvedData,store,modelConfig:config,client,traceStore:traces});adminDrafts=await createAdminDraftStore({dataDir:resolvedData});translationJobs=await createTranslationJobs({maxAttempts:3,dataDir:resolvedData,store,modelConfig:config,client,traceStore:traces,reportJobs,adminDrafts});rawStructureJobs=await createRawStructureJobs({dataDir:resolvedData,store,modelConfig:config,client,traceStore:traces});
+    }
+    catch(error){error.path??=openingPath;await closeServices();throw error;}
   }
-  try{await openServices();}catch(error){await recovery.close();throw error;}
+  try{await openServices();startupMaintenancePending=false;}catch(error){await recovery.close();throw await auditStartupRefusal(resolvedData,error);}
   const backupError=(message,status,code)=>Object.assign(new WorkspaceError(message,status),{code});
   const busy=()=>connectionTests.size>0||[ai,reportJobs,translationJobs,rawStructureJobs].some(service=>service.isBusy());
   async function assertTaskNotVoided(taskId){if(!taskId)return;const task=(await store.read()).state?.tasks.find(t=>t.id===taskId);if(task?.lifecycle?.voidedAt)throw new WorkspaceError('作废任务只读，不能继续生成、翻译或重跑。',409);}

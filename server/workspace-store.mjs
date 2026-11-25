@@ -191,6 +191,7 @@ export async function createWorkspaceStore({dataDir,fsOps=fs,catalogSeed=null,sc
     return clone({initialized:true,baseRevision:revision,revision:document.revision,patch});
   }
   return {
+    lockIdentity:()=>({path:lockPath,pid:process.pid,nonce}),
     read,changesSince,
     // Internal immutable view: callers must never mutate or expose it to plugins.
     transportSnapshot:()=>({initialized:document.revision>0,revision:document.revision,state:document.state,catalog:document.catalog}),
