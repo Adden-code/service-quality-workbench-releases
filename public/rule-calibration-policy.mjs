@@ -1,3 +1,4 @@
+import {languageCalibrationScope} from './workspace-language.mjs';
 import {classificationNeedsJudgment} from './ecommerce-classification-review.mjs';
 const clone=v=>structuredClone(v);
 import {ruleExecutionScope} from './scene-rule-execution.mjs';
@@ -5,7 +6,7 @@ export const stable=v=>Array.isArray(v)?'['+v.map(stable).join(',')+']':v&&typeo
 export const RULE_CALIBRATION_CONTRACT='rule-pairs-80-30.v1';
 export function calibrationScope(task){
  const fields=['id','version','title','category','scope','passCriteria','failCriteria','exceptionCriteria','policyIds','ruleKind'];
- return {...(task.basisSnapshot?.businessProfile?{ecommerceExecution:task.basisSnapshot.businessProfile}:{}),contract:RULE_CALIBRATION_CONTRACT,scene:task.scene,scenario:task.scenarioSnapshot||null,inputMode:task.inputMode||'structured',rawImportOptions:task.rawImportOptions?{timePolicy:task.rawImportOptions.timePolicy,productDefault:task.rawImportOptions.productDefault}:null,
+ return {...languageCalibrationScope(task),...(task.basisSnapshot?.businessProfile?{ecommerceExecution:task.basisSnapshot.businessProfile}:{}),contract:RULE_CALIBRATION_CONTRACT,scene:task.scene,scenario:task.scenarioSnapshot||null,inputMode:task.inputMode||'structured',rawImportOptions:task.rawImportOptions?{timePolicy:task.rawImportOptions.timePolicy,productDefault:task.rawImportOptions.productDefault}:null,
   ...(task.executionSnapshot?{sceneExecution:{...ruleExecutionScope(task.executionSnapshot.configuration),contract:task.executionSnapshot.contract,mode:task.executionSnapshot.configuration.executionMode,capabilities:task.executionSnapshot.configuration.capabilities,timingPolicy:task.executionSnapshot.configuration.timingPolicy,ruleDependencies:task.executionSnapshot.configuration.ruleDependencies,timingRuleMetrics:task.executionSnapshot.configuration.timingRuleMetrics||{},inspectionLanguage:task.executionSnapshot.configuration.inspectionLanguage||'zh',taxonomy:task.executionSnapshot.taxonomy,exceptions:task.executionSnapshot.exceptions,parameters:Object.fromEntries(Object.entries(task.executionSnapshot.runtime.values).filter(([k])=>!['reviewMode','legacyConfidenceThreshold','outputLanguages'].includes(k))),timingStandards:task.executionSnapshot.runtime.timingStandards}}:{}),
   rules:(task.basisSnapshot?.rules||[]).map(rule=>Object.fromEntries(fields.filter(k=>rule[k]!==undefined).map(k=>[k,rule[k]]))),policies:(task.basisSnapshot?.policies||[]).map(p=>({id:p.id,version:p.version,sections:p.sections}))};
 }

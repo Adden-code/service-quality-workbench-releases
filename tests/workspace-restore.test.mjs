@@ -153,7 +153,7 @@ test('replacement removes business entries absent in backup but retains them in 
 });
 
 test('all business entries are explicit, and unknown or malicious recovery journals never target external paths',async t=>{
- assert.deepEqual(WORKSPACE_BUSINESS_ENTRIES,['workspace.json','workspace-records','sources','workflow-runs','report-jobs','raw-structure','content-translations','report-cache','translation-cache','import-drafts','backups']);
+ assert.deepEqual(WORKSPACE_BUSINESS_ENTRIES,['workspace.json','workspace-records','sources','workflow-runs','report-jobs','raw-structure','content-translations','report-cache','translation-cache','import-drafts','backups','language-materials']);
  const f=await fixture(t);await f.closeServices();await f.manager.close();
  await fs.writeFile(path.join(f.dataDir,'.workspace-restore.json'),JSON.stringify({version:1,id:'b'.repeat(32),target:f.dataDir,phase:'swapping',oldNames:['../outside'],newNames:[]}));
  await assert.rejects(createWorkspaceRestore({dataDir:f.dataDir}),/日志无法核验/);assert.deepEqual(await fs.readFile(path.join(f.dataDir,'workspace.json')),f.original);

@@ -1,3 +1,5 @@
+import {validateLanguageTransition} from '../public/workspace-language.mjs';
+import {validateLanguageRegistry} from './workspace-language-service.mjs';
 import {validateEcReportMetadata} from '../public/ec-report-metadata.mjs';
 import {validateImportLineages} from '../public/import-lineage.mjs';
 import {requiresEcommerceClassification,classificationReviewed,classificationNeedsJudgment} from '../public/ecommerce-classification-review.mjs';
@@ -223,7 +225,8 @@ function validateRawReinspection(task,tasks,sessions){
  const visited=new Set([task.id]);let current=parent;
  while(current){if(visited.has(current.id))fail('原文重检父任务关系不能循环。');visited.add(current.id);current=current.reinspectionOf?tasks.get(current.reinspectionOf):null;}
 }
-export function validateWorkspace(state,catalog,previous=null,{authenticateNewSnapshots=false,trustedAI=false,trustedLifecycle=false,trustedCalibration=false,trustedScene=false,trustedReview=false}={}){
+export function validateWorkspace(state,catalog,previous=null,{authenticateNewSnapshots=false,trustedAI=false,trustedLifecycle=false,trustedCalibration=false,trustedScene=false,trustedReview=false,trustedLanguage=false}={}){
+  validateLanguageTransition(state,previous,{trustedLanguage});validateLanguageRegistry(state,previous,{trustedLanguage});
   const priorSessions=new Map((previous?.sessions||[]).map(s=>[s.id,s]));
   if(trustedReview){
     if(!previous||Object.keys(previous).some(k=>!['tasks','sessions','activity'].includes(k)&&state[k]!==previous[k])||state.tasks.length!==previous.tasks.length||state.sessions.length!==previous.sessions.length)fail('审核命令不能改变工作区范围。');

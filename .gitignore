@@ -12,3 +12,5 @@ packaging/runtime/
 *.sqwb
 *.class
 __pycache__/
+acceptance-results/
+acceptance-workspace/

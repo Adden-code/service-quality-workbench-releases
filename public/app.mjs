@@ -1,3 +1,5 @@
+import {workspaceLanguage} from './workspace-language.mjs';
+import {languageAcceptanceScreen,enforceWorkspaceLocale} from './workspace-language-ui.mjs';
 import {startupMaintenanceNotice} from './startup-maintenance-view.mjs';
 import {createAdminDraftTranslationController} from './admin-draft-translation.mjs';
 import {createReasonTranslationController} from './reason-translation.mjs';
@@ -83,6 +85,7 @@ const adminDraftTranslations=createAdminDraftTranslationController({getToken:()=
 const contentTranslations=createContentTranslationController({getToken:()=>workspace.token,onChange:()=>redrawLocalized()});
 const workflowManager=createWorkflowManager({getToken:()=>workspace.token,openModal:openDialog,closeModal:()=>closeDialog({force:true}),onChange:()=>{if(dialog?.type==='workflow')renderDialog();},toast,download});
 let state=createBusinessState(),catalog=createBusinessCatalog();
+let languageChoice='',languageSaving=false;
 const businessExportManager=createBusinessExportManager({api:businessExportApi,getState:()=>scoped(),getUI:()=>ui,onRender:()=>render(),download,notify:toast});
 const rawWorkbenchManager=createRawWorkbenchManager({getState:()=>state,getUI:()=>ui,getDialog:()=>dialog,getModelConfig:()=>ui.modelConfig,openDialog,closeDialog,renderDialog,render,toast,download,api:businessExportApi,configureModel:origin=>openModelSettings({returnDialog:origin}),commit,selectSession,reinspect:beginRawReinspection});
 const rawReviewTimer=createRawReviewTimer({getSession:current,isActive:()=>ui.page==='review'&&(!dialog||['raw-edit','confirm-review','pending','policy','rule'].includes(dialog.type))&&document.visibilityState!=='hidden'&&(document.hasFocus?.()??true),save:packet=>commit(latest=>recordRawReviewTime(latest,packet),undefined,{reviewSessionId:packet.sessionId,deferRender:true,command:{action:'time',sessionId:packet.sessionId,packet,at:packet.now}})});
@@ -247,6 +250,8 @@ function restoreFocus(identity){
 }
 function render(){
   if(composingInput?.isConnected)return;
+  const languageScreen=languageAcceptanceScreen(state,{choice:languageChoice,saving:languageSaving});
+  if(languageScreen){renderUpdate(document.getElementById('app'),languageScreen);document.title=uiT('会话质检工作台');return;}
   const samePage=lastPage===ui.page;
   const disclosures=[...document.querySelectorAll('#app details[data-disclosure][open]')].map(el=>el.dataset.disclosure);
   const focused=samePage&&document.getElementById('app').contains(document.activeElement)?focusIdentity(document.activeElement):null;
@@ -577,7 +582,9 @@ document.addEventListener('click',async event=>{
     if(action==='task-problem-summary'){const task=state.tasks.find(t=>t.id===id);if(task){const text=taskProblemSummary(task,ui.buildInfo||{version:workspace.snapshot?.productVersion});try{await navigator.clipboard.writeText(text);toast(getLocale()==='en'?'Problem summary copied':'问题摘要已复制');}catch{download(text,'quality-problem-summary.json','application/json');}}return;}
     if(action==='admin-draft-translation-retry'){adminDraftTranslations.ensure(dialog,{retry:true});return;}
     if(action==='reason-translation-retry'){const session=button.dataset.session?state.sessions.find(s=>s.id===button.dataset.session):current();if(session)reasonTranslations.ensure(session,{retry:true,task:state.tasks.find(task=>task.id===session.taskId)});return;}
-    if(action==='ui-locale'){setLocale(button.dataset.locale);document.title=uiT('会话质检工作台');redrawLocalized();return;}
+    if(action==='language-pick'){languageChoice=button.dataset.language;render();return;}
+    if(action==='language-confirm'){languageSaving=true;render();try{adoptWorkspace(await workspace.chooseLanguage(languageChoice));enforceWorkspaceLocale(state);}finally{languageSaving=false;render();}return;}
+    if(action==='ui-locale'){if(workspaceLanguage(state)?.mode==='native-v1'){enforceWorkspaceLocale(state);render();return;}setLocale(button.dataset.locale);document.title=uiT('会话质检工作台');redrawLocalized();return;}
     if(await ecommerceConversionManager.action(action,button))return;
     if(await importDraftManager.action(action,button))return;
     if(await importFlowAction(action,button))return;

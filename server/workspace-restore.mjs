@@ -9,7 +9,7 @@ import {WorkspaceError} from './workspace-validation.mjs';
 import {encodeWorkspaceArchive,validateBackupDocument,validateBackupPath,backupSummary} from './workspace-archive.mjs';
 
 // Runtime identity, credentials and logs remain in the stable data directory.
-export const WORKSPACE_BUSINESS_ENTRIES=Object.freeze(['workspace.json','workspace-records','sources','workflow-runs','report-jobs','raw-structure','content-translations','report-cache','translation-cache','import-drafts','backups']);
+export const WORKSPACE_BUSINESS_ENTRIES=Object.freeze(['workspace.json','workspace-records','sources','workflow-runs','report-jobs','raw-structure','content-translations','report-cache','translation-cache','import-drafts','backups','language-materials']);
 const allowed=new Set(WORKSPACE_BUSINESS_ENTRIES),identifier=/^[a-f0-9]{32}$/;
 const issue=(message,status=409)=>new WorkspaceError(message,status);
 const missing=error=>error?.code==='ENOENT';

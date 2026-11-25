@@ -92,6 +92,15 @@ export function createWorkspaceClient({fetchImpl=globalThis.fetch,storage=null,t
     get snapshot(){return view(acknowledged);},
     get revision(){return acknowledged?.revision;},
     get token(){return acknowledged?.token;},
+    chooseLanguage(language,operationId=mutationId()){return serial(async()=>{
+      ensureWritable();
+      try{return adopt(await request('/api/workspace-language/select',{method:'POST',headers:{'Content-Type':'application/json','X-Workspace-Token':acknowledged.token},body:JSON.stringify({language,actor:'local-operator',operationId,baseRevision:acknowledged.revision})}));}
+      catch(error){
+        // Adopt the winning selection after a conflict or lost response. Never
+        // replay a losing language choice on a newer revision.
+        const latest=await readCurrent();if(latest.state?.workspaceSettings?.languagePolicy?.mode==='native-v1'){conflicted=false;return adopt(latest);}throw error;
+      }
+    });},
     get supportsReviewCommands(){return acknowledged?.reviewCommands===true;},
     reviewCommand(input){return serial(async()=>{ensureWritable();const session=acknowledged.state.sessions.find(s=>s.id===input.sessionId);if(!session)throw new Error('会话不存在。');pending={url:'/api/review',body:JSON.stringify({...input,mutationId:mutationId(),baseRevision:acknowledged.revision,expected:JSON.stringify(session.review),expectedAI:JSON.stringify({aiResults:session.aiResults,aiExecution:session.aiExecution,aiDecision:session.aiDecision,sceneCapabilities:session.sceneCapabilities})})};return sendPending();});},
     get hasPending(){return Boolean(pending);},

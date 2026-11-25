@@ -12,6 +12,7 @@ payloadFiles.push('server/raw-inspection.mjs','server/raw-source.mjs','server/ra
 payloadFiles.push('server/workspace-usage.mjs','server/workspace-archive.mjs','server/workspace-restore.mjs','server/task-deletion.mjs','server/rule-calibration.mjs');
 payloadFiles.push('server/workspace-transport.mjs','server/bounded-job-scheduler.mjs','server/startup-builtin-upgrade.mjs','server/delivery-progress.mjs','server/desktop-activity.mjs');
 payloadFiles.push('server/startup-maintenance.mjs');
+payloadFiles.push('server/native-language-materials.mjs','server/workspace-language-service.mjs');
 payloadFiles.push('server/builtin-scene-upgrade.mjs','server/scene-configuration-service.mjs','server/scene-package-preparation.mjs','server/scene-capabilities.mjs','server/scene-seed.mjs','server/scene-capability-schema.mjs','server/unicode-source-quote.mjs','server/diagnostics.mjs');
 export const packageLimit=49_000_000;
 const run=(exe,args)=>{const result=spawnSync(exe,args,{stdio:'inherit',windowsHide:true});if(result.error)throw result.error;if(result.status!==0)throw new Error(`${path.basename(exe)} failed (${result.status})`);};

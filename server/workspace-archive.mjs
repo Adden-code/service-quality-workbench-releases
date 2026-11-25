@@ -1,3 +1,4 @@
+import {verifyLanguageFileSet} from './workspace-language-service.mjs';
 import {isRecordIndex,readRecordDocument} from './workspace-records.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -8,7 +9,7 @@ import {WorkspaceError,validateWorkspace} from './workspace-validation.mjs';
 const MAGIC=Buffer.from('SQWB0001');
 export const MAX_BACKUP_BYTES=512*1024*1024;
 const MAX_MANIFEST=8*1024*1024,MAX_FILE=64*1024*1024,MAX_FILES=20000;
-const roots=new Set(['sources','workflow-runs','report-jobs','raw-structure','content-translations','report-cache','translation-cache','import-drafts','admin-drafts','backups']);
+const roots=new Set(['sources','workflow-runs','report-jobs','raw-structure','content-translations','report-cache','translation-cache','import-drafts','admin-drafts','backups','language-materials']);
 const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
 const fail=message=>{throw new WorkspaceError(message,400);};
 const transient=name=>/^\..*\.tmp$/.test(name)||/^\.(workspace|workflow)\.lock(?:\.recovery)?$/.test(name);
@@ -44,6 +45,7 @@ export function decodeWorkspaceArchive(input){
  for(const name of names){const parts=name.split('/');for(let i=1;i<parts.length;i++)if(names.has(parts.slice(0,i).join('/')))fail('备份文件和目录路径冲突。');}
  if(offset!==bytes.length||manifest.totalBytes!==totalBytes||manifest.fileCount!==files.size||!files.has('workspace.json'))fail('备份长度或工作区目录不匹配。');
  const document=validateBackupDocument(files.get('workspace.json'));
+ verifyLanguageFileSet(document.state,files);
  return {manifest:{...manifest,...backupSummary(document)},files,document};
 }
 export async function encodeWorkspaceArchive(dataDir,{appVersion='0.10.6'}={}){
@@ -75,6 +77,7 @@ export async function encodeWorkspaceArchive(dataDir,{appVersion='0.10.6'}={}){
  await walk(root);
  const at=files.findIndex(file=>file.path==='workspace.json');if(at<0)fail('工作区尚未初始化，请先打开工作台。');
  const document=validateBackupDocument(contents[at]);
+ verifyLanguageFileSet(document.state,new Map(files.map((file,i)=>[file.path,contents[i]])));
  const manifest={format:'service-quality-workspace',version:1,appVersion,createdAt:new Date().toISOString(),fileCount:files.length,totalBytes,...backupSummary(document),files};
  const json=Buffer.from(JSON.stringify(manifest));if(json.length>MAX_MANIFEST)fail('备份目录超过大小限制。');
  const header=Buffer.alloc(12);MAGIC.copy(header);header.writeUInt32BE(json.length,8);

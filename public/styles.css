@@ -28,3 +28,4 @@
 .build-identity p{overflow-wrap:anywhere;margin:5px 0}
 .review-waiting{padding:24px}
 .review-waiting .queue-filters{display:flex;flex-wrap:wrap;gap:8px;margin:16px 0}
+.language-acceptance{max-width:880px;margin:8vh auto;padding:24px;line-height:1.7}.language-acceptance>.panel{padding:32px}.language-options,.language-tools{display:flex;gap:16px;margin:24px 0}.language-options button{min-width:160px;padding:16px}.language-options button[aria-pressed=true]{outline:3px solid var(--accent,#a82536)}.language-acceptance table{width:100%;text-align:left}.language-acceptance td{overflow-wrap:anywhere}.language-acceptance details{margin-top:24px}

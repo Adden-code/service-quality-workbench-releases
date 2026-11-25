@@ -1,3 +1,9 @@
+import {workspaceLanguage,languageError,assertNativeStageReady} from '../public/workspace-language.mjs';
+import {initializeLanguageGovernance,selectWorkspaceLanguage,diskLanguageHistory,verifyLanguageFiles} from './workspace-language-service.mjs';
+import {validateBilingualMaterial,assertMaterialReleaseAllowed,freezeNativeLanguage,languageHash,languageCanonical,languageDiff} from './native-language-materials.mjs';
+import {encodeWorkspaceArchive} from './workspace-archive.mjs';
+import {productVersion} from '../packaging/version.mjs';
+import {createBusinessCatalog} from '../public/catalog.mjs';
 import {createRecordWriter,isRecordIndex,readRecordDocument} from './workspace-records.mjs';
 import {applyReviewCommand} from '../public/review-command.mjs';
 import {workspacePatch,mergeWorkspacePatch} from '../public/workspace-patch.mjs';
@@ -67,6 +73,7 @@ export async function createWorkspaceStore({dataDir,fsOps=fs,catalogSeed=null,sc
       const originalBytes=await fsOps.readFile(file),disk=JSON.parse(originalBytes.toString('utf8'));if(isRecordIndex(disk))split=true;const loaded=isRecordIndex(disk)?await readRecordDocument(directory,disk,{fsOps}):disk;
       if(!object(loaded)||loaded.schemaVersion!==1||!Number.isSafeInteger(loaded.revision)||loaded.revision<1||!Array.isArray(loaded.mutations)||new Set(loaded.mutations.map(item=>item.id)).size!==loaded.mutations.length||loaded.mutations.some(item=>!object(item)||typeof item.id!=='string'||!HASH.test(item.digest)))throw new Error('保存结构不匹配');
       validateWorkspace(loaded.state,loaded.catalog);
+      await verifyLanguageFiles(loaded.state,name=>fsOps.readFile(path.join(directory,name),'utf8'));
       await checkRawSources(loaded.state);
       const business=migrateBusinessWorkspace({state:loaded.state,catalog:loaded.catalog});
       const scenes=migrateCatalogScenes({state:business.state,catalog:business.catalog});
@@ -112,6 +119,12 @@ export async function createWorkspaceStore({dataDir,fsOps=fs,catalogSeed=null,sc
     catch(error){if(handle)await handle.close().catch(()=>{});await fsOps.unlink(temporary).catch(()=>{});throw error;}
   }
   const read=async()=>({initialized:document.revision>0,revision:document.revision,state:clone(document.state),catalog:clone(document.catalog)});
+  async function writeLanguageArtifact(hash,value){
+    const target=path.join(directory,'language-materials',hash+'.json'),bytes=languageCanonical(value);
+    await fsOps.mkdir(path.dirname(target),{recursive:true});
+    try{const old=await fsOps.readFile(target,'utf8');if(old!==bytes)languageError('LANGUAGE_MATERIAL_IMMUTABLE','Immutable execution material already exists with different bytes.');return;}catch(e){if(e.code!=='ENOENT')throw e;}
+    await atomicWrite(target,bytes);
+  }
   async function sourceRecord(sha256){
     if(typeof sha256!=='string'||!HASH.test(sha256))throw new WorkspaceError('原文件摘要格式无效。');
     try{
@@ -191,6 +204,51 @@ export async function createWorkspaceStore({dataDir,fsOps=fs,catalogSeed=null,sc
     return clone({initialized:true,baseRevision:revision,revision:document.revision,patch});
   }
   return {
+    enableLanguageGovernance(){return serial(async()=>{
+      if(workspaceLanguage(document.state))return read();
+      const externalHistory=await diskLanguageHistory(directory),at=new Date().toISOString(),id=`language-bootstrap-${randomBytes(12).toString('hex')}`;
+      const state=initializeLanguageGovernance(document.state||createBusinessState(),{externalHistory,at,operationId:id});
+      let backupPath=null;
+      if(document.revision>0){const backup=await encodeWorkspaceArchive(directory,{appVersion:productVersion});backupPath=`backups/workspace-before-native-language-${Date.now()}-${randomBytes(6).toString('hex')}.sqwb`;await fsOps.mkdir(path.join(directory,'backups'),{recursive:true});await atomicWrite(path.join(directory,backupPath),backup.bytes);}
+      state.languageAudit[0].backupPath=backupPath;
+      const catalog=document.catalog||createBusinessCatalog();validateWorkspace(state,catalog,document.state,{trustedLanguage:true});
+      return persist({...document,state,catalog,revision:document.revision+1});
+    });},
+    selectLanguage(input){return serial(async()=>{
+      if(!object(input)||Object.keys(input).some(k=>!['language','actor','operationId','baseRevision'].includes(k))||!Number.isSafeInteger(input.baseRevision)||typeof input.operationId!=='string'||!input.operationId.trim()||input.operationId.length>128)languageError('LANGUAGE_SELECTION_INVALID','Invalid language selection operation.');
+      const fingerprint=digest(canonical(input)),replay=document.mutations.find(m=>m.id===input.operationId);
+      if(replay){if(replay.digest!==fingerprint)languageError('LANGUAGE_OPERATION_CONFLICT','The operation identifier belongs to a different selection.');return read();}
+      if(input.baseRevision!==document.revision)languageError('LANGUAGE_REVISION_CONFLICT','Another page changed this workspace. Reload to use the saved language.');
+      const state=selectWorkspaceLanguage(document.state,input);validateWorkspace(state,document.catalog,document.state,{trustedLanguage:true});
+      return persist({...document,state,revision:document.revision+1,mutations:[...document.mutations,{id:input.operationId,digest:fingerprint}]});
+    });},
+    publishLanguageMaterial(input){return serial(async()=>{
+      if(!object(input)||Object.keys(input).some(k=>!['baseRevision','operationId','material'].includes(k))||typeof input.operationId!=='string'||!input.operationId.trim()||input.operationId.length>128)languageError('BILINGUAL_INVALID','Invalid bilingual publication request.');
+      const fingerprint=digest(canonical(input)),replay=document.mutations.find(m=>m.id===input.operationId);if(replay){if(replay.digest!==fingerprint)languageError('LANGUAGE_OPERATION_CONFLICT','Publication identifier was already used.');return read();}
+      if(input.baseRevision!==document.revision)languageError('LANGUAGE_REVISION_CONFLICT','Reload the current workspace before publishing.');
+      if(!workspaceLanguage(document.state))languageError('LANGUAGE_SELECTION_REQUIRED','Language governance has not been initialized.');
+      validateBilingualMaterial(input.material);assertMaterialReleaseAllowed(input.material);
+      const state=clone(document.state),m=clone(input.material),registry=state.languageMaterials||{schemaVersion:1,releases:[],freezes:[]};
+      if(registry.releases.some(r=>r.id===m.id&&r.version===m.version))languageError('BILINGUAL_VERSION_EXISTS','This material version is already published; create a new version.');
+      const oldRef=registry.releases.filter(r=>r.id===m.id).at(-1),before=oldRef?JSON.parse(await fsOps.readFile(path.join(directory,'language-materials',oldRef.contentHash+'.json'),'utf8')):null;
+      registry.releases.push({id:m.id,version:m.version,scene:m.scene,contentHash:m.contentHash});state.languageMaterials=registry;
+      state.languageAudit.push({id:input.operationId,action:'publish-material',actor:m.review.reviewer,at:new Date().toISOString(),reason:m.review.reason,before,after:m,diff:languageDiff(before,m)});
+      validateWorkspace(state,document.catalog,document.state,{trustedLanguage:true});
+      await fsOps.mkdir(path.join(directory,'language-materials'),{recursive:true});await writeLanguageArtifact(m.contentHash,m);
+      return persist({...document,state,revision:document.revision+1,mutations:[...document.mutations,{id:input.operationId,digest:fingerprint}]});
+    });},
+    freezeLanguageMaterial(input){return serial(async()=>{
+      if(!object(input)||Object.keys(input).some(k=>!['baseRevision','operationId','materialHashes','promptId','glossaryId','actor','reason'].includes(k))||!['operationId','actor','reason'].every(k=>typeof input[k]==='string'&&input[k].trim()&&input[k].length<=500)||!Array.isArray(input.materialHashes)||input.materialHashes.some(h=>!HASH.test(h)))languageError('LANGUAGE_FREEZE_INVALID','Invalid language freeze request.');
+      const fingerprint=digest(canonical(input)),replay=document.mutations.find(m=>m.id===input.operationId);if(replay){if(replay.digest!==fingerprint)languageError('LANGUAGE_OPERATION_CONFLICT','Freeze identifier was already used.');return read();}
+      if(input.baseRevision!==document.revision)languageError('LANGUAGE_REVISION_CONFLICT','Reload before freezing language materials.');
+      const registry=clone(document.state.languageMaterials||{schemaVersion:1,releases:[],freezes:[]}),materials=[];
+      for(const hash of input.materialHashes){if(!registry.releases.some(r=>r.contentHash===hash))languageError('LANGUAGE_MATERIAL_MISSING','Only published materials may enter an execution snapshot.');materials.push(JSON.parse(await fsOps.readFile(path.join(directory,'language-materials',hash+'.json'),'utf8')));}
+      const frozen=freezeNativeLanguage(workspaceLanguage(document.state),{materials,promptId:input.promptId,glossaryId:input.glossaryId}),hash=languageHash(frozen),state=clone(document.state);
+      if(!registry.freezes.some(r=>r.hash===hash))registry.freezes.push({hash,languageExecution:frozen.languageExecution});state.languageMaterials=registry;
+      state.languageAudit.push({id:input.operationId,action:'freeze-material',actor:input.actor,at:new Date().toISOString(),reason:input.reason,before:null,after:{hash,languageExecution:frozen.languageExecution}});
+      validateWorkspace(state,document.catalog,document.state,{trustedLanguage:true});await writeLanguageArtifact(hash,frozen);
+      return persist({...document,state,revision:document.revision+1,mutations:[...document.mutations,{id:input.operationId,digest:fingerprint}]});
+    });},
     lockIdentity:()=>({path:lockPath,pid:process.pid,nonce}),
     read,changesSince,
     // Internal immutable view: callers must never mutate or expose it to plugins.
@@ -217,6 +275,7 @@ export async function createWorkspaceStore({dataDir,fsOps=fs,catalogSeed=null,sc
     upgradeBuiltinAutomatically(input){return serial(async()=>{const plan=prepareAutomaticBuiltinUpgrade(document,input);if(!plan)return read();const next=plan.next;validateWorkspace(next.state,next.catalog,document.state,{trustedScene:true});await ensureSceneSeedSources(input.sceneSeed);await checkSources(next.state,next.catalog);return persist({...next,revision:document.revision+1});});},
     installEcommercePolicy(input){return serial(async()=>{const next=installEcommercePolicyUpgrade(document,input);validateWorkspace(next.state,next.catalog,document.state,{trustedScene:true});await checkSources(next.state,next.catalog);return persist({...next,revision:document.revision+1});});},
     configureScene(input){return serial(async()=>{
+      assertNativeStageReady(document.state);
       const next=sceneConfigurationMutation(document,input);if(canonical(next)===canonical(document))return read();
       validateWorkspace(next.state,next.catalog,document.state,{trustedScene:true});await checkSources(next.state,next.catalog);
       return persist({...next,revision:document.revision+1});
@@ -273,6 +332,8 @@ export async function createWorkspaceStore({dataDir,fsOps=fs,catalogSeed=null,sc
         if(replay){if(replay.digest!==fingerprint)throw new WorkspaceError('相同 mutationId 对应不同请求。',409);return {...(snapshot?await read():{initialized:true,revision:document.revision}),replayed:true};}
         if(request.baseRevision!==document.revision)throw new WorkspaceError('工作区已由另一页面更新，请保留编辑内容后重新加载。',409);
         if(delta){if(!document.state)throw new WorkspaceError('未初始化工作区不能使用增量保存。');let merged;try{merged=mergeWorkspacePatch(document,{baseRevision:request.baseRevision,revision:request.baseRevision+1,patch:request.patch});}catch(error){throw new WorkspaceError(error.message);}request.state=merged.state;request.catalog=merged.catalog;}
+        if(canonical(request.state?.workspaceSettings?.languagePolicy)!==canonical(document.state?.workspaceSettings?.languagePolicy)||canonical(request.state?.languageMaterials)!==canonical(document.state?.languageMaterials)||canonical(request.state?.languageAudit)!==canonical(document.state?.languageAudit))languageError('LANGUAGE_LOCKED','Language settings and materials cannot be changed through general workspace saving.');
+        if(workspaceLanguage(document.state)?.mode==='native-v1'&&canonical(request.catalog)!==canonical(document.catalog))languageError('BILINGUAL_REVIEW_REQUIRED','Native materials must use the paired-language publication workflow. Legacy catalog editing is not enabled in stage 1.');
         if(canonical(request.catalog?.deletedRules||[])!==canonical(document.catalog?.deletedRules||[]))throw new WorkspaceError('规则删除审计只能通过专用删除入口追加，历史内容不可改写。');
         const deletedEvents=catalog=>(catalog?.events||[]).filter(event=>(document.catalog?.deletedRules||[]).some(entry=>event.kind==='rules'&&entry.id===event.id&&entry.version===event.version));
         if(canonical(deletedEvents(request.catalog))!==canonical(deletedEvents(document.catalog)))throw new WorkspaceError('已删除规则的历史操作记录不可改写。');

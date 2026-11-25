@@ -10,7 +10,7 @@ import {englishUiFingerprint} from '../scripts/check-english-ui.mjs';
 import {sessionDisplayFields} from '../public/session-display-fields.mjs';
 import {rulePreparationFields} from '../public/admin-draft-fields.mjs';
 const releaseVersion=JSON.parse(await fs.readFile('package.json','utf8')).version;
-const root=path.resolve('public'),out=path.resolve('../outputs/service01124-20261125/english-gate');
+const root=path.resolve('public'),out=path.resolve(process.env.ENGLISH_GATE_OUTPUT||'../outputs/service01124-20261125/english-gate');
 await fs.mkdir(out,{recursive:true});
 // An interrupted/failed rerun must not leave a previous green proof usable.
 await fs.writeFile(path.join(out,'verification.json'),JSON.stringify({status:'running',version:releaseVersion,startedAt:new Date().toISOString()},null,2));
