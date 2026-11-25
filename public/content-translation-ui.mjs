@@ -29,6 +29,7 @@ export function scenarioName(value){
   return ['新品产品咨询','电商评论回复'].includes(source)?t(source):d(source);
 }
 export function ruleDisplayName(record){
+ if(record?.nativeDisplayLanguage)return record.title||record.name||record.id||'';
  const name=record?.title||record?.name||record?.id||'';
  return getLocale()==='en'?(builtinDisplayName(record)||d(name)):name;
 }

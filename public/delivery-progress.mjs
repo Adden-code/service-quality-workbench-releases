@@ -1,4 +1,5 @@
 const n=value=>Number.isFinite(Number(value))?Math.max(0,Number(value)):0;
+const native=model=>Boolean(model.result?.snapshot?.executionSnapshot?.languageExecution||model.job?.nativeLanguage);
 const terminal=status=>['completed','completed_with_warnings'].includes(status);
 export function deliveryUnitProgress(units=[]){
  const counts={total:units.length,done:0,skipped:0,failed:0,pending:0,running:0};
@@ -19,12 +20,12 @@ export function deliveryJobStatus(job){
  return job.status;
 }
 export function combinedReportProgress(model,language){
- const base=deliveryJobProgress(model.job);if(language!=='en')return base;
+ const base=deliveryJobProgress(model.job);if(language!=='en'||native(model))return base;
  const derived=model.translationJob?deliveryJobProgress(model.translationJob):{total:1,done:0,skipped:0,failed:0,pending:1,running:0};
  return finish(Object.fromEntries(['total','done','skipped','failed','pending','running'].map(key=>[key,n(base[key])+n(derived[key])])));
 }
 export function combinedReportStatus(model,language){
- const base=deliveryJobStatus(model.job);if(language!=='en'||!terminal(base))return base;
+ const base=deliveryJobStatus(model.job);if(language!=='en'||native(model)||!terminal(base))return base;
  if(!model.translationJob)return model.translationError?'incomplete':'awaiting_translation';
  const derived=deliveryJobStatus(model.translationJob);
  if(!terminal(derived))return derived;

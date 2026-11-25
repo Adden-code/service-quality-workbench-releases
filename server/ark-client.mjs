@@ -8,6 +8,7 @@ import {validateDuplicateGroups} from './ecommerce-engine.mjs';
 import {validateEcommerceSource} from '../public/ecommerce-schema.mjs';
 import {parseComparisonWire,comparisonRetryFeedback} from './ecommerce-comparison-wire.mjs';
 import {prepareReportEnrichment,parseReportEnrichment,ReportEnrichmentError} from './report-enrichment.mjs';
+import {nativeReportMessages,parseNativeReportEnrichment} from './native-report-language.mjs';
 import {prepareCleaningPrompt,parseCleaningResult,CLEANING_PROMPT_VERSION} from './conversation-cleaning.mjs';
 import {prepareImportMappingPrompt,parseImportMappingResult,ImportMappingError,IMPORT_MAPPING_PROMPT_VERSION} from './import-mapping.mjs';
 import {prepareRawInspection,parseRawInspectionResult,RawInspectionError,RAW_INSPECTION_PROMPT_VERSION} from './raw-inspection.mjs';
@@ -235,13 +236,14 @@ export function createArkClient({fetchImpl=fetch,timeoutMs=120000,maxResponseByt
         return await traced(trace,'validation',{kind:'importMapping',content,promptVersion:prepared.promptVersion},()=>({...parseImportMappingResult(content,prepared.input),...meta,promptVersion:IMPORT_MAPPING_PROMPT_VERSION}));
       }catch(error){if(error instanceof ImportMappingError){const failure=new ArkError(error.code,error.message,error.status);if(error.traceOutput!==undefined)failure.traceOutput=error.traceOutput;throw failure;}throw error;}
     },
-    async enrichBusinessReport({config,kind,input,signal,trace,retryFeedback}={}) {
+    async enrichBusinessReport({config,kind,input,signal,trace,retryFeedback,nativeContext}={}) {
       try{
-        const prepared=prepareReportEnrichment(kind,input,retryFeedback);
+        let prepared=prepareReportEnrichment(kind,input,retryFeedback);
+        if(nativeContext&&kind!=='translation')prepared=nativeReportMessages(prepared,nativeContext,{retryFeedback});
         const {content,...meta}=await request(config,prepared.messages,prepared.maxTokens,signal,trace);
-        return await traced(trace,'validation',{kind,content,promptVersion:prepared.promptVersion},()=>({ ...parseReportEnrichment(content,prepared,{allowPartial:true}),...meta,promptVersion:prepared.promptVersion }));
+        return await traced(trace,'validation',{kind,content,promptVersion:prepared.promptVersion},()=>({ ...(nativeContext&&kind!=='translation'?parseNativeReportEnrichment(content,prepared,{allowPartial:true}):parseReportEnrichment(content,prepared,{allowPartial:true})),...meta,promptVersion:prepared.promptVersion }));
       }catch(error){
-        if(error instanceof ReportEnrichmentError){const failure=new ArkError(error.code,error.message,error.status);if(error.traceOutput!==undefined)failure.traceOutput=error.traceOutput;throw failure;}
+        if(error instanceof ReportEnrichmentError){const failure=new ArkError(error.code,error.message,error.status);for(const key of ['traceOutput','nativeCandidate','nativeLanguageFailure','partialOutput'])if(error[key]!==undefined)failure[key]=error[key];throw failure;}
         throw error;
       }
     },

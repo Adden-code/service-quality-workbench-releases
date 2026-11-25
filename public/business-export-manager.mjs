@@ -1,4 +1,5 @@
 import {createBusinessDeliverySnapshot,buildBusinessDeliveryXlsx} from './business-delivery.mjs';
+import {nativeReportLanguage} from './native-report-locale.mjs';
 import {buildBusinessReportHtml} from './business-report.mjs';
 import {sceneReportSizeWarning} from './scene-report-audit.mjs';
 import {businessExportView,businessTasks,businessTranslationSummary} from './business-export-view.mjs';
@@ -27,7 +28,7 @@ const errorMessage=(error,zh,en)=>error?.message?translateError(error):message(z
 export function createBusinessExportManager({api,getState,getUI,onRender=()=>{},download,notify=()=>{},pollMs=1500,buildXlsx=buildBusinessDeliveryXlsx,createSnapshot=createBusinessDeliverySnapshot,buildConsultationXlsx=buildConsultationDeliveryXlsx,createConsultationSnapshot=createConsultationDeliverySnapshot,translationClient,concurrencyStorage}={}){
   if(typeof api!=='function'||typeof getState!=='function'||typeof getUI!=='function'||typeof download!=='function')throw new TypeError('业务导出管理器缺少必要依赖。');
   let active=false,disposed=false,epoch=0,timer=null,nodeVersion=0,hydratedKey='',defaultedLanguage=false,lastLocale=getLocale();
-  const controllers=new Set(),pendingIds=new Map(),derivedIds=new Map(),authorizedDerivedBases=new Set();
+  const controllers=new Set(),pendingIds=new Map(),derivedIds=new Map(),authorizedDerivedBases=new Set(),translationRecoveries=new Set(),rejectedDerivedIds=new Set();
   let model=emptyModel();
   const render=()=>{if(!disposed)onRender();};
   function selection(){
@@ -38,6 +39,7 @@ export function createBusinessExportManager({api,getState,getUI,onRender=()=>{},
     else if(defaultedLanguage&&getLocale()!==lastLocale){ui.businessReportLanguage=getLocale();ui.businessTargetLang=ui.businessReportLanguage;lastLocale=getLocale();}
     if(!['zh','en'].includes(ui.businessTargetLang))ui.businessTargetLang=ui.businessReportLanguage;
     const allowed=tasks.find(t=>t.id===ui.businessTaskId)?.executionSnapshot?.runtime.values.outputLanguages;if(allowed?.length){if(!allowed.includes(ui.businessTargetLang))ui.businessTargetLang=allowed[0];if(!allowed.includes(ui.businessReportLanguage))ui.businessReportLanguage=allowed[0];}
+    const nativeLanguage=nativeReportLanguage(tasks.find(t=>t.id===ui.businessTaskId));if(nativeLanguage){ui.businessTargetLang=nativeLanguage;ui.businessReportLanguage=nativeLanguage;}
     if(![CUSTOMER_ONLY,CONVERSATION_UNVERIFIED].includes(ui.businessRoleEvidenceMode)||!isConsultationTask(state,tasks.find(task=>task.id===ui.businessTaskId)))ui.businessRoleEvidenceMode=CUSTOMER_ONLY;
     const rawTask=tasks.find(task=>task.id===ui.businessTaskId)?.inputMode==='raw-transcript-v1';
     if(!validBusinessConcurrency(ui.businessConcurrency))ui.businessConcurrency=readBusinessConcurrencyPreference(concurrencyStorage);
@@ -86,35 +88,44 @@ export function createBusinessExportManager({api,getState,getUI,onRender=()=>{},
     const old=model.translationJob;model.translationJob=job;
     if(job.resultAvailable!==false&&(!model.translationResult||old?.updatedAt!==job.updatedAt||old?.status!==job.status)){
       const result=preloadedResult||await translations.result(job.id);if(!current(version,options)||model.translationKey!==key||model.translationJob?.id!==job.id)return;
-      if(!translationResultMatches(result,job)){model.translationJob=null;model.translationResult=null;derivedIds.set(key,`report-en-${makeId().slice(7)}`);throw new Error('Report translation source has changed. Generate a new derived English view.');}
+      if(!translationResultMatches(result,job)){rejectedDerivedIds.add(job.id);model.translationJob=null;model.translationResult=null;derivedIds.set(key,`report-en-${makeId().slice(7)}`);throw new Error('Report translation source has changed. Generate a new derived English view.');}
       model.translationResult=result;model.translationJob=result.job||job;
     }
     model.translationError='';model.translationNotGenerated=false;render();
   }
-  async function ensureTranslation(version,options,{force=false,refresh=false,allowCreate=authorizedDerivedBases.has(model.job?.id)}={}){
+  async function ensureTranslation(version,options,{force=false,refresh=false,allowCreate=authorizedDerivedBases.has(model.job?.id)||model.job?.options?.reportLanguage==='en'}={}){
+    if(nativeReportLanguage(model.result?.snapshot))return;
     if(options.reportLanguage!=='en'||!model.result||!terminal(model.job?.status))return;
     const key=translationContext(model.result);
     if(model.translationKey!==key){resetTranslation();model.translationKey=key;}
     if(model.translationBusy||model.translationError&&!force)return;
     if(model.translationJob&&!refresh&&!force)return;
     model.translationBusy=true;model.translationError='';render();
+    const restore=async(job,result)=>{
+      await adoptTranslation(job,version,options,key,result);
+      if(!current(version,options)||model.translationKey!==key)return;
+      const saved=model.translationJob,recoverable=saved?.status==='paused'&&saved.stopReason==='interrupted'||saved?.status==='completed_with_warnings'&&!['user_paused','configuration_changed','storage_error'].includes(saved.stopReason);
+      if(recoverable&&!translationRecoveries.has(saved.id)){
+        translationRecoveries.add(saved.id);
+        const answer=await translations.action(saved.id,saved.status==='paused'?'resume':'retry');
+        if(current(version,options))await adoptTranslation(answer.job,version,options,key);
+      }
+    };
     try{
-      if(model.translationJob){const answer=await translations.get(model.translationJob.id);if(current(version,options))await adoptTranslation(answer.job,version,options,key);return;}
+      if(model.translationJob){const answer=await translations.get(model.translationJob.id);if(current(version,options))await restore(answer.job);return;}
       let id=derivedIds.get(key)||`report-en-${shortHash(key)}`;derivedIds.set(key,id);let answer;
       try{answer=await translations.get(id);}
       catch(error){
         if(!current(version,options))return;if(error.status!==404)throw error;
-        if(!allowCreate){
           if(typeof translations.list==='function'){
-            const saved=await translations.list({kind:'report',jobId:model.job.id});if(!current(version,options))return;
+            const saved=await translations.list({kind:'report',jobId:model.job.id}).catch(error=>{if(error.status===404)return{jobs:[]};throw error;});if(!current(version,options))return;
             for(const candidate of saved.jobs||[]){
-              if(candidate.targetLang!=='en'||candidate.source?.kind!=='report'||candidate.source.jobId!==model.job.id||candidate.resultAvailable===false)continue;
+              if(rejectedDerivedIds.has(candidate.id)||candidate.targetLang!=='en'||candidate.source?.kind!=='report'||candidate.source.jobId!==model.job.id||candidate.resultAvailable===false)continue;
               const result=await translations.result(candidate.id);if(!current(version,options))return;
-              if(translationResultMatches(result,candidate)){derivedIds.set(key,candidate.id);await adoptTranslation(candidate,version,options,key,result);return;}
+              if(translationResultMatches(result,candidate)){derivedIds.set(key,candidate.id);await restore(candidate,result);return;}
             }
           }
-          model.translationNotGenerated=true;return;
-        }
+        if(!allowCreate){model.translationNotGenerated=true;return;}
         model.translationTriedKey=key;
         try{answer=await translations.create({jobId:id,source:{kind:'report',jobId:model.job.id},targetLang:'en',concurrency:options.concurrency});}
         catch(createError){
@@ -125,7 +136,7 @@ export function createBusinessExportManager({api,getState,getUI,onRender=()=>{},
           else{try{answer=await translations.get(id);}catch{throw createError;}}
         }
       }
-      if(current(version,options)){await adoptTranslation(answer.job,version,options,key);authorizedDerivedBases.delete(model.job.id);}
+      if(current(version,options)){await restore(answer.job);authorizedDerivedBases.delete(model.job.id);}
     }catch(error){if(current(version,options)&&model.translationKey===key&&!aborted(error)){model.translationError=error.message||'English report translation could not be completed.';render();}}
     finally{if(current(version,options)&&model.translationKey===key){model.translationBusy=false;render();}}
   }

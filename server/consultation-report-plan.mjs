@@ -10,7 +10,7 @@ import {isRawReport,validateRawReportRecord,rawReportNotices} from '../public/ra
 
 export const CONSULTATION_REPORT_PLAN_VERSION='consultation-report-plan-v1';
 export const SCENARIO_REPORT_PLAN_VERSION='consultation-report-plan-v2-scenarios';
-export const consultationReportPlanVersion=snapshot=>isRawReport(snapshot)?'consultation-report-plan-v3-raw-quote':consultationConfiguration(snapshot).custom?SCENARIO_REPORT_PLAN_VERSION:CONSULTATION_REPORT_PLAN_VERSION;
+export const consultationReportPlanVersion=snapshot=>snapshot.executionSnapshot?.languageExecution?'native-consultation-report-plan-v1':isRawReport(snapshot)?'consultation-report-plan-v3-raw-quote':consultationConfiguration(snapshot).custom?SCENARIO_REPORT_PLAN_VERSION:CONSULTATION_REPORT_PLAN_VERSION;
 export const CONSULTATION_TRANSLATION_PROMPT_VERSION=`consultation-translation-segment-v2:${REPORT_TRANSLATION_PROMPT_VERSION}`;
 const clone=value=>structuredClone(value);
 const canonical=value=>Array.isArray(value)?'['+value.map(canonical).join(',')+']':value&&typeof value==='object'?'{'+Object.keys(value).sort().map(key=>JSON.stringify(key)+':'+canonical(value[key])).join(',')+'}':JSON.stringify(value);
@@ -50,8 +50,9 @@ function excerptContext(record){
  if(header.length+body.length<=budget)return header+body;
  let end=budget-header.length-tail.length;if(/[\uD800-\uDBFF]/.test(body[end-1])&&/[\uDC00-\uDFFF]/.test(body[end]))end--;return header+body.slice(0,end)+tail;
 }
-function issueRecord(record,dimension){
+function issueRecord(record,dimension,snapshot){
  const failed=record.final.filter(item=>item.verdict==='Fail'&&dimension.ruleIds.includes(item.ruleId||item.id));
+ if(snapshot?.nativeDisplay){const excerpts=selectConsultationCaseExcerpts(record),source=excerpts.length?excerpts.map(t=>t.text).join('\n'):record.conversation;let end=Math.min(source.length,6000);if(/[\uD800-\uDBFF]/.test(source[end-1])&&/[\uDC00-\uDFFF]/.test(source[end]))end--;return{id:record.id,reason:failed.map(r=>`${r.ruleId||r.id}: ${r.reason||''}`).join('\n'),conversation:source.slice(0,end)};}
  return{id:record.id,reason:failed.map(item=>`${item.label||item.ruleId||item.id}：${item.reason||'未提供具体判定理由。'}`).join('\n'),conversation:excerptContext(record)};
 }
 function oversizedIssues(input){return input.records.length>CONSULTATION_ENRICHMENT_LIMITS.issuesRecords||JSON.stringify(input).length>CONSULTATION_ENRICHMENT_LIMITS.issuesChars||Buffer.byteLength(JSON.stringify(input),'utf8')>CONSULTATION_ENRICHMENT_LIMITS.inputBytes;}
@@ -73,7 +74,7 @@ export function planConsultationReport(snapshot,configFingerprint){
  for(const dimension of config.report.sections.includes('improvements')?snapshot.basis.dimensions:[]){
   if(typeof dimension.key!=='string'||!dimension.key.trim()||!Array.isArray(dimension.ruleIds))storage();
   const selected=records.filter(record=>record.final.some(item=>item.verdict==='Fail'&&dimension.ruleIds.includes(item.ruleId||item.id))),groups=[];let group=[];
-  for(const record of selected){const candidate=[...group,issueRecord(record,dimension)];if(group.length&&oversizedIssues({category:dimension.key,records:candidate})){groups.push(group);group=[];}group.push(issueRecord(record,dimension));if(oversizedIssues({category:dimension.key,records:group})){groups.push(group);group=[];}}
+  for(const record of selected){const candidate=[...group,issueRecord(record,dimension,snapshot)];if(group.length&&oversizedIssues({category:dimension.key,records:candidate})){groups.push(group);group=[];}group.push(issueRecord(record,dimension,snapshot));if(oversizedIssues({category:dimension.key,records:group})){groups.push(group);group=[];}}
   if(group.length)groups.push(group);
   groups.forEach((items,index)=>{const unit=add('consultationIssues',`${dimension.label||dimension.key}原因 ${index+1}`,{category:dimension.key,recordIds:items.map(item=>item.id)});if(oversizedIssues({category:dimension.key,records:items}))unit.inputError=tooLarge();});
  }
@@ -95,7 +96,7 @@ export function consultationInputFor(snapshot,unit,prepared){
   if(unit.recordIds.length!==1||!consultationConfiguration(snapshot).customFields.length)storage();const input=scenarioInput(snapshot,records.get(unit.recordIds[0]));if(scenarioFieldsInputTooLarge(input))throw Object.assign(new Error(tooLarge().message),{code:'INPUT_TOO_LARGE',status:413});return input;
  }
  if(unit.kind!=='consultationIssues')storage();const dimension=snapshot.basis.dimensions.find(value=>value.key===unit.category);if(!dimension)storage();
- const input={category:unit.category,records:unit.recordIds.map(id=>issueRecord(records.get(id),dimension))};if(oversizedIssues(input))throw Object.assign(new Error(tooLarge().message),{code:'INPUT_TOO_LARGE',status:413});return input;
+ const input={category:unit.category,records:unit.recordIds.map(id=>issueRecord(records.get(id),dimension,snapshot))};if(oversizedIssues(input))throw Object.assign(new Error(tooLarge().message),{code:'INPUT_TOO_LARGE',status:413});return input;
 }
 
 export function mergeConsultationReport(snapshot,job,prepared,outputs){

@@ -76,6 +76,17 @@ test('read-only recovery also finds a saved derived job whose ID changed after a
  const f=setup();try{await f.client.create({jobId:'report-en-prior-config-recovery',source:{kind:'report',jobId:f.base.id},targetLang:'en'});const before=f.calls.filter(row=>row[0]==='create').length;f.manager.setActive(true);await flush();assert.equal(f.calls.filter(row=>row[0]==='create').length,before);assert.ok(f.manager.view(f.state,f.ui).includes('report-en-prior-config-recovery'));}finally{f.manager.close();}
 });
 
+test('persisted English delivery intent restores missing translations after restart without another click',async()=>{
+ const f=setup();f.base.options.reportLanguage='en';try{f.manager.setActive(true);await flush();assert.equal(f.calls.filter(x=>x[0]==='create').length,1);await f.manager.handleAction('business-download-xlsx');assert.equal(f.built[0][2].translationJob.status,'completed');}finally{f.manager.close();}
+});
+
+test('persisted English intent reuses a prior alternate job ID and resumes only interrupted jobs',async()=>{
+ for(const stopReason of ['interrupted','user_paused']){
+  const f=setup({derivedStatus:'paused'});f.base.options.reportLanguage='en';const answer=await f.client.create({jobId:'report-en-recovered-config',source:{kind:'report',jobId:f.base.id},targetLang:'en'});answer.job.stopReason=stopReason;
+  try{f.manager.setActive(true);await flush();assert.equal(f.calls.filter(x=>x[0]==='create').length,1);assert.deepEqual(f.calls.filter(x=>x[0]==='action').map(x=>x[2]),stopReason==='interrupted'?['resume']:[]);assert.ok(f.manager.view(f.state,f.ui).includes('report-en-recovered-config'));}finally{f.manager.close();}
+ }
+});
+
 test('navigation interrupts a derived GET without retaining busy or clearing a newer request owner',async()=>{
  const previous=getLocale();setLocale('en');const f=setup(),get=f.client.get;let releaseOld,releaseNew,gets=0;const oldPending=new Promise(resolve=>releaseOld=resolve),newPending=new Promise(resolve=>releaseNew=resolve);
  f.client.get=async id=>{gets++;if(gets===1)await oldPending;else if(gets===2)await newPending;return get(id);};

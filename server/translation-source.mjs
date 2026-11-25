@@ -64,6 +64,7 @@ export async function freezeTranslationSource({source,store,reportJobs,collectRe
  }else if(source.kind==='report'){
   if(!reportJobs?.getResult)throw new TranslationJobError('交付来源服务不可用。',503);
   const saved=await reportJobs.getResult(source.jobId);
+  if(saved.snapshot?.executionSnapshot?.languageExecution)throw new TranslationJobError('Native report prose is generated in the frozen task language; display translation is not applicable.',409);
   if(!['completed','completed_with_warnings'].includes(saved.job?.status))throw new TranslationJobError('请先完成基础交付任务，再翻译报告内容。',409);
   const collector=collectReportFields||(await import('../public/report-locale.mjs')).collectReportTranslationFields;
   fields=validateFields(collector(saved.snapshot,saved.enrichment));
@@ -79,11 +80,16 @@ export async function freezeTranslationSource({source,store,reportJobs,collectRe
   }else if(source.kind==='session-display'){
    const task=state.tasks?.find(item=>item.id===source.taskId),session=state.sessions?.find(item=>item.taskId===source.taskId&&item.id===source.sessionId);
    if(!task||!session)throw new TranslationJobError('翻译来源会话不存在或不属于当前任务。',404);
+   if(task.executionSnapshot?.languageExecution)throw new TranslationJobError('Native explanations are displayed directly in the frozen task language; display translation is not applicable.',409);
    fields=validateFields(sessionDisplayFields(session,task));data={task:pick(task,['id']),session:pick(session,['id','taskId'])};
   }else if(source.kind==='session'||source.kind==='task'){
    const task=state.tasks?.find(item=>item.id===source.taskId);if(!task)throw new TranslationJobError('翻译来源任务不存在。',404);
    const sessions=(state.sessions||[]).filter(item=>item.taskId===task.id&&(source.kind==='task'||item.id===source.sessionId));if(source.kind==='session'&&sessions.length!==1)throw new TranslationJobError('翻译来源会话不存在或不属于当前任务。',404);
    data={task:taskOf(task),basis:basisOf(getTaskBasis(state,task)),sessions:sessions.map(sessionOf)};
+   if(task.executionSnapshot?.languageExecution){
+    data={task:{id:task.id},sessions:sessions.map(s=>({id:s.id,turns:(s.turns||[]).map(t=>pick(t,['id','role','text'])),...(s.rawTranscript?{rawTranscript:{text:s.rawTranscript.text}}:{})}))};
+    fields=validateFields(data.sessions.flatMap(s=>s.rawTranscript?[{id:`sessions.${s.id}.rawTranscript.text`,text:s.rawTranscript.text}]:s.turns.filter(t=>t.text?.trim()).map(t=>({id:`sessions.${s.id}.turns.${t.id}.text`,text:t.text}))));
+   }
   }else if(source.kind==='rule'||source.kind==='policy'){
    const values=(catalog[source.kind==='rule'?'rules':'policies']||[]).filter(item=>item.id===source.id&&item.version===source.version);if(values.length!==1)throw new TranslationJobError('翻译来源的明确版本不存在。',404);data={[source.kind]:record(values[0],source.kind==='rule'?'rules':'policies')};
   }else if(source.kind==='catalog')data={catalog:(catalog[source.section]||[]).map(item=>pick(item,['id','version','title','category','scope']))};

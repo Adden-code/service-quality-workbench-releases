@@ -1,4 +1,5 @@
 import {hasReportClusterPolicy,reportClusterView,reportClusterTextParts} from './report-issue-clusters.mjs';
+import {nativeReportLanguage,createNativeReportLocale} from './native-report-locale.mjs';
 import {selectConsultationCaseExcerpts} from './consultation-excerpts.mjs';
 import {CONVERSATION_UNVERIFIED,groundedConversationQuote} from './role-evidence.mjs';
 import {reusableEnglishBaseTranslation} from './translation-language.mjs';
@@ -121,6 +122,7 @@ export function collectReportTranslationFields(snapshot,enrichment={}){
 export function groundedReportQuote(record,quote,turnId,mode){return record?.inputMode==='raw-transcript-v1'?groundedConversationQuote(record,quote):mode===CONVERSATION_UNVERIFIED?groundedConversationQuote(record,quote,turnId):Boolean(readable(quote)&&array(record?.turns).some(turn=>['客户','用户','customer','user'].includes(String(turn.role??'').toLowerCase())&&(turnId===undefined||String(turn.id)===String(turnId))&&String(turn.text??'').includes(quote)));}
 
 export function createReportLocale(snapshot,enrichment={},options={}){
+ if(nativeReportLanguage(snapshot))return createNativeReportLocale(snapshot,enrichment,{englishValue:englishReportValue});
  const language=options.language==='en'?'en':'zh',fields=collectReportTranslationFields(snapshot,enrichment),byId=new Map(fields.map(field=>[field.id,field])),byText=new Map(),entries=new Map(),reused=reportEnglishBaseTranslations(snapshot,enrichment),reusedByText=new Map();
  for(const value of reused.values())if(!reusedByText.has(value.source))reusedByText.set(value.source,value);
  for(const field of fields){if(!byText.has(field.text))byText.set(field.text,[]);byText.get(field.text).push(field.id);}

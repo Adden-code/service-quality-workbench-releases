@@ -1,4 +1,5 @@
 import {workspaceLanguage,assertNativeStageReady,languageError} from './public/workspace-language.mjs';
+import {nativeDisplayProjection} from './server/native-delivery.mjs';
 import {bilingualHashes,reviewBilingualMaterial} from './server/native-language-materials.mjs';
 import {createDiagnosticBundle} from './server/diagnostics.mjs';
 import {createWorkspaceTransport} from './server/workspace-transport.mjs';
@@ -46,7 +47,7 @@ async function body(req,max){
   return Buffer.concat(parts,size);
 }
 export async function createWorkbenchServer({dataDir=process.env.DEMO_DATA_DIR||path.join(project,'data'),publicDir=path.join(project,'public'),maxBodyBytes=32*1024*1024,fsOps,modelConfig,arkClient,catalogSeed=()=>loadBundledCatalogSeed(path.join(project,'resources')),sceneSeed=()=>loadBundledSceneSeed(path.join(project,'resources')),executionEngine=process.env.QA_AI_ENGINE||'native-node',bridgeToken=process.env.WORKBENCH_BRIDGE_TOKEN,workerPort=process.env.WORKBENCH_WORKER_PORT||4192,storageMode='single',automaticBuiltinUpgrade=true,nativeLanguageStage=Number(process.env.WORKBENCH_NATIVE_LANGUAGE_STAGE||0)}={}){
-  if(![0,1,2].includes(nativeLanguageStage))throw new WorkspaceError('Unsupported native language implementation stage.');
+  if(![0,1,2,3].includes(nativeLanguageStage))throw new WorkspaceError('Unsupported native language implementation stage.');
   if(!['native-node','spring-ai'].includes(executionEngine))throw new WorkspaceError('不支持的模型执行引擎。');
   const client=arkClient||createArkClient(executionEngine==='spring-ai'?{fetchImpl:createSpringAiFetch({bridgeToken,workerPort})}:{});
   const transport=createWorkspaceTransport();
@@ -69,7 +70,7 @@ export async function createWorkbenchServer({dataDir=process.env.DEMO_DATA_DIR||
       builtinUpgrade=automaticBuiltinUpgrade?await upgradeBuiltinOnStartup({store,dataDir:resolvedData,catalogSeed,sceneSeed,productVersion:PRODUCT_VERSION,recovery:startupRecovery}):{status:'current',recovery:startupRecovery};
       if(nativeLanguageStage>=1)await store.enableLanguageGovernance();
       if(nativeLanguageStage<2&&workspaceLanguage(store.transportSnapshot().state)?.mode==='native-v1'&&store.transportSnapshot().state.tasks.length)languageError('NATIVE_LANGUAGE_STAGE_PENDING','This stage 1 build cannot execute native tasks from a later-stage workspace. Restore its pre-upgrade backup or use the matching later build.');
-      if(nativeLanguageStage===2)for(const task of store.transportSnapshot().state?.tasks||[])if(task.executionSnapshot?.languageExecution)await store.readNativeMaterial(task);
+      if(nativeLanguageStage>=2)for(const task of store.transportSnapshot().state?.tasks||[])if(task.executionSnapshot?.languageExecution)await store.readNativeMaterial(task);
       importDrafts=await createImportDraftStore({dataDir:resolvedData,workspaceStore:store});config=modelConfig||await createModelConfig({dataDir:resolvedData});ai=await createAiService({store,modelConfig:config,client,traceStore:traces});reportJobs=await createReportJobs({maxAttempts:3,dataDir:resolvedData,store,modelConfig:config,client,traceStore:traces});adminDrafts=await createAdminDraftStore({dataDir:resolvedData});translationJobs=await createTranslationJobs({maxAttempts:3,dataDir:resolvedData,store,modelConfig:config,client,traceStore:traces,reportJobs,adminDrafts});rawStructureJobs=await createRawStructureJobs({dataDir:resolvedData,store,modelConfig:config,client,traceStore:traces});
     }
     catch(error){error.path??=openingPath;await closeServices();throw error;}
@@ -90,7 +91,7 @@ export async function createWorkbenchServer({dataDir=process.env.DEMO_DATA_DIR||
       if(req.headers['x-workspace-sync']==='records-v1')res.workspaceEnvelope=async value=>{
         if(!value||!(value.patch||value.unchanged||typeof value.initialized==='boolean'))return value;
         const {state:ignoredState,catalog:ignoredCatalog,patch:ignoredPatch,baseRevision:ignoredBase,revision:ignoredRevision,initialized:ignoredInit,unchanged:ignoredUnchanged,...extra}=value;
-        const current=store.transportSnapshot(),meta={...extra,token,aiRuntime:ai.runtime(),reviewCommands:true,productVersion:PRODUCT_VERSION,builtinUpgrade};
+        const current=store.transportSnapshot(),meta={...extra,token,aiRuntime:ai.runtime(),reviewCommands:true,productVersion:PRODUCT_VERSION,builtinUpgrade,nativeLanguageStage};
         if(!current.initialized)return{...current,...meta};
         const since=Number(req.headers['x-workspace-revision']);
         if(Number.isSafeInteger(since)&&since===current.revision&&req.headers['x-workspace-epoch']===token)return{initialized:true,revision:since,unchanged:true,...meta};
@@ -122,7 +123,13 @@ export async function createWorkbenchServer({dataDir=process.env.DEMO_DATA_DIR||
       }
       // Stage 1 deliberately has no native execution. A stale tab or direct API
       // cannot bypass the acceptance boundary. Legacy workspaces keep working.
-      if(!['GET','HEAD','OPTIONS'].includes(req.method)&&(/^\/api\/(ai|report-jobs|translation-jobs|raw-structure-jobs)(?:\/|$)/.test(pathname)||/^\/api\/tasks\/[^/]+\/ai(?:\/|$)/.test(pathname)||['/api/scene-config/prepare','/api/rules/prepare','/api/imports/prepare-mapping','/api/conversations/clean'].includes(pathname)))assertNativeStageReady(store.transportSnapshot().state,{stage:/^\/api\/(?:ai|tasks\/[^/]+\/ai)(?:\/|$)/.test(pathname)?nativeLanguageStage:1});
+      if(!['GET','HEAD','OPTIONS'].includes(req.method)&&(/^\/api\/(ai|report-jobs|translation-jobs|raw-structure-jobs)(?:\/|$)/.test(pathname)||/^\/api\/tasks\/[^/]+\/ai(?:\/|$)/.test(pathname)||['/api/scene-config/prepare','/api/rules/prepare','/api/imports/prepare-mapping','/api/conversations/clean'].includes(pathname)))assertNativeStageReady(store.transportSnapshot().state,{stage:/^\/api\/(?:ai|tasks\/[^/]+\/ai)(?:\/|$)/.test(pathname)||nativeLanguageStage>=3&&/^\/api\/(?:report-jobs|translation-jobs)(?:\/|$)/.test(pathname)?nativeLanguageStage:1});
+      const nativeMaterialRoute=pathname.match(/^\/api\/tasks\/([^/]+)\/native-material$/);
+      if(nativeMaterialRoute&&req.method==='GET'){
+        const task=store.transportSnapshot().state.tasks.find(t=>t.id===decodeURIComponent(nativeMaterialRoute[1]));
+        if(!task?.executionSnapshot?.languageExecution)throw new WorkspaceError('Native task not found.',404);
+        await json(res,200,{material:nativeDisplayProjection(task,await store.readNativeMaterial(task))});return;
+      }
       if(releasePart&&req.method==='POST'){if(req.headers.origin!==origin)throw new WorkspaceError('修改操作必须来自当前页面。',403);transport.release(releasePart[1]);res.writeHead(204,safeHeaders);res.end();return;}
       const part=pathname.match(/^\/api\/workspace\/parts\/([a-f0-9]{32})\/([a-f0-9]{64})\/(\d+)$/);
       if(part&&req.method==='GET'){const bytes=transport.page(part[1],part[2],Number(part[3]));res.writeHead(200,{...safeHeaders,'Content-Type':'application/octet-stream','Content-Length':bytes.length,'X-Response-Bytes':String(bytes.length),'X-Response-Budget':String(2*1024*1024)});res.end(bytes);return;}
@@ -421,7 +428,7 @@ export async function createWorkbenchServer({dataDir=process.env.DEMO_DATA_DIR||
       }
       if(pathname==='/api/workspace'){
         if(req.method==='GET'&&req.headers['x-workspace-sync']==='records-v1'){await json(res,200,{initialized:true});return;}
-        if(req.method==='GET'){const since=url.searchParams.get('since');await json(res,200,{...await(since!==null?store.changesSince(Number(since)):store.read()),token,aiRuntime:ai.runtime(),reviewCommands:true,productVersion:PRODUCT_VERSION,builtinUpgrade});return;}
+        if(req.method==='GET'){const since=url.searchParams.get('since');await json(res,200,{...await(since!==null?store.changesSince(Number(since)):store.read()),token,aiRuntime:ai.runtime(),reviewCommands:true,productVersion:PRODUCT_VERSION,builtinUpgrade,nativeLanguageStage});return;}
         if(req.method!=='PUT')throw new WorkspaceError('Method not allowed',405);
         requireMutation('application/json');const bytes=await body(req,maxBodyBytes);let request;
         try{request=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(bytes));}catch{throw new WorkspaceError('保存请求不是有效 JSON。');}

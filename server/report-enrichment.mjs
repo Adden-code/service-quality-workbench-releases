@@ -25,7 +25,7 @@ export class ReportEnrichmentError extends Error{
 }
 const invalidInput=()=>{throw new ReportEnrichmentError('INVALID_INPUT','报告分析输入、范围或字段无效。',400);};
 const invalidResult=()=>{throw new ReportEnrichmentError('INVALID_OUTPUT','报告分析结果的结构、行号、语种或证据不完整。',502);};
-function consultation(operation){try{return operation();}catch(error){if(error instanceof ConsultationEnrichmentError||error instanceof ScenarioFieldsError){const wrapped=new ReportEnrichmentError(error.code,error.message,error.status);if(error.traceOutput!==undefined)wrapped.traceOutput=error.traceOutput;throw wrapped;}throw error;}}
+function consultation(operation){try{return operation();}catch(error){if(error instanceof ConsultationEnrichmentError||error instanceof ScenarioFieldsError){const wrapped=new ReportEnrichmentError(error.code,error.message,error.status);if(error.traceOutput!==undefined)wrapped.traceOutput=error.traceOutput;if(error.diagnostic!==undefined)wrapped.diagnostic=error.diagnostic;throw wrapped;}throw error;}}
 function rows(value,max,fields,{nonempty=[]}={}){
   if(!Array.isArray(value)||value.length<1||value.length>max)invalidInput();
   const ids=new Set();
@@ -180,12 +180,12 @@ export function rebuildValidatedReportAudit(value,key){
   const {coercion,evidenceValidation,...rest}=value;
   return{...rest,...businessResult(key,value[key])};
 }
-function validateHighlights(value,input){
+function validateHighlights(value,input,{nativeProse=false}={}){
   if(!keys(value,['cases'])||!Array.isArray(value.cases)||value.cases.length!==Math.min(input.limit,input.candidates.length))invalidResult();
   const expected=new Map(input.candidates.map(item=>[item.id,item])),seen=new Set();
   return businessResult('cases',value.cases.map(rawItem=>{
     const {item,coercion}=normalizeBusinessItem('caseHighlights',rawItem);
-    if(!expected.has(item.id)||seen.has(item.id)||!Number.isSafeInteger(item.score)||item.score<1||item.score>5||!validText(item.commentary,2000)||!han(item.commentary)||!validText(item.quote,20000))invalidResult();
+    if(!expected.has(item.id)||seen.has(item.id)||!Number.isSafeInteger(item.score)||item.score<1||item.score>5||!validText(item.commentary,2000)||!nativeProse&&!han(item.commentary)||!validText(item.quote,20000))invalidResult();
     const evidenceValidation=validateBusinessQuote(expected.get(item.id).reply,item.quote,'quote','reply');
     seen.add(item.id);return{id:item.id,score:item.score,commentary:item.commentary,quote:item.quote,...(coercion?{coercion}:{}),...(evidenceValidation?{evidenceValidation}:{})};
   }));
@@ -215,17 +215,17 @@ function validateVoc(value,input){
   }));
 }
 const validators={translation:validateTranslation,caseHighlights:validateHighlights,issueClusters:validateClusters,voc:validateVoc};
-export function parseReportEnrichment(content,prepared,{allowPartial=false}={}){
+export function parseReportEnrichment(content,prepared,{allowPartial=false,nativeProse=false}={}){
   if(prepared?.kind==='scenarioFields')return consultation(()=>parseScenarioFields(content,prepared));
-  if(prepared?.kind==='consultationAnalysis'||prepared?.kind==='consultationIssues')return consultation(()=>parseConsultationEnrichment(content,prepared));
+  if(prepared?.kind==='consultationAnalysis'||prepared?.kind==='consultationIssues')return consultation(()=>parseConsultationEnrichment(content,prepared,{nativeProse}));
   if(!plain(prepared)||!kinds.has(prepared.kind))invalidInput();
   const input=normalizeInput(prepared.kind,prepared.input),valid=[];
   try{
     if(typeof content!=='string'||!content.trim()||content.length>2*1024*1024)invalidResult();
-    for(const candidate of jsonObjects(content)){try{valid.push(validators[prepared.kind](candidate,input));}catch(error){if(!(error instanceof ReportEnrichmentError))throw error;}}
+    for(const candidate of jsonObjects(content)){try{valid.push(validators[prepared.kind](candidate,input,{nativeProse}));}catch(error){if(!(error instanceof ReportEnrichmentError))throw error;}}
     if(!valid.length&&allowPartial&&['translation','caseHighlights'].includes(prepared.kind)){
       const candidates=jsonObjects(content);
-      if(candidates.length===1)return validatePartialReportResult(prepared.kind,candidates[0],input);
+      if(candidates.length===1)return validatePartialReportResult(prepared.kind,candidates[0],input,{nativeProse});
     }
     if(valid.length!==1)invalidResult();
     return valid[0];
@@ -236,7 +236,7 @@ export function parseReportEnrichment(content,prepared,{allowPartial=false}={}){
 }
 
 // Only independently validated items survive. Missing or invalid items stay visible.
-export function validatePartialReportResult(kind,value,rawInput){
+export function validatePartialReportResult(kind,value,rawInput,{nativeProse=false}={}){
  const input=normalizeInput(kind,rawInput),key=kind==='translation'?'items':'cases';
  if(!['translation','caseHighlights'].includes(kind)||!plain(value)||!Array.isArray(value[key]))invalidResult();
  if(kind==='caseHighlights'&&!keys(value,[key]))invalidResult();
@@ -246,7 +246,7 @@ export function validatePartialReportResult(kind,value,rawInput){
  for(const item of value[key]){
   const source=sources.find(s=>s.id===item?.id);
   if(!source||counts.get(item?.id)!==1){rejected.push(String(item?.id||''));continue;}
-  try{const unitInput=kind==='translation'?{...input,items:[source]}:{...input,candidates:[source],limit:1};accepted.push(...validators[kind]({[key]:[item]},unitInput)[key]);}
+  try{const unitInput=kind==='translation'?{...input,items:[source]}:{...input,candidates:[source],limit:1};accepted.push(...validators[kind]({[key]:[item]},unitInput,{nativeProse})[key]);}
   catch(error){if(error.code!=='INVALID_OUTPUT')throw error;rejected.push(item.id);}
  }
  if(!accepted.length)invalidResult();

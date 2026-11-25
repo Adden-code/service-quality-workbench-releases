@@ -15,6 +15,7 @@ export function reportOriginalAuditRows(snapshot,enrichment={}){
 export function reportOriginalAuditHtml(snapshot,enrichment={}){
  // Translation copies of full source conversations are retained in Excel only.
  const rows=reportOriginalAuditRows(snapshot,enrichment).filter(([id])=>!id.startsWith('savedTranslation.'));
- return rows.length?`<details class="original-ai-audit" data-original-ai-audit><summary>Original AI and judgment text — audit only</summary><p>Saved source-language text is retained for comparison. The report body uses English translations or an explicit translation status.</p><table><thead><tr><th>Saved field</th><th>Original text</th></tr></thead><tbody>${rows.map(([id,text])=>`<tr><td>${escape(id)}</td><td>${escape(text)}</td></tr>`).join('')}</tbody></table></details>`:'';
+ const native=snapshot.executionSnapshot?.languageExecution?.mode==='native-v1';
+ return rows.length?`<details class="original-ai-audit" data-original-ai-audit><summary>Original AI and judgment text — audit only</summary><p>${native?'Saved source-language text and internal audit labels are retained for comparison. The report body uses the task\'s frozen native language.':'Saved source-language text is retained for comparison. The report body uses English translations or an explicit translation status.'}</p><table><thead><tr><th>Saved field</th><th>Original text</th></tr></thead><tbody>${rows.map(([id,text])=>`<tr><td>${escape(id)}</td><td>${escape(text)}</td></tr>`).join('')}</tbody></table></details>`:'';
 }
 export const reportOriginalAuditSheet=(snapshot,enrichment={})=>({name:'Original AI Audit',headers:['Saved field','Original AI / judgment text'],rows:reportOriginalAuditRows(snapshot,enrichment)});

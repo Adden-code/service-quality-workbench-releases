@@ -10,7 +10,7 @@ const source=readFileSync(new URL('../public/app.mjs',import.meta.url),'utf8');
 const actionBody=source.slice(source.indexOf('async function modelAction(action){'),source.indexOf('function scheduleWorkspacePoll(){'));
 assert.ok(actionBody.includes('submitModelSettings')&&actionBody.includes('async function runAiTask('));
 const factory=new Function('env','submitModelSettings','modelConnectionBadge','taskStartSettings',`
-  let {dialog,ui,document,workspace,uiT,uiError,lockSaving,renderDialog,openModelSettings,crypto,state,adoptWorkspace,render,toast}=env;
+  let {dialog,ui,document,workspace,uiT,uiError,lockSaving,renderDialog,openModelSettings,crypto,state,adoptWorkspace,render,toast,reasonTranslations}=env;
   ${actionBody}
   return{modelAction,runAiTask,getDialog:()=>dialog,replaceDialog:value=>{dialog=value;}};
 `);
@@ -21,7 +21,7 @@ const decode=value=>String(value??'').replace(/&quot;/g,'"').replace(/&#39;/g,"'
 function deferred(){let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});return{promise,resolve,reject};}
 function harness({input=values(),initial=config(),testModel,readModelConfig,saveModelConfig}={}){
   const owner={type:'model-settings',config:structuredClone(initial)},ui={modelConfig:structuredClone(initial)},nodes=new Map();
-  let api,html='',renders=0,tests=0,reads=0,starts=0,opens=0,locked=false,backend=structuredClone(initial);
+  let api,html='',renders=0,tests=0,reads=0,starts=0,opens=0,recoveries=0,locked=false,backend=structuredClone(initial);
   function renderDialog(){
     const current=api?.getDialog()||owner;renders++;html=modelUi.modelDialog(current).body;nodes.clear();
     for(const [key,id] of Object.entries(ids)){
@@ -41,13 +41,13 @@ function harness({input=values(),initial=config(),testModel,readModelConfig,save
     async saveModelConfig(changes){return saveModelConfig?saveModelConfig(changes):{...initial,...changes,connectionTested:false,connectionTestedAt:null};},
     async startAI(){starts++;return{};},
   };
-  api=factory({dialog:owner,ui,document:{getElementById:id=>nodes.get(id)||null},workspace,uiT:text=>text,uiError:error=>error?.message||String(error),lockSaving:value=>{locked=value;},renderDialog,openModelSettings:async()=>{opens++;},crypto:{randomUUID:()=> 'controlled-run'},state:{tasks:[{id:'task'}]},adoptWorkspace(){},render(){},toast(){}},submitModelSettings,modelUi.modelConnectionBadge,taskStartSettings);
-  return{api,owner,ui,nodes,renderDialog,inputValues:()=>Object.fromEntries(Object.entries(ids).map(([key,id])=>[key,nodes.get(id)?.value])),get visibleStatus(){return nodes.get('model-connection-status')?.innerHTML||html;},get html(){return html;},get renders(){return renders;},get tests(){return tests;},get reads(){return reads;},get starts(){return starts;},get opens(){return opens;},get locked(){return locked;}};
+  api=factory({reasonTranslations:{configurationRecovered(){recoveries++;}},dialog:owner,ui,document:{getElementById:id=>nodes.get(id)||null},workspace,uiT:text=>text,uiError:error=>error?.message||String(error),lockSaving:value=>{locked=value;},renderDialog,openModelSettings:async()=>{opens++;},crypto:{randomUUID:()=> 'controlled-run'},state:{tasks:[{id:'task'}]},adoptWorkspace(){},render(){},toast(){}},submitModelSettings,modelUi.modelConnectionBadge,taskStartSettings);
+  return{api,owner,ui,nodes,renderDialog,inputValues:()=>Object.fromEntries(Object.entries(ids).map(([key,id])=>[key,nodes.get(id)?.value])),get visibleStatus(){return nodes.get('model-connection-status')?.innerHTML||html;},get html(){return html;},get renders(){return renders;},get tests(){return tests;},get reads(){return reads;},get starts(){return starts;},get opens(){return opens;},get recoveries(){return recoveries;},get locked(){return locked;}};
 }
 
 test('a failed connection retest refreshes public config, removes verified badge and closes the AI start gate',async()=>{
   const h=harness();await h.api.modelAction('model-test');
-  assert.equal(h.tests,1);assert.equal(h.reads,1);assert.equal(h.owner.config.connectionTested,false);assert.equal(h.ui.modelConfig.connectionTested,false);
+  assert.equal(h.tests,1);assert.equal(h.reads,1);assert.equal(h.recoveries,0);assert.equal(h.owner.config.connectionTested,false);assert.equal(h.ui.modelConfig.connectionTested,false);
   assert.match(h.visibleStatus,/当前连接尚未测试/);assert.doesNotMatch(h.visibleStatus,/当前连接已测试通过/);
   assert.equal(h.nodes.get('model-error').textContent,'Controlled connection failure');assert.equal(h.locked,false);
   await h.api.runAiTask('task');assert.equal(h.opens,1);assert.equal(h.starts,0);
@@ -72,7 +72,7 @@ test('dirty and invalid settings never send a connection test or overwrite the e
 test('successful tests adopt the returned public configuration and permit AI start',async()=>{
   const confirmed={...config(),connectionTestedAt:'2026-11-10T10:00:00+08:00'},h=harness({testModel:async()=>({modelId:confirmed.model,config:confirmed})});
   await h.api.modelAction('model-test');assert.deepEqual(h.owner.config,confirmed);assert.deepEqual(h.ui.modelConfig,confirmed);assert.match(h.visibleStatus,/当前连接已测试通过/);assert.equal(h.reads,0);
-  await h.api.runAiTask('task');assert.equal(h.starts,1);assert.equal(h.opens,0);
+  assert.equal(h.recoveries,1);await h.api.runAiTask('task');assert.equal(h.starts,1);assert.equal(h.opens,0);
 });
 test('a stale action cannot write feedback or rerender after another modal replaces its owner',async()=>{
   for(const replacement of [{type:'help'},{type:'model-settings',config:{...config(),model:'another-open-dialog'}}]){

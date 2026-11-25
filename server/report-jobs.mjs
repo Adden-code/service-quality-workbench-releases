@@ -1,4 +1,8 @@
 import {activeDesktopJobCount} from './desktop-activity.mjs';
+import {nativeExecutionContext} from './native-language-execution.mjs';
+import {nativeDisplayProjection,nativeTaskFromDelivery,assertNativeDeliveryLanguage} from './native-delivery.mjs';
+import {assertNativeReportCoverage,nativeReportMessages,parseNativeReportEnrichment,nativeReportWireValue,nativeReportRetryFeedback} from './native-report-language.mjs';
+import {prepareReportEnrichment} from './report-enrichment.mjs';
 import {deliveryUnitProgress,projectIncompleteDelivery,adoptIncompleteDelivery} from './delivery-progress.mjs';
 import {REPORT_CLUSTER_POLICY,hasReportClusterPolicy,buildReportIssueClusters} from '../public/report-issue-clusters.mjs';
 import {createJobScheduler,validJobConcurrency,serialOperations,interleaveReportUnits} from './bounded-job-scheduler.mjs';
@@ -66,7 +70,7 @@ function inputFor(snapshot,unit,prepared){
  return{records:rows.map(row=>({id:row.id,comment:row.raw22[8]}))};
 }
 function progress(job){return deliveryUnitProgress(job.units);}
-function summary(job){return{schemaVersion:1,id:job.id,...(job.reportClusterPolicy?{reportClusterPolicy:job.reportClusterPolicy}:{}),concurrency:job.concurrency??2,taskId:job.taskId,taskName:job.taskName,createdAt:job.createdAt,updatedAt:job.updatedAt,status:job.status,phase:job.phase,options:copy(job.options),snapshotFingerprint:job.snapshotFingerprint,sourceRevision:job.sourceRevision,progress:progress(job),warningsCount:job.units.filter(unit=>unit.status==='failed').length,resultAvailable:true,stopReason:job.stopReason||'',modelConfig:copy(job.modelConfig),traceRunIds:[...job.traceRunIds],nodes:job.units.map(({id,kind,label,status,attempts,durationMs,errorCode,error,notApplicable})=>({id,kind,label,status,attempts,durationMs,...(notApplicable?{notApplicable:true}:{}),...(errorCode?{errorCode,error}:{})}))};}
+function summary(job){return{schemaVersion:1,id:job.id,...(job.nativeLanguage?{nativeLanguage:job.nativeLanguage}:{}),...(job.reportClusterPolicy?{reportClusterPolicy:job.reportClusterPolicy}:{}),concurrency:job.concurrency??2,taskId:job.taskId,taskName:job.taskName,createdAt:job.createdAt,updatedAt:job.updatedAt,status:job.status,phase:job.phase,options:copy(job.options),snapshotFingerprint:job.snapshotFingerprint,sourceRevision:job.sourceRevision,progress:progress(job),warningsCount:job.units.filter(unit=>unit.status==='failed').length,resultAvailable:true,stopReason:job.stopReason||'',modelConfig:copy(job.modelConfig),traceRunIds:[...job.traceRunIds],nodes:job.units.map(({id,kind,label,status,attempts,durationMs,errorCode,error,notApplicable})=>({id,kind,label,status,attempts,durationMs,...(notApplicable?{notApplicable:true}:{}),...(errorCode?{errorCode,error}:{})}))};}
 function bounded(value,secret){const clean=input=>typeof input==='string'?(secret?input.split(secret).join('[已隐藏密钥]'):input):Array.isArray(input)?input.map(clean):input&&typeof input==='object'?Object.fromEntries(Object.entries(input).filter(([key])=>!['apikey','authorization','proxyauthorization'].includes(key.toLowerCase().replace(/[\s_-]/g,''))).map(([key,item])=>[key,clean(item)])):input??null;const safe=clean(value),text=JSON.stringify(safe),bytes=Buffer.byteLength(text);return bytes<=16384?safe:{truncated:true,bytes,limitBytes:16384,sha256:hash(text),preview:text.slice(0,3000),...(safe?.kind==='consultationAnalysis'&&safeConsultationDiagnostic(safe.diagnostic)?{diagnostic:safeConsultationDiagnostic(safe.diagnostic)}:{}),reason:'节点快照已摘要；原文及完整成功输出保留在交付任务中。'};}
 async function abortable(operation,signal){if(signal.aborted)throw Object.assign(new Error('interrupted'),{code:'INTERRUPTED'});let cancel;try{return await Promise.race([Promise.resolve().then(operation),new Promise((_,reject)=>{cancel=()=>reject(Object.assign(new Error('interrupted'),{code:'INTERRUPTED'}));signal.addEventListener('abort',cancel,{once:true});})]);}finally{if(cancel)signal.removeEventListener('abort',cancel);}}
 
@@ -117,12 +121,31 @@ export async function createReportJobs({dataDir,store,modelConfig,client,traceSt
   try{return validateReportTranslationResult({items:value?.items},input);}
   catch(error){if(error.code==='INVALID_OUTPUT')error.traceOutput={kind:'translation',content:JSON.stringify(value??null).slice(0,20000)};throw error;}
  }
+ async function nativeContextOf(snapshot){
+  if(!snapshot.executionSnapshot?.languageExecution)return null;
+  const task=nativeTaskFromDelivery(snapshot),frozen=await store.readNativeMaterial(task),context=nativeExecutionContext(task,frozen);
+  assertNativeReportCoverage(context);
+  if(hash(snapshot.nativeDisplay)!==hash(nativeDisplayProjection(task,frozen,{delivery:true})))throw new ReportJobError('Native display material differs from the frozen reviewed package.',500,'REPORT_STORAGE');
+  return context;
+ }
+ function validateNativeOutput(output,kind,input,context,{saved=false}={}){
+  if(!context||kind==='translation')return output;
+  const prepared=nativeReportMessages(prepareReportEnrichment(kind,input),{...context,attempt:output.languageValidation?.attempt||context.attempt});
+  const validated=parseNativeReportEnrichment(JSON.stringify(nativeReportWireValue(output,kind)),prepared,{allowPartial:true});
+  if(output.partial){
+   const old=output.partial,expected=validated.partial||(kind==='caseHighlights'?{expectedCount:Math.min(input.limit,input.candidates.length),acceptedCount:validated.cases.length,missingIds:input.candidates.filter(c=>!validated.cases.some(v=>v.id===c.id)).map(c=>c.id)}:null);
+   if(!expected||old.expectedCount!==expected.expectedCount||old.acceptedCount!==expected.acceptedCount||hash(old.missingIds)!==hash(expected.missingIds)||!Array.isArray(old.rejectedIds)||old.rejectedIds.some(id=>typeof id!=='string'||id.length>1024))throw new ReportJobError('Native partial-result audit does not match its accepted records.',500,'REPORT_STORAGE');
+   validated.partial=copy(old);
+  }
+  if(saved&&(hash(output.nativeContract)!==hash(validated.nativeContract)||hash(output.languageValidation)!==hash(validated.languageValidation)||hash(output.coercion??null)!==hash(validated.coercion??null)||hash(output.evidenceValidation??null)!==hash(validated.evidenceValidation??null)))throw new ReportJobError('Native output audit does not match its frozen language contract.',500,'REPORT_STORAGE');
+  return{...output,...validated};
+ }
  function savedConfig(job){const current=modelConfig.getPrivate(),selected=modelConfigSnapshot(current);if(selected.baseUrl!==job.modelConfig.baseUrl||selected.authMode!==job.modelConfig.authMode)throw new ReportJobError('模型地址或认证方式已变化，请恢复原设置后继续，或重新生成交付任务。',409);return{...copy(job.modelConfig),apiKey:job.modelConfig.authMode==='none'?null:current.apiKey,configured:current.configured};}
  async function resultOf(job){
   job=await visibleJob(job);
   if((await snapshotOf(job)).deliveryType==='consultation-v1'){
-   const snapshot=await snapshotOf(job),prepared=plan(snapshot,job.modelConfigFingerprint),saved=new Map();
-   for(const unit of job.units)if(unit.status==='completed'||unit.partialResult===true)saved.set(unit.id,await outputOf(job,unit));
+   const snapshot=await snapshotOf(job),prepared=plan(snapshot,job.modelConfigFingerprint),saved=new Map(),nativeContext=await nativeContextOf(snapshot);
+   for(const unit of job.units)if(unit.status==='completed'||unit.partialResult===true)saved.set(unit.id,validateNativeOutput(await outputOf(job,unit),unit.kind,inputFor(snapshot,unit,prepared),nativeContext,{saved:true}));
    return{snapshot:copy(snapshot),enrichment:mergeConsultationReport(snapshot,job,prepared,saved),job:summary(job)};
   }
   const snapshot=await snapshotOf(job),prepared=plan(snapshot,job.modelConfigFingerprint),translations=Object.fromEntries(snapshot.records.map(row=>[row.id,Object.fromEntries(['comment','reply','humanIssue'].map(field=>[field,{status:'empty',text:''}]))])),states=new Map();
@@ -158,7 +181,7 @@ export async function createReportJobs({dataDir,store,modelConfig,client,traceSt
    let value;await traceStore.step(runId,id,bounded(input,work.config.apiKey),async()=>{try{value=await operation();return bounded(value,work.config.apiKey);}catch(error){if(error.traceOutput!==undefined)error.traceOutput=bounded(error.traceOutput,work.config.apiKey);throw error;}});return value;
   }
   try{
-   const snapshot=await snapshotOf(job),prepared=plan(snapshot,job.modelConfigFingerprint);
+   const snapshot=await snapshotOf(job),prepared=plan(snapshot,job.modelConfigFingerprint),nativeContext=await nativeContextOf(snapshot);
    await step('snapshot','冻结交付来源',{source:job.taskId,sourceRevision:job.sourceRevision,fingerprint:job.snapshotFingerprint,records:snapshot.records.length,conclusionMode:snapshot.conclusionMode,targetLang:snapshot.targetLang},async()=>({frozen:true}));
    await scheduler.run(interleaveReportUnits(job.units.filter(unit=>!['completed','failed'].includes(unit.status))),async unit=>{
     if(!canDispatch())return;if(unit.partialResult===true)await outputOf(job,unit);job.phase=unit.kind;
@@ -167,7 +190,9 @@ export async function createReportJobs({dataDir,store,modelConfig,client,traceSt
      unit.status='running';unit.attempts++;unit.startedAt=now();unit.completedAt=null;delete unit.errorCode;delete unit.error;await persist(job);const started=Date.now();let input,output,error,retryFeedback;
      try{
       input=inputFor(snapshot,unit,prepared);
-      if(unit.kind==='consultationAnalysis'){
+      if(nativeContext&&unit.kind!=='translation'&&unit.history.some(item=>item.errorCode==='invalid_output')){
+       retryFeedback=nativeReportRetryFeedback({code:'INVALID_OUTPUT',nativeLanguageFailure:unit.history.at(-1)?.nativeLanguageFailure},unit.kind);
+      }else if(unit.kind==='consultationAnalysis'){
        const previous=unit.history.findLast(item=>item.errorCode==='invalid_output');
        if(previous){const saved=await files.attempt(job.id,unit.id,previous.attempt);retryFeedback=consultationRetryFeedback(saved?.output?.diagnostic,input);}
       }else if(['caseHighlights','issueClusters','voc'].includes(unit.kind)&&unit.history.some(item=>item.errorCode==='invalid_output')){
@@ -181,7 +206,7 @@ export async function createReportJobs({dataDir,store,modelConfig,client,traceSt
         for(const item of generated.items){const key=prepared.translations.get(item.id)?.key;if(!key)throw Object.assign(new Error('unexpected translation id'),{code:'INVALID_OUTPUT'});await files.putCache(key,{translation:item.translation,isTargetLanguage:item.isTargetLanguage,detectedLanguage:item.detectedLanguage,...(item.confidence!==undefined?{confidence:item.confidence}:{})});cached.set(item.id,item);}
         if(input.items.some(item=>!cached.has(item.id))){const partial={items:input.items.filter(item=>cached.has(item.id)).map(item=>cached.get(item.id))};if(partial.items.length){unit.partialResult=true;unit.resultSha256=await files.saveResult(job.id,unit.id,partial);outputs.set(job.id+'/'+unit.id,partial);}throw Object.assign(new Error('missing translation; valid items preserved'),{code:'INVALID_OUTPUT'});}return{items:input.items.map(item=>cached.get(item.id))};
        }
-       if(unit.kind==='scenarioFields'){
+       if(unit.kind==='scenarioFields'&&!nativeContext){
         if(typeof unit.cacheKey!=='string'||!/^[a-f0-9]{64}$/.test(unit.cacheKey))throw new ReportJobError('场景字段缓存配置缺失。',500,'REPORT_STORAGE');
         const cached=await files.cache(unit.cacheKey);if(cached){try{return validateScenarioFieldsResult(cached,input);}catch{throw new ReportJobError('场景字段缓存与冻结输入不一致。',500,'REPORT_STORAGE');}}
         if(!await scheduler.ready())throw Object.assign(new Error('interrupted'),{code:'INTERRUPTED'});if(work.config.configured===false||(work.config.authMode!=='none'&&!work.config.apiKey))throw Object.assign(new Error('not configured'),{code:'NOT_CONFIGURED'});
@@ -189,13 +214,29 @@ export async function createReportJobs({dataDir,store,modelConfig,client,traceSt
         await files.putCache(unit.cacheKey,validated);return validated;
        }
        if(!await scheduler.ready())throw Object.assign(new Error('interrupted'),{code:'INTERRUPTED'});if(work.config.configured===false||(work.config.authMode!=='none'&&!work.config.apiKey))throw Object.assign(new Error('not configured'),{code:'NOT_CONFIGURED'});
-       return scheduler.request(()=>abortable(()=>client.enrichBusinessReport({config:work.config,kind:unit.kind,input,...(retryFeedback?{retryFeedback}:{}),signal:work.controller.signal,trace:{step:(node,data,operation)=>step(`${unit.id}-a${unit.attempts}-${node}`,`${unit.label} · ${node}`,data,operation)}}),work.controller.signal),unit.attempts);
+       const context=nativeContext?{...nativeContext,attempt,maxAttempts}:null;
+       const generated=await scheduler.request(()=>abortable(()=>client.enrichBusinessReport({config:work.config,kind:unit.kind,input,...(context?{nativeContext:context}:{}),...(retryFeedback?{retryFeedback}:{}),signal:work.controller.signal,trace:{step:(node,data,operation)=>step(`${unit.id}-a${unit.attempts}-${node}`,`${unit.label} · ${node}`,data,operation)}}),work.controller.signal),unit.attempts);
+       return validateNativeOutput(generated,unit.kind,input,context);
       });
      }catch(cause){if(isStorageError(cause)){work.stopped=true;throw cause;}error=cause;const code=failure(cause).errorCode;if(fatal(code))job.stopReason=code;}
      unit.durationMs+=Math.max(0,Date.now()-started);unit.completedAt=now();
      if(!error&&output?.partial)error=Object.assign(new Error('partial report output'),{code:'INVALID_OUTPUT',partialOutput:output});
-     if(error?.partialOutput){const old=outputs.get(job.id+'/'+unit.id);let safe=copy(error.partialOutput);if(old?.cases?.length){safe.cases=[...new Map([...old.cases,...safe.cases].map(c=>[c.id,c])).values()].sort((a,b)=>b.score-a.score).slice(0,input.limit);safe=rebuildValidatedReportAudit(safe,'cases');if(safe.cases.length>=Math.min(input.limit,input.candidates.length)){delete safe.partial;error=null;output=safe;}}unit.partialResult=Boolean(error);if(error){error.partialOutput=safe;unit.resultSha256=await files.saveResult(job.id,unit.id,safe);outputs.set(job.id+'/'+unit.id,safe);}}
-     const problem=error?failure(error):null;const info={attempt:unit.attempts,startedAt:unit.startedAt,completedAt:unit.completedAt,durationMs:Math.max(0,Date.now()-started),status:error?'failed':'completed',...(problem||{}),...outputAudit(error?.partialOutput??output,work.config.apiKey)};unit.history.push(info);
+     if(error?.partialOutput){
+      const old=outputs.get(job.id+'/'+unit.id);let safe=copy(error.partialOutput);
+      if(old?.cases?.length){
+       safe.cases=[...new Map([...old.cases,...safe.cases].map(c=>[c.id,c])).values()].sort((a,b)=>b.score-a.score).slice(0,input.limit);safe=rebuildValidatedReportAudit(safe,'cases');
+       const complete=safe.cases.length>=Math.min(input.limit,input.candidates.length);
+       if(complete)delete safe.partial;
+       else safe.partial={expectedCount:Math.min(input.limit,input.candidates.length),acceptedCount:safe.cases.length,missingIds:input.candidates.filter(c=>!safe.cases.some(v=>v.id===c.id)).map(c=>c.id),rejectedIds:[...new Set([...(old.partial?.rejectedIds||[]),...(safe.partial?.rejectedIds||[])])]};
+       if(nativeContext)safe=validateNativeOutput(safe,unit.kind,input,{...nativeContext,attempt,maxAttempts});
+       if(complete){error=null;output=safe;}
+      }
+      unit.partialResult=Boolean(error);if(error){error.partialOutput=safe;unit.resultSha256=await files.saveResult(job.id,unit.id,safe);outputs.set(job.id+'/'+unit.id,safe);}
+     }
+     const problem=error?failure(error):null;const info={attempt:unit.attempts,startedAt:unit.startedAt,completedAt:unit.completedAt,durationMs:Math.max(0,Date.now()-started),status:error?'failed':'completed',...(problem||{}),...(error?.nativeLanguageFailure?{nativeLanguageFailure:true}:{}),...(output?.languageValidation?{languageValidation:output.languageValidation}:{}),...outputAudit(error?.partialOutput??output,work.config.apiKey)};unit.history.push(info);
+     // Full unaccepted prose remains a separate audit artifact. It never enters
+     // the successful-result/cache channel or changes an inspection verdict.
+     if(error?.nativeCandidate)await files.saveCandidate(job.id,unit.id,unit.attempts,copy(error.nativeCandidate));
      await files.saveAttempt(job.id,unit.id,unit.attempts,{...info,input:bounded(input,work.config.apiKey),...(retryFeedback?{validationFeedback:bounded(retryFeedback,work.config.apiKey)}:{}),output:bounded(error?.traceOutput??output??null,work.config.apiKey)});
      if(!error){delete unit.partialResult;const safe=copy(output);unit.resultSha256=await files.saveResult(job.id,unit.id,safe);outputs.set(job.id+'/'+unit.id,safe);unit.status='completed';await persist(job);break;}
      const willRetry=canDispatch()&&retryable(problem.errorCode)&&attempt<maxAttempts;unit.status=closing||work.paused||problem.errorCode==='interrupted'||willRetry?'pending':'failed';Object.assign(unit,problem);await persist(job);
@@ -217,7 +258,10 @@ export async function createReportJobs({dataDir,store,modelConfig,client,traceSt
   create(input){return serial(async()=>{
    if(closing)throw new ReportJobError('服务正在关闭。',503);if(!input||typeof input!=='object'||Array.isArray(input)||Object.keys(input).some(key=>!['jobId','taskId','conclusionMode','targetLang','reportLanguage','roleEvidenceMode','concurrency'].includes(key))||(input.concurrency!==undefined&&!validJobConcurrency(input.concurrency))||(input.reportLanguage!==undefined&&!['zh','en'].includes(input.reportLanguage)))throw new ReportJobError('交付任务参数无效。');
    const id=reportJobId(input.jobId);if(typeof input.taskId!=='string'||!input.taskId.trim()||input.taskId.length>160)throw new ReportJobError('请选择质检任务。');
-   const doc=await store.read();const allowed=doc.state.tasks.find(t=>t.id===input.taskId)?.executionSnapshot?.runtime.values.outputLanguages;if(allowed&&!allowed.includes(input.targetLang??'zh'))throw new ReportJobError('输出语种不在本任务冻结的运行参数内，请使用已选语种。');if(isVoidedTask(doc.state.tasks.find(task=>task.id===input.taskId)))throw new ReportJobError('作废任务仅供追溯，不能生成新交付物。');let snapshot;try{const task=doc.state.tasks?.find(value=>value.id===input.taskId),original=isConsultationTask(doc.state,task)?await loadConsultationOriginal({state:doc.state,task,store}):undefined;snapshot=createBusinessDeliverySnapshot(doc.state,{taskId:input.taskId,conclusionMode:input.conclusionMode??'combined',targetLang:input.targetLang??'zh',roleEvidenceMode:input.roleEvidenceMode,original,now:now()});}catch(error){throw new ReportJobError(error.message);}
+   const doc=await store.read(),task=doc.state.tasks.find(t=>t.id===input.taskId),nativeLanguage=assertNativeDeliveryLanguage(task,input),targetLang=input.targetLang??nativeLanguage??'zh';
+   const allowed=task?.executionSnapshot?.runtime.values.outputLanguages;if(allowed&&!allowed.includes(targetLang))throw new ReportJobError('输出语种不在本任务冻结的运行参数内，请使用已选语种。');if(isVoidedTask(task))throw new ReportJobError('作废任务仅供追溯，不能生成新交付物。');
+   let nativeDisplay;if(nativeLanguage){const frozen=await store.readNativeMaterial(task);assertNativeReportCoverage(nativeExecutionContext(task,frozen));nativeDisplay=nativeDisplayProjection(task,frozen,{delivery:true});}
+   let snapshot;try{const original=isConsultationTask(doc.state,task)?await loadConsultationOriginal({state:doc.state,task,store}):undefined;snapshot=createBusinessDeliverySnapshot(doc.state,{taskId:input.taskId,conclusionMode:input.conclusionMode??'combined',targetLang,roleEvidenceMode:input.roleEvidenceMode,original,now:now()});if(nativeDisplay)snapshot.nativeDisplay=nativeDisplay;}catch(error){throw new ReportJobError(error.message);}
    // Stamp only newly created report snapshots. Never backfill saved jobs.
    snapshot.reportClusterPolicy=REPORT_CLUSTER_POLICY;
    const signature=fingerprint(snapshot);
@@ -228,7 +272,7 @@ export async function createReportJobs({dataDir,store,modelConfig,client,traceSt
    const existing=[...jobs.values()].filter(job=>job.taskId===input.taskId&&job.snapshotFingerprint===signature).sort((a,b)=>b.createdAt.localeCompare(a.createdAt))[0];
    if(existing)return{...summary(await visibleJob(existing)),reused:true};
    const config=modelConfig.getPrivate(),saved=modelConfigSnapshot(config),configFingerprint=modelConfigFingerprint(config),prepared=plan(snapshot,configFingerprint),createdAt=now();
-   const job={schemaVersion:1,id,reportClusterPolicy:snapshot.reportClusterPolicy,concurrency:input.concurrency??concurrency,taskId:input.taskId,taskName:snapshot.taskName,createdAt,updatedAt:createdAt,status:'running',phase:'snapshot',completedAt:null,sourceRevision:doc.revision??null,snapshotFingerprint:signature,options:{conclusionMode:snapshot.conclusionMode,targetLang:snapshot.targetLang,...(input.reportLanguage?{reportLanguage:input.reportLanguage}:{}),...(snapshot.roleEvidenceMode===CONVERSATION_UNVERIFIED?{roleEvidenceMode:CONVERSATION_UNVERIFIED}:{})},modelConfig:saved,modelConfigFingerprint:configFingerprint,units:prepared.units,traceRunIds:[],round:1,resumeCount:0,...(snapshot.deliveryType==='consultation-v1'?{planVersion:consultationReportPlanVersion(snapshot)}:{})};
+   const job={schemaVersion:1,id,...(nativeLanguage?{nativeLanguage}:{}),reportClusterPolicy:snapshot.reportClusterPolicy,concurrency:input.concurrency??concurrency,taskId:input.taskId,taskName:snapshot.taskName,createdAt,updatedAt:createdAt,status:'running',phase:'snapshot',completedAt:null,sourceRevision:doc.revision??null,snapshotFingerprint:signature,options:{conclusionMode:snapshot.conclusionMode,targetLang:snapshot.targetLang,...(input.reportLanguage?{reportLanguage:input.reportLanguage}:{}),...(snapshot.roleEvidenceMode===CONVERSATION_UNVERIFIED?{roleEvidenceMode:CONVERSATION_UNVERIFIED}:{})},modelConfig:saved,modelConfigFingerprint:configFingerprint,units:prepared.units,traceRunIds:[],round:1,resumeCount:0,...(snapshot.deliveryType==='consultation-v1'?{planVersion:consultationReportPlanVersion(snapshot)}:{})};
    // Reserve the deliverable in the workspace serial queue before writing its frozen output.
    // This closes the race with task invalidation; a failed file write remains conservatively logged.
    if(store.updateTaskLifecycle)await store.updateTaskLifecycle([input.taskId],'deliverable',{deliveryId:id,kind:'business-report'});
@@ -237,7 +281,7 @@ export async function createReportJobs({dataDir,store,modelConfig,client,traceSt
   async list(taskId){return Promise.all([...jobs.values()].filter(job=>!taskId||job.taskId===taskId).sort((a,b)=>b.createdAt.localeCompare(a.createdAt)).map(async job=>summary(await visibleJob(job))));},
   async get(id){return summary(await visibleJob(find(id)));},
   async getResult(id){return resultOf(copy(find(id)));},
-  async getNode(id,nodeId){const job=await visibleJob(find(id)),unit=job.units.find(node=>node.id===nodeId);if(!unit)throw new ReportJobError('生成节点不存在。',404);const attempts=[];for(const item of unit.history){const detail=await files.attempt(id,nodeId,item.attempt);if(detail)attempts.push(detail);}return{node:summary(job).nodes.find(node=>node.id===nodeId),attempts,input:attempts.at(-1)?.input??null,output:attempts.at(-1)?.output??null};},
+  async getNode(id,nodeId){const job=await visibleJob(find(id)),unit=job.units.find(node=>node.id===nodeId);if(!unit)throw new ReportJobError('生成节点不存在。',404);const attempts=[];for(const item of unit.history){const detail=await files.attempt(id,nodeId,item.attempt);if(detail){const nativeCandidate=item.nativeLanguageFailure?await files.candidate(id,nodeId,item.attempt):null;attempts.push({...detail,...(nativeCandidate?{nativeCandidate}:{})});}}return{node:summary(job).nodes.find(node=>node.id===nodeId),attempts,input:attempts.at(-1)?.input??null,output:attempts.at(-1)?.output??null};},
   pause(id){return serial(async()=>{const job=find(id);if(active.has(id)){const work=active.get(id);work.paused=true;work.scheduler?.wake();}if(job.status==='running'){job.status='paused';job.completedAt=null;job.stopReason='user_paused';await persist(job);}return summary(job);});},
   resume(id){return serial(async()=>{const job=find(id);if(closing)throw new ReportJobError('服务正在关闭。',503);if(active.has(job.id))throw new ReportJobError('请求仍在收尾，请稍后继续。',409);if(job.status!=='paused')return summary(await visibleJob(job));await snapshotOf(job);const config=savedConfig(job);adoptTranslationFailures(job,await visibleJob(job));job.status='running';delete job.stopReason;job.resumeCount++;await persist(job);launch(job,config);return summary(job);});},
   retry(id){return serial(async()=>{const job=find(id);if(closing)throw new ReportJobError('服务正在关闭。',503);if(active.has(job.id))throw new ReportJobError('已有生成请求正在执行。',409);await snapshotOf(job);const config=savedConfig(job);adoptTranslationFailures(job,await visibleJob(job));if(!job.units.some(unit=>unit.status==='failed'))return summary(job);for(const unit of job.units)if(unit.status==='failed'){unit.status='pending';delete unit.error;delete unit.errorCode;}job.status='running';delete job.stopReason;job.round++;await persist(job);launch(job,config);return summary(job);});},

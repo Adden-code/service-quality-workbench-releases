@@ -1,3 +1,4 @@
+import {createNativeReviewMaterialController,nativeReviewLanguage} from './native-review-language.mjs';
 import {workspaceLanguage} from './workspace-language.mjs';
 import {languageAcceptanceScreen,enforceWorkspaceLocale} from './workspace-language-ui.mjs';
 import {startupMaintenanceNotice} from './startup-maintenance-view.mjs';
@@ -15,7 +16,7 @@ import {localBasisDate,defaultSceneRuleIds} from './catalog-scenes.mjs';
 import {saveClassificationReview} from './ecommerce-classification-review.mjs';
 import {createRuleCalibrationManager} from './rule-calibration-ui.mjs';
 import {taskLifecycleDialog} from './task-lifecycle-ui.mjs';
-import {usableTaskState,isVoidedTask} from './task-lifecycle.mjs';
+import {usableTaskState,isVoidedTask,isInactiveTask} from './task-lifecycle.mjs';
 import {parseConsultationFile,updateRawImportOptions} from './raw-import-flow.mjs';
 import {RAW_INPUT_MODE,RAW_EVIDENCE_VERSION,isRawTranscriptSession} from './raw-transcript.mjs';
 import {createRawWorkbenchManager} from './raw-workbench-manager.mjs';
@@ -81,11 +82,12 @@ const searchKeys={'task-search':'taskQuery','review-search':'reviewQuery','catal
 const ui={dataMode:'manual',page:'overview',period:'month',dashboardTaskId:INITIAL_TASK_ID,taskStatus:'全部',taskQuery:'',catalogQuery:'',reviewTaskId:INITIAL_TASK_ID,reviewStatus:'待确认',reviewQuery:'',selectedId:'',openRules:[],highlightedTurns:[],resultFilter:'全部',exportTaskId:INITIAL_TASK_ID,includePending:false,reportPeriod:'month',reportTaskId:INITIAL_TASK_ID};
 const workspace=createWorkspaceClient({structuralSharing:true,storage:{getItem:key=>localStorage.getItem(key)}});
 const reasonTranslations=createReasonTranslationController({getToken:()=>workspace.token,onChange:()=>redrawLocalized()});
+const nativeMaterials=createNativeReviewMaterialController({api:businessExportApi,onChange:()=>redrawLocalized()});
 const adminDraftTranslations=createAdminDraftTranslationController({getToken:()=>workspace.token,onChange:()=>redrawLocalized()});
 const contentTranslations=createContentTranslationController({getToken:()=>workspace.token,onChange:()=>redrawLocalized()});
 const workflowManager=createWorkflowManager({getToken:()=>workspace.token,openModal:openDialog,closeModal:()=>closeDialog({force:true}),onChange:()=>{if(dialog?.type==='workflow')renderDialog();},toast,download});
 let state=createBusinessState(),catalog=createBusinessCatalog();
-let languageChoice='',languageSaving=false;
+let languageChoice='',languageSaving=false,languageStage=0;
 const businessExportManager=createBusinessExportManager({api:businessExportApi,getState:()=>scoped(),getUI:()=>ui,onRender:()=>render(),download,notify:toast});
 const rawWorkbenchManager=createRawWorkbenchManager({getState:()=>state,getUI:()=>ui,getDialog:()=>dialog,getModelConfig:()=>ui.modelConfig,openDialog,closeDialog,renderDialog,render,toast,download,api:businessExportApi,configureModel:origin=>openModelSettings({returnDialog:origin}),commit,selectSession,reinspect:beginRawReinspection});
 const rawReviewTimer=createRawReviewTimer({getSession:current,isActive:()=>ui.page==='review'&&(!dialog||['raw-edit','confirm-review','pending','policy','rule'].includes(dialog.type))&&document.visibilityState!=='hidden'&&(document.hasFocus?.()??true),save:packet=>commit(latest=>recordRawReviewTime(latest,packet),undefined,{reviewSessionId:packet.sessionId,deferRender:true,command:{action:'time',sessionId:packet.sessionId,packet,at:packet.now}})});
@@ -96,13 +98,13 @@ async function businessExportApi(url,{method='GET',body,signal}={}){
   const response=await fetch(url,{method,signal,headers:{'X-Workspace-Token':token,...(body!==undefined?{'Content-Type':'application/json'}:{})},...(body!==undefined?{body:JSON.stringify(body)}:{})});
   const value=await response.json();if(!response.ok)throw Object.assign(new Error(value.error||'交付任务请求失败。'),{status:response.status});if(method==='POST'&&url==='/api/report-jobs'&&!workspace.hasPending&&!workspace.conflicted)adoptWorkspace(await workspace.refresh());return value;
 }
-try{const loaded=await workspace.load();state=loaded.state;catalog=loaded.catalog;applyBundledRuleEnglish(catalog,state);}
+try{const loaded=await workspace.load();state=loaded.state;catalog=loaded.catalog;languageStage=loaded.nativeLanguageStage||0;applyBundledRuleEnglish(catalog,state);}
 catch(error){storageWarning=getLocale()==='en'?'Workspace loading is delayed. Retrying automatically; editing will unlock when loading succeeds.':`工作区暂未加载：${error.message} 正在自动重试，恢复后自动解除只读。`;persistenceBlocked=true;workspaceLoadFailed=true;}
 try{const response=await fetch('/api/build-info',{cache:'no-store'});if(response.ok)ui.buildInfo=await response.json();}catch{}
 const reviewRoutingController=createReviewRoutingController({getState:()=>scoped(),getUI:()=>ui,getDialog:()=>dialog,getRoot:()=>document.getElementById('overlay-root'),openDialog,closeDialog,commit,render,renderDialog,navigate:()=>go('review'),selectSession,now:reviewNow});
 const qualityInsightsManager=createQualityInsightsManager({getState:()=>state,getDialog:()=>dialog,openDialog,renderDialog,download,beforeAuditDownload:async({taskIds})=>{const ids=taskIds.filter(id=>!isVoidedTask(state.tasks.find(task=>task.id===id)));await registerAuditDelivery(ids,'review-audit');}});
 const diagnosticManager=createDiagnosticManager({getToken:()=>workspace.token,getDialog:()=>dialog,openDialog,renderDialog,download});
-const workspaceBackupManager=createWorkspaceBackupManager({getToken:()=>workspace.token,getDialog:()=>dialog,openDialog,renderDialog,download,reload:()=>location.reload(),getStatus:()=>({saving,hasPending:workspace.hasPending,conflicted:workspace.conflicted,readOnly:persistenceBlocked,revision:workspace.revision,editing:Boolean(dialog&&!['workspace-backup','workspace-usage','shortcuts-help','help'].includes(dialog.type)),suspendedDraft:Boolean(suspendedTaskDraft),composing:Boolean(composingInput),timerPending:rawReviewTimer.pendingCount>0}),onReloadRequired:()=>{clearTimeout(pollTimer);persistenceBlocked=true;adminDraftTranslations.stop();contentTranslations.stop();workflowManager.stop();rawWorkbenchManager.stop();businessExportManager.setActive(false);}});
+const workspaceBackupManager=createWorkspaceBackupManager({getToken:()=>workspace.token,getDialog:()=>dialog,openDialog,renderDialog,download,reload:()=>location.reload(),getStatus:()=>({saving,hasPending:workspace.hasPending,conflicted:workspace.conflicted,readOnly:persistenceBlocked,revision:workspace.revision,editing:Boolean(dialog&&!['workspace-backup','workspace-usage','shortcuts-help','help'].includes(dialog.type)),suspendedDraft:Boolean(suspendedTaskDraft),composing:Boolean(composingInput),timerPending:rawReviewTimer.pendingCount>0}),onReloadRequired:()=>{clearTimeout(pollTimer);persistenceBlocked=true;adminDraftTranslations.stop();contentTranslations.stop();reasonTranslations.stop();nativeMaterials.stop();workflowManager.stop();rawWorkbenchManager.stop();businessExportManager.setActive(false);}});
 const pendingResolutionManager=createPendingResolutionManager({getState:()=>scoped(),getUI:()=>ui,getDialog:()=>dialog,openDialog,closeDialog,renderDialog,render,commit,selectSession,now:reviewNow});
 const cleaningManager=createConversationCleaningManager({configureModel:origin=>openModelSettings({returnDialog:origin}),getState:()=>state,getDialog:()=>dialog,getModelConfig:()=>ui.modelConfig,openDialog,closeDialog:()=>closeDialog({force:true}),renderDialog,toast,
   prepareConversationCleaning:(input,options)=>workspace.prepareConversationCleaning(input,options),uploadSource:file=>workspace.uploadSource(file),
@@ -191,7 +193,7 @@ function setMode(mode){
   Object.assign(ui,{reviewStatus:'待确认',reviewQuery:'',taskQuery:'',taskStatus:'全部',showReviewRecords:false,selectedId:'',openRules:[],highlightedTurns:[]});
   const session=scoped().sessions[0];if(session)selectSession(session.id,false);
 }
-function adoptWorkspace(value){state=value.state;catalog=value.catalog;applyBundledRuleEnglish(catalog,state);ui.aiRuntime=value.aiRuntime||ui.aiRuntime;catalogManager.replaceCatalog(catalog);storageWarning=value.aiRuntime?.error||'';persistenceBlocked=false;workspaceLoadFailed=false;workspaceReadFailures=0;}
+function adoptWorkspace(value){if(Number.isInteger(value.nativeLanguageStage))languageStage=value.nativeLanguageStage;state=value.state;catalog=value.catalog;applyBundledRuleEnglish(catalog,state);ui.aiRuntime=value.aiRuntime||ui.aiRuntime;catalogManager.replaceCatalog(catalog);storageWarning=value.aiRuntime?.error||'';persistenceBlocked=false;workspaceLoadFailed=false;workspaceReadFailures=0;}
 function lockSaving(value){
   saving=value;document.body.classList.toggle('workspace-saving',value);
   for(const el of document.querySelectorAll('button,input,select,textarea')){
@@ -250,7 +252,7 @@ function restoreFocus(identity){
 }
 function render(){
   if(composingInput?.isConnected)return;
-  const languageScreen=languageAcceptanceScreen(state,{choice:languageChoice,saving:languageSaving});
+  const languageScreen=languageAcceptanceScreen(state,{choice:languageChoice,saving:languageSaving,stage:languageStage});
   if(languageScreen){renderUpdate(document.getElementById('app'),languageScreen);document.title=uiT('会话质检工作台');return;}
   const samePage=lastPage===ui.page;
   const disclosures=[...document.querySelectorAll('#app details[data-disclosure][open]')].map(el=>el.dataset.disclosure);
@@ -269,7 +271,7 @@ function render(){
       <div class="sidebar-bottom"><div class="sidebar-foot"><span>本机业务工作区</span><details class="build-identity"><summary>${e(workspace.snapshot?.productVersion||clientBuild.version)}</summary><p>${e(ui.buildInfo?.buildId||clientBuild.buildId)}</p><p>${e(ui.buildInfo?.sourceCommit?.slice(0,12)||'development')}</p><p>${e(ui.buildInfo?.resourceFingerprint?.slice(0,16)||'')}</p></details></div><button class="btn small" data-act="workspace-backup-open">${workspaceBackupText('备份与恢复','Backup and restore')}</button></div>
     </aside>
     <main class="main"><header class="topbar ${isReview?'review-topbar':''}">${isReview?reviewHeader(viewState,ui):uiHtml`<div class="breadcrumb"><span>服务领域</span>${icon('chevron',11)}<span>会话质检</span>${icon('chevron',11)}<strong>${uiT(page[1])}</strong></div>`}
-      <div class="top-tools">${isReview?uiHtml`<button class="text-btn" data-act="review-shortcuts-help">审核快捷键</button>`:''}<div class="locale-switch" role="group" aria-label="${getLocale()==='en'?'Interface language':'界面语言'}"><button data-act="ui-locale" data-locale="zh" aria-pressed="${getLocale()==='zh'}" lang="zh-CN">中文</button><button data-act="ui-locale" data-locale="en" aria-pressed="${getLocale()==='en'}" lang="en">English</button></div><span class="workspace-timezone" title="${getLocale()==='en'?'All displayed dates and timing use UTC+08:00':'所有日期及计时使用北京时间 UTC+08:00'}">UTC+08:00</span><button class="btn small" data-act="model-settings" aria-label="模型设置">模型设置</button><button class="icon-btn" data-act="help" title="使用指引" aria-label="使用指引">${icon('info',18)}</button>${isReview?'':uiHtml`<button class="profile text-btn" data-act="workspace-usage" aria-label="工作区用量"><span class="avatar">质检</span><span>本机工作区</span></button>`}</div>
+      <div class="top-tools">${isReview?uiHtml`<button class="text-btn" data-act="review-shortcuts-help">审核快捷键</button>`:''}<div class="locale-switch" role="group" aria-label="${getLocale()==='en'?'Interface language':'界面语言'}"><button data-act="ui-locale" data-locale="zh" ${workspaceLanguage(state)?.mode==='native-v1'?'disabled':''} aria-pressed="${getLocale()==='zh'}" lang="zh-CN">中文</button><button data-act="ui-locale" data-locale="en" ${workspaceLanguage(state)?.mode==='native-v1'?'disabled':''} aria-pressed="${getLocale()==='en'}" lang="en">English</button></div><span class="workspace-timezone" title="${getLocale()==='en'?'All displayed dates and timing use UTC+08:00':'所有日期及计时使用北京时间 UTC+08:00'}">UTC+08:00</span><button class="btn small" data-act="model-settings" aria-label="模型设置">模型设置</button><button class="icon-btn" data-act="help" title="使用指引" aria-label="使用指引">${icon('info',18)}</button>${isReview?'':uiHtml`<button class="profile text-btn" data-act="workspace-usage" aria-label="工作区用量"><span class="avatar">质检</span><span>本机工作区</span></button>`}</div>
     </header>${ui.buildInfo&&clientBuild.buildId!==ui.buildInfo.buildId?uiHtml`<div class="notice-banner warning" role="alert">页面与本机服务版本不同，请重新加载页面。<button class="btn" data-act="reload-build">重新加载页面</button></div>`:''}<div id="workspace-warning"></div><div class="content">${content}</div></main></div>`,{reuse:samePage&&isReview});
   renderStorageWarning();
   for(const key of disclosures){const node=document.querySelector(`#app details[data-disclosure="${CSS.escape(key)}"]`);if(node)node.open=true;}
@@ -283,8 +285,15 @@ function render(){
   renderDialog(false);
   businessExportManager.setActive(page[0]==='exports'&&businessAvailable);
   rawReviewTimer.sync();
-  if(ui.page==='review'&&current())reasonTranslations.ensure(current(),{task:state.tasks.find(task=>task.id===current().taskId)});
-  if(ui.page==='exports')for(const session of exportSessions(scoped(),ui).slice(0,7))reasonTranslations.ensure(session,{task:state.tasks.find(task=>task.id===session.taskId)});
+  const reviewDisplayQueue=ui.page==='review'?reviewQueue(scoped(),ui):[];
+  const visibleReview=reviewDisplayQueue.find(s=>s.id===ui.selectedId)||reviewDisplayQueue[0];
+  const displaySessions=ui.page==='review'?(isInactiveTask(state.tasks.find(t=>t.id===ui.reviewTaskId))&&ui.historySessionFilter?reviewDisplayQueue.filter(s=>s.id===ui.historySessionFilter):[visibleReview,...reviewDisplayQueue.filter(s=>s.id!==visibleReview?.id)].filter(Boolean)):ui.page==='exports'?exportSessions(scoped(),ui):[];
+  const taskFor=session=>state.tasks.find(task=>task.id===session.taskId);
+  const first=displaySessions[0];if(first)reasonTranslations.ensure(first,{task:taskFor(first)});
+  reasonTranslations.ensureNext(displaySessions.slice(1),{taskFor});
+  const displayTasks=new Map(displaySessions.slice(0,8).map(session=>[session.taskId,taskFor(session)]));
+  if(ui.page==='tasks'&&ui.taskDetailId)displayTasks.set(ui.taskDetailId,state.tasks.find(task=>task.id===ui.taskDetailId));
+  for(const task of displayTasks.values())if(nativeReviewLanguage(task))nativeMaterials.ensure(task);
 }
 function redrawLocalized(){
   // Rendering a translated view must not replace unsaved user input with a
@@ -513,6 +522,7 @@ async function modelAction(action){
     }else{
       if(outcome.result.config)owner.config=ui.modelConfig=outcome.result.config;
       owner.message=`连接成功 · ${outcome.result.modelId||outcome.input.model}`;
+      reasonTranslations.configurationRecovered();
     }
     if(dialog===owner)document.getElementById('model-feedback').textContent=uiT(owner.message);
   }catch(error){
@@ -581,6 +591,8 @@ document.addEventListener('click',async event=>{
     if(action==='reload-build'){location.reload();return;}
     if(action==='task-problem-summary'){const task=state.tasks.find(t=>t.id===id);if(task){const text=taskProblemSummary(task,ui.buildInfo||{version:workspace.snapshot?.productVersion});try{await navigator.clipboard.writeText(text);toast(getLocale()==='en'?'Problem summary copied':'问题摘要已复制');}catch{download(text,'quality-problem-summary.json','application/json');}}return;}
     if(action==='admin-draft-translation-retry'){adminDraftTranslations.ensure(dialog,{retry:true});return;}
+    if(action==='native-material-retry'){const task=state.tasks.find(t=>t.id===button.dataset.task);if(task)await nativeMaterials.ensure(task,{retry:true});return;}
+    if(action==='native-language-retry'){const session=state.sessions.find(s=>s.id===button.dataset.session),task=state.tasks.find(t=>t.id===session?.taskId);if(!session||!nativeReviewLanguage(task))return;await rawReviewTimer.flush();lockSaving(true);try{await businessExportApi(`/api/tasks/${encodeURIComponent(task.id)}/ai/retry-native-language`,{method:'POST',body:{sessionId:session.id}});adoptWorkspace(await workspace.refresh());}finally{lockSaving(false);}render();toast(getLocale()==='en'?'Native-language retry saved. Review the original and retry audit.':'冻结语种重试已保存，请核对结果与重试留痕。');return;}
     if(action==='reason-translation-retry'){const session=button.dataset.session?state.sessions.find(s=>s.id===button.dataset.session):current();if(session)reasonTranslations.ensure(session,{retry:true,task:state.tasks.find(task=>task.id===session.taskId)});return;}
     if(action==='language-pick'){languageChoice=button.dataset.language;render();return;}
     if(action==='language-confirm'){languageSaving=true;render();try{adoptWorkspace(await workspace.chooseLanguage(languageChoice));enforceWorkspaceLocale(state);}finally{languageSaving=false;render();}return;}
@@ -861,7 +873,7 @@ window.addEventListener('beforeunload',event=>{if(workspaceBackupManager.isBusy)
 matchMedia('(prefers-reduced-motion: reduce)').addEventListener('change',event=>{if(event.matches){cancelAllMotion();if(closingOverlay)finishOverlayClose?.();}});
 if(navigation.some(n=>n[0]===location.hash.slice(1)))ui.page=location.hash.slice(1);
 setLocale(getLocale());document.title=uiT('会话质检工作台');
-window.addEventListener('pagehide',()=>{adminDraftTranslations.stop();contentTranslations.stop();reasonTranslations.stop();});
+window.addEventListener('pagehide',()=>{adminDraftTranslations.stop();contentTranslations.stop();reasonTranslations.stop();nativeMaterials.stop();});
 setMode('manual');
 try{ui.modelConfig=await workspace.readModelConfig();}catch{ui.modelConfig={configured:false,keyConfigured:false,model:'glm-5.3-flash'};}
 render();

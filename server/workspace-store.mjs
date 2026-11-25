@@ -154,7 +154,7 @@ export async function createWorkspaceStore({dataDir,fsOps=fs,catalogSeed=null,sc
   }
   async function checkSources(state,catalog){
     for(const task of state.tasks||[])if(task.executionSnapshot?.languageExecution){
-      if(nativeLanguageStage!==2)languageError('NATIVE_LANGUAGE_STAGE_PENDING','Use the stage 2 interpreter for native task data.');
+      if(nativeLanguageStage<2)languageError('NATIVE_LANGUAGE_STAGE_PENDING','Use a stage 2 or later interpreter for native task data.');
       await readNativeMaterial(task);
     }
     const sceneSources=[...(state.sceneConfigurations||[]).flatMap(c=>c.sourceRefs||[]),...(state.scenePackageDrafts||[]).flatMap(d=>d.package?.configuration?.sourceRefs||[])];
@@ -256,7 +256,7 @@ export async function createWorkspaceStore({dataDir,fsOps=fs,catalogSeed=null,sc
       if(input.baseRevision!==document.revision)languageError('LANGUAGE_REVISION_CONFLICT','Reload before freezing language materials.');
       const registry=clone(document.state.languageMaterials||{schemaVersion:1,releases:[],freezes:[]}),materials=[];
       for(const hash of input.materialHashes){if(!registry.releases.some(r=>r.contentHash===hash))languageError('LANGUAGE_MATERIAL_MISSING','Only published materials may enter an execution snapshot.');materials.push(JSON.parse(await fsOps.readFile(path.join(directory,'language-materials',hash+'.json'),'utf8')));}
-      const frozen=freezeNativeLanguage(workspaceLanguage(document.state),{materials,promptId:input.promptId,glossaryId:input.glossaryId,...(nativeLanguageStage===2?{languageValidatorVersion:NATIVE_LANGUAGE_VALIDATOR}:{})}),hash=languageHash(frozen),state=clone(document.state);
+      const frozen=freezeNativeLanguage(workspaceLanguage(document.state),{materials,promptId:input.promptId,glossaryId:input.glossaryId,...(nativeLanguageStage>=2?{languageValidatorVersion:NATIVE_LANGUAGE_VALIDATOR}:{})}),hash=languageHash(frozen),state=clone(document.state);
       if(!registry.freezes.some(r=>r.hash===hash))registry.freezes.push({hash,languageExecution:frozen.languageExecution});state.languageMaterials=registry;
       state.languageAudit.push({id:input.operationId,action:'freeze-material',actor:input.actor,at:new Date().toISOString(),reason:input.reason,before:null,after:{hash,languageExecution:frozen.languageExecution}});
       validateWorkspace(state,document.catalog,document.state,{trustedLanguage:true});await writeLanguageArtifact(hash,frozen);
@@ -351,7 +351,7 @@ export async function createWorkspaceStore({dataDir,fsOps=fs,catalogSeed=null,sc
         const deletedEvents=catalog=>(catalog?.events||[]).filter(event=>(document.catalog?.deletedRules||[]).some(entry=>event.kind==='rules'&&entry.id===event.id&&entry.version===event.version));
         if(canonical(deletedEvents(request.catalog))!==canonical(deletedEvents(document.catalog)))throw new WorkspaceError('已删除规则的历史操作记录不可改写。');
         if((document.catalog?.rules||[]).some(old=>!request.catalog?.rules?.some(next=>next.id===old.id&&next.version===old.version)))throw new WorkspaceError('删除规则须使用专用入口并检查任务引用。');
-        validateWorkspace(request.state,request.catalog,document.state,{authenticateNewSnapshots:true,allowNativeTaskCreation:nativeLanguageStage===2});
+        validateWorkspace(request.state,request.catalog,document.state,{authenticateNewSnapshots:true,allowNativeTaskCreation:nativeLanguageStage>=2});
         try{validateRuleSetCatalogTransition(document.catalog,request.catalog);}catch(error){throw new WorkspaceError(error.message);}
         await checkSources(request.state,request.catalog);
         const monitored=monitorCalibrations(request.state);

@@ -168,7 +168,7 @@ function validateQuote(record,quote,eligible,path,declaredTurn){
  if(!record.conversation.includes(quote))invalidOutput('quote_not_in_conversation',path,details);
  if(declaredTurn?!eligible.has(declaredTurn.id):!matched.some(turn=>eligible.has(turn.id)))invalidOutput('quote_matches_non_customer_turn',path,details);
 }
-function validateAnalysis(value,input){
+function validateAnalysis(value,input,{nativeProse=false}={}){
  if(!exact(value,['items'])||!Array.isArray(value.items)||value.items.length!==1||!plain(value.items[0]))invalidOutput('invalid_analysis_structure','items');
  const result={...value.items[0]},record=input.record;
  const {fields,voc:includeVoc}=selection(input);
@@ -179,8 +179,8 @@ function validateAnalysis(value,input){
  }
  if(!exact(result,analysisKeys(input)))invalidOutput('invalid_analysis_fields','items[0]');
  if(result.id!==record.id)invalidOutput('record_id_mismatch','items[0].id');
- if(fields.includes('salesStage')&&(!['售前','售中','售后','待判定'].includes(result.salesStage)||!text(result.salesSubstage,200)||!han(result.salesSubstage)))invalidOutput('invalid_sales_stage','items[0].salesStage');
- if(fields.includes('demandSummary')&&(!text(result.demandSummary,2000)||!han(result.demandSummary)))invalidOutput('invalid_demand_summary','items[0].demandSummary');
+ if(fields.includes('salesStage')&&(!['售前','售中','售后','待判定'].includes(result.salesStage)||!text(result.salesSubstage,200)||!nativeProse&&!han(result.salesSubstage)))invalidOutput('invalid_sales_stage','items[0].salesStage');
+ if(fields.includes('demandSummary')&&(!text(result.demandSummary,2000)||!nativeProse&&!han(result.demandSummary)))invalidOutput('invalid_demand_summary','items[0].demandSummary');
  if(fields.includes('intent')){
  if(!text(result.intentLabel,200)||!text(result.intentReferenceId,600,true))invalidOutput('invalid_intent','items[0].intentLabel');
  if(!input.taxonomy.length){if(result.intentLabel!=='未配置分类体系'||result.intentReferenceId!=='')invalidOutput();}
@@ -209,27 +209,27 @@ function validateAnalysis(value,input){
  if(includeVoc){
  const voc=result.voc,inScope=['负向','中性'].includes(result.sentiment);
  if(!exact(voc,['valid','scene','painPoint','reason','evidenceQuote']))invalidOutput('invalid_voc_structure','items[0].voc');
- if(typeof voc.valid!=='boolean'||!CONSULTATION_VOC_SCENES.includes(voc.scene)||!text(voc.painPoint,2000,!voc.valid)||!text(voc.reason,2000)||!han(voc.reason)||!text(voc.evidenceQuote,20000,true))invalidOutput('invalid_voc_fields','items[0].voc');
- if(voc.valid?(!inScope||!han(voc.painPoint)||!voc.evidenceQuote.trim()):voc.painPoint!==''||voc.scene!=='其他')invalidOutput('invalid_voc_scope','items[0].voc');
+ if(typeof voc.valid!=='boolean'||!CONSULTATION_VOC_SCENES.includes(voc.scene)||!text(voc.painPoint,2000,!voc.valid)||!text(voc.reason,2000)||!nativeProse&&!han(voc.reason)||!text(voc.evidenceQuote,20000,true))invalidOutput('invalid_voc_fields','items[0].voc');
+ if(voc.valid?(!inScope||!nativeProse&&!han(voc.painPoint)||!voc.evidenceQuote.trim()):voc.painPoint!==''||voc.scene!=='其他')invalidOutput('invalid_voc_scope','items[0].voc');
  if(voc.evidenceQuote)validateQuote(record,voc.evidenceQuote,eligible,'items[0].voc.evidenceQuote');
  if(inScope&&(raw||eligible.size)&&!voc.evidenceQuote.trim())invalidOutput('missing_voc_quote','items[0].voc.evidenceQuote');
  }
  return{items:[{...clone(result),...(raw?{speakerAttribution:'unverified'}:{})}]};
 }
-function validateIssues(value,input){
+function validateIssues(value,input,{nativeProse=false}={}){
  if(!exact(value,['clusters'])||!Array.isArray(value.clusters)||!value.clusters.length||value.clusters.length>input.records.length)invalidOutput();
  const expected=new Set(input.records.map(record=>record.id)),seen=new Set();
  for(const cluster of value.clusters){
-  if(!exact(cluster,['label','summary','memberIds','action'])||!text(cluster.label,160)||!han(cluster.label)||!text(cluster.summary,2000)||!han(cluster.summary)||!text(cluster.action,2000)||!han(cluster.action)||!Array.isArray(cluster.memberIds)||!cluster.memberIds.length)invalidOutput();
+  if(!exact(cluster,['label','summary','memberIds','action'])||!text(cluster.label,160)||!nativeProse&&!han(cluster.label)||!text(cluster.summary,2000)||!nativeProse&&!han(cluster.summary)||!text(cluster.action,2000)||!nativeProse&&!han(cluster.action)||!Array.isArray(cluster.memberIds)||!cluster.memberIds.length)invalidOutput();
   for(const member of cluster.memberIds){if(!expected.has(member)||seen.has(member))invalidOutput();seen.add(member);}
  }
  if(seen.size!==expected.size)invalidOutput();return clone(value);
 }
-export function parseConsultationEnrichment(content,prepared){
+export function parseConsultationEnrichment(content,prepared,{nativeProse=false}={}){
  if(!plain(prepared)||!kinds.has(prepared.kind))invalidInput();const input=normalizeInput(prepared.kind,prepared.input);
  try{
   if(typeof content!=='string'||!content.trim()||content.length>2*1024*1024)invalidOutput('invalid_content','$');const values=[],failures=[];
-  for(const candidate of jsonObjects(content)){try{values.push(prepared.kind==='consultationAnalysis'?validateAnalysis(candidate,input):validateIssues(candidate,input));}catch(error){if(!(error instanceof ConsultationEnrichmentError))throw error;failures.push(error);}}
+  for(const candidate of jsonObjects(content)){try{values.push(prepared.kind==='consultationAnalysis'?validateAnalysis(candidate,input,{nativeProse}):validateIssues(candidate,input,{nativeProse}));}catch(error){if(!(error instanceof ConsultationEnrichmentError))throw error;failures.push(error);}}
   if(!values.length){if(failures.length===1)throw failures[0];invalidOutput('no_valid_object','$',failures.length?{issues:failures.slice(0,8).map(error=>error.diagnostic)}:{});}
   if(values.length!==1)invalidOutput('ambiguous_valid_objects','$');return values[0];
  }catch(error){if(error instanceof ConsultationEnrichmentError)error.traceOutput={...diagnostics(content,prepared.kind),diagnostic:safeConsultationDiagnostic(error.diagnostic)};throw error;}

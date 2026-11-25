@@ -70,13 +70,14 @@ function validateOriginal(original,sessions){
 }
 function resultItem(rule,result,source,session){
  const evidence=Array.isArray(result?.evidence)?[...result.evidence]:[];
+ const native=result?.languageValidation?{languageValidation:clone(result.languageValidation),...(result.nativeContract?{nativeContract:clone(result.nativeContract)}:{})}:{};
  if(isRawReport(session)){
   const quotes=clone(result?.evidenceQuotes||[]);
   if(evidence.length||quotes.some(item=>!rawSavedQuoteMatches(session.rawTranscript.text,item?.quote,result?.rawValidation).length||JSON.stringify(rawSavedQuoteMatches(session.rawTranscript.text,item?.quote,result?.rawValidation))!==JSON.stringify(item.matches))||result?.rawValidation&&result.rawValidation.textSha256!==session.rawTranscript.textSha256)fail('原文证据引文或来源摘要与本行不一致，不能生成交付物。');
-  return{id:rule.id,ruleId:rule.id,label:label(rule),category:category(rule),verdict:normalize(result?.verdict),reason:String(result?.reason??''),evidence:[],evidenceQuotes:quotes,turnRefs:clone(result?.turnRefs||[]),...(result?.rawValidation?{rawValidation:clone(result.rawValidation)}:{}),source:result?source:'none'};
+  return{id:rule.id,ruleId:rule.id,label:label(rule),category:category(rule),verdict:normalize(result?.verdict),reason:String(result?.reason??''),evidence:[],evidenceQuotes:quotes,turnRefs:clone(result?.turnRefs||[]),...(result?.rawValidation?{rawValidation:clone(result.rawValidation)}:{}),...native,source:result?source:'none'};
  }
  if(evidence.some(id=>!session.turns.some(turn=>turn.id===id)))fail('判定证据轮次不属于本会话，不能生成交付物。');
- return{id:rule.id,ruleId:rule.id,label:label(rule),category:category(rule),verdict:normalize(result?.verdict),reason:String(result?.reason??''),evidence,source:result?source:'none'};
+ return{id:rule.id,ruleId:rule.id,label:label(rule),category:category(rule),verdict:normalize(result?.verdict),reason:String(result?.reason??''),evidence,...native,source:result?source:'none'};
 }
 function reasonSummary(result,corrected=false){
  let value=String(result.reason||'未提供具体判定理由').replace(/[\r\n\t]+/g,' ').trim();
@@ -118,7 +119,8 @@ export function createConsultationDeliverySnapshot(state,{taskId,conclusionMode=
   const confirmed=rules.map(rule=>resultItem(rule,session.review?.status==='已确认'&&session.review.disposition!=='unreplied'?session.review.drafts?.[rule.id]:null,'confirmed',session));
    const routing=freezeReviewRouting(session,task);
    const final=ai.map((item,index)=>clone(conclusionMode==='ai'?item:confirmed[index].source==='confirmed'?confirmed[index]:routing?routing.aiFinal||routing.exemptRuleIds?.includes(item.id)?{...item,source:'ai_final'}:pendingHumanResult(item,routing):item));
-  const conversation=original.messageColumn===null?session.turns.map(turn=>`${turn.role}：${turn.text}`).join('\n'):sourceRows.map(row=>row.values[original.messageColumn]??'').join('\n');
+  const nativeEnglish=task.executionSnapshot?.languageExecution?.contentLanguage==='en';
+  const conversation=original.messageColumn===null?session.turns.map(turn=>`${nativeEnglish?({'客户':'Customer','客服':'Agent','系统':'System'}[turn.role]||turn.role):turn.role}${nativeEnglish?': ':'：'}${turn.text}`).join('\n'):sourceRows.map(row=>row.values[original.messageColumn]??'').join('\n');
   const timeFacts=(hasAI?session.aiResults:[]).filter(result=>Number.isFinite(result.timeFacts?.elapsedMs)&&result.timeFacts.elapsedMs>=0&&Number.isFinite(result.timeFacts.thresholdHours)&&result.timeFacts.thresholdHours>0&&['continuous','workingHours'].includes(result.timeFacts.mode)).map(result=>({...clone(result.timeFacts),ruleId:result.ruleId}));
   const group=groupForRecord(config,original,session,product);
    const record={id:session.id,externalId:session.externalId??session.id,...(isRawReport(task)?{inputMode:task.inputMode,rawTranscript:clone(session.rawTranscript),executionStatus:session.aiExecution?.status||'not_started',aiExecution:clone(session.aiExecution||null)}:{}),...(routing?{routing}:{}),startedAt:typeof session.startedAt==='string'?session.startedAt:'',sourceRows:sourceRows.map(row=>row.sourceRow),conversation,turns:clone(session.turns||[]),product:product.source==='未提供'?'未提供':product.value,productSource:product.source,...(product.column?{productColumn:product.column}:{}),...(config.custom?{groupValue:group.value,groupSource:group.source,...(group.column?{groupColumn:group.column}:{})}:{}),hasAI,ai,historical,confirmed,final,aiOverall:overall(ai),finalOverall:overall(final),summary:final.filter(item=>item.verdict==='Fail').map(item=>reasonSummary(item,hasAI&&item.verdict!==ai.find(result=>result.id===item.id)?.verdict)).join('；'),timeFacts};
