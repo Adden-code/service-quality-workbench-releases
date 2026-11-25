@@ -1,5 +1,15 @@
 # 会话质检工作台
 
+## 0.11.26 · 中英文原生两场景试用完整版
+
+**[免登录下载完整安装包](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.26-native-pilot/QualityWorkbench-0.11.26-Native-Pilot-Full-Setup-Windows-x64.exe)** · [发布说明](https://github.com/Adden-code/service-quality-workbench-releases/releases/tag/v0.11.26-native-pilot)
+
+按用户及服务领域PDT“先用起来、收集反馈再改”的决定，新品与电商中英文材料作为试用版随包提供。全新工作区选择中文/English后，两场景均可直接建任务；旧工作区与历史任务保持原有流程。材料如实标记试用待反馈，不声称已完成业务逐条复核；EC沿用现有中文版，无新判据校准。
+
+原生理由、审核、报告、Excel接通；原文保持，交付原文译文自动生成。英文免审按语言独立积累。3,081项合成回归通过、0失败，四组合端到端与实际安装升级通过；未调用真实业务模型，内网效果随试用反馈继续验证。安装包包含17规则、两场景及运行环境，约98MB。[源码](https://github.com/Adden-code/service-quality-workbench-releases/commit/3a42c7d6ec667e89413ade504324622d36e14716)。
+
+以下0.11.25为此前程序验收包，首次原生工作区材料限制已由0.11.26试用授权解除；旧版本记录保留。
+
 ## 0.11.25 · 需求39第4步程序验收包
 
 **[免登录下载完整安装器](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.25-r39-stage4/QualityWorkbench-0.11.25-R39-Stage4-Full-Setup-Windows-x64.exe)** · [验收步骤](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.25-r39-stage4/Stage4-Acceptance-Guide-zh.txt) · [发布记录](https://github.com/Adden-code/service-quality-workbench-releases/releases/tag/v0.11.25-r39-stage4)
