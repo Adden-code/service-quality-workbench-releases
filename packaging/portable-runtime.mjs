@@ -337,7 +337,7 @@ export async function startSupervisor(config,{spawnWorker=spawn,createWorkbenchS
     await log('WORKER_HEALTHY');
     try{
       const create=createWorkbenchServer||(await import('../server.mjs')).createWorkbenchServer;
-      app=await create({dataDir:id.dataDir,storageMode:'sharded',publicDir:config.publicDir,executionEngine:'spring-ai',bridgeToken,workerPort:config.workerPort});
+      app=await create({dataDir:id.dataDir,storageMode:'sharded',nativeLanguageStage:4,publicDir:config.publicDir,executionEngine:'spring-ai',bridgeToken,workerPort:config.workerPort});
       if(stopping)throw error('START_CANCELLED','工作台启动已停止。');
       await listen(app,config.appPort);
     }catch(cause){if(cause?.portable)throw cause;throw error(cause?.code==='EADDRINUSE'?'PORT_IN_USE':'APP_START_FAILED',cause?.code==='EADDRINUSE'?`工作台端口${config.appPort}已被占用，启动已回收。`:'工作台启动失败，已回收自有执行服务。');}

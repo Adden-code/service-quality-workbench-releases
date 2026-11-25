@@ -138,6 +138,22 @@ test('真实HTTP生命周期等待Java健康，内存桥接令牌不落盘且Jav
   assert.equal(record.pid,process.pid);await supervisor.stop();assert.equal(existsSync(config.instanceFile),false);assert.equal(existsSync(config.lockFile),false);
 });
 
+test('正式portable supervisor默认启动Stage 4并要求新工作区明确选择语言',async t=>{
+  const {startSupervisor}=await implementation(),{config}=await fixture(t),env={...process.env};delete env.WORKBENCH_NATIVE_LANGUAGE_STAGE;
+  const supervisor=await startSupervisor(config,{spawnWorker:workerSpawn(),registerSignals:false,env});t.after(()=>supervisor.stop());
+  const response=await request(config.appPort,'/api/workspace');assert.equal(response.status,200);
+  assert.equal(response.value.nativeLanguageStage,4);assert.equal(response.value.state.workspaceSettings.languagePolicy.mode,'pending-selection');assert.equal(response.value.nativeLanguageReadiness.status,'selection-required');
+});
+
+test('正式portable创建选项显式固定Stage 4，不被旧验收环境变量降级',async t=>{
+  const {startSupervisor}=await implementation();
+  for(const stage of ['0','1','2','3']){
+    const {config}=await fixture(t);let options;
+    const supervisor=await startSupervisor(config,{spawnWorker:workerSpawn(),registerSignals:false,env:{...process.env,WORKBENCH_NATIVE_LANGUAGE_STAGE:stage},createWorkbenchServer:async value=>{options=value;return http.createServer((_req,res)=>res.end('synthetic supervisor option check'));}});
+    t.after(()=>supervisor.stop());assert.equal(options.nativeLanguageStage,4,`Legacy environment stage ${stage} must not downgrade the production entry point`);assert.equal(options.storageMode,'sharded');await supervisor.stop();
+  }
+});
+
 test('控制接口拒绝缺少令牌、浏览器Origin和错误Host',async t=>{
   const {startSupervisor}=await implementation();const {config}=await fixture(t);const supervisor=await startSupervisor(config,{spawnWorker:workerSpawn(),registerSignals:false});t.after(()=>supervisor.stop());const record=await readJson(config.instanceFile);
   assert.equal((await request(record.controlPort,'/status')).status,403);
@@ -253,18 +269,22 @@ test('活跃未知锁拒绝启动，死进程锁才允许恢复',async t=>{
 
 test('冷启动命令报告新实例，重启保留虚构工作区资料',async t=>{
   const {runPortableCommand}=await import(launchUrl);const {startSupervisor}=await implementation();const {config}=await fixture(t);let starts=0;
+  const {createInitialState}=await import('../public/domain.mjs'),{createCatalog}=await import('../public/catalog.mjs'),{createWorkspaceStore}=await import('../server/workspace-store.mjs');
+  // Existing fictional records enter the compatibility path; Stage 4 fresh
+  // workspaces must never bypass their language/material gates to seed tasks.
+  const seeded=await createWorkspaceStore({dataDir:config.dataDir});
+  try{await seeded.save({baseRevision:0,mutationId:'portable-existing-fictional',state:{...createInitialState(),businessMigrationVersion:1},catalog:createCatalog()});}finally{await seeded.close();}
   const options={config,startDetached:async()=>{starts++;await startSupervisor(config,{spawnWorker:workerSpawn(),registerSignals:false});},write:()=>{}};
   const stoppedStatus=await runPortableCommand(['--status'],options);
   assert.equal(stoppedStatus.state,'stopped');assert.equal(stoppedStatus.version,1);assert.equal(stoppedStatus.productVersion,productVersion);
   const first=await runPortableCommand(['--no-open'],options);assert.equal(first.started,true);assert.equal(starts,1);
   const origin=`http://127.0.0.1:${config.appPort}`,initial=await(await fetch(origin+'/api/workspace')).json();
-  const {createInitialState}=await import('../public/domain.mjs');const {createCatalog}=await import('../public/catalog.mjs');
-  // This test explicitly stores a modern fixture; legacy migration has separate coverage.
-  const state={...createInitialState(),businessMigrationVersion:1},catalog=createCatalog();
-  const saved=await fetch(origin+'/api/workspace',{method:'PUT',headers:{Origin:origin,'X-Workspace-Token':initial.token,'Content-Type':'application/json'},body:JSON.stringify({baseRevision:0,mutationId:'portable-fictional',state,catalog})});assert.equal(saved.status,200);
+  assert.equal(initial.state.workspaceSettings.languagePolicy.mode,'legacy-display-v1');
+  const {state,catalog}=initial;
+  const saved=await fetch(origin+'/api/workspace',{method:'PUT',headers:{Origin:origin,'X-Workspace-Token':initial.token,'Content-Type':'application/json'},body:JSON.stringify({baseRevision:initial.revision,mutationId:'portable-fictional',state,catalog})});assert.equal(saved.status,200);const confirmed=await saved.json();
   await runPortableCommand(['--stop'],options);const second=await runPortableCommand(['--no-open'],options);
   assert.equal(second.started,true);assert.notEqual(second.instanceId,first.instanceId);assert.equal(starts,2);
-  const reloaded=await(await fetch(origin+'/api/workspace')).json();assert.equal(reloaded.revision,1);assert.deepEqual(reloaded.state,state);
+  const reloaded=await(await fetch(origin+'/api/workspace')).json();assert.equal(reloaded.revision,confirmed.revision);assert.deepEqual(reloaded.state,state);
 });
 
 test('Java未健康时工作台端口不可访问，超时后只回收自有资源',async t=>{
