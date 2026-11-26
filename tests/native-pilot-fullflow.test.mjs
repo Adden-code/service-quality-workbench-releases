@@ -3,21 +3,24 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {once} from 'node:events';
+import {pathToFileURL} from 'node:url';
+const runtimeRoot=path.resolve(process.env.NATIVE_PILOT_RUNTIME_ROOT||'.');
+const runtimeModule=relative=>import(pathToFileURL(path.join(runtimeRoot,relative)).href);
 import {chromium} from 'playwright';
-import {createWorkbenchServer} from '../server.mjs';
-import {createWorkspaceStore} from '../server/workspace-store.mjs';
-import {createAiService} from '../server/ai-service.mjs';
-import {createArkClient} from '../server/ark-client.mjs';
-import {createReportJobs} from '../server/report-jobs.mjs';
-import {createImportedTask} from '../public/domain.mjs';
-import {sceneBasisForTask} from '../public/scene-configuration.mjs';
-import {parseBusinessInput} from '../public/business-input.mjs';
-import {parseEcommerceFile} from '../public/ecommerce-input.mjs';
-import {EC_HEADERS} from '../public/ecommerce-schema.mjs';
-import {workbook,readXlsx} from '../public/io.mjs';
-import {buildBusinessReportHtml} from '../public/business-report.mjs';
-import {buildBusinessDeliveryXlsx} from '../public/business-delivery.mjs';
-import {languageHash} from '../server/native-language-materials.mjs';
+const {createWorkbenchServer}=await runtimeModule('server.mjs');
+const {createWorkspaceStore}=await runtimeModule('server/workspace-store.mjs');
+const {createAiService}=await runtimeModule('server/ai-service.mjs');
+const {createArkClient}=await runtimeModule('server/ark-client.mjs');
+const {createReportJobs}=await runtimeModule('server/report-jobs.mjs');
+const {createImportedTask}=await runtimeModule('public/domain.mjs');
+const {sceneBasisForTask}=await runtimeModule('public/scene-configuration.mjs');
+const {parseBusinessInput}=await runtimeModule('public/business-input.mjs');
+const {parseEcommerceFile}=await runtimeModule('public/ecommerce-input.mjs');
+const {SYSTEM_EC_HEADERS}=await runtimeModule('public/ecommerce-system-source.mjs');
+const {workbook,readXlsx}=await runtimeModule('public/io.mjs');
+const {buildBusinessReportHtml}=await runtimeModule('public/business-report.mjs');
+const {buildBusinessDeliveryXlsx}=await runtimeModule('public/business-delivery.mjs');
+const {languageHash}=await runtimeModule('server/native-language-materials.mjs');
 
 // All rules, references and configuration bytes are the complete shipped seeds.
 // Only business records and model responses are synthetic. No remote requests.
@@ -66,8 +69,8 @@ function reply(data,language){
 }
 async function inputFile(scene){
  if(scene==='电商评论回复'){
-  const rows=[0,1].map(i=>{const raw=Array(22).fill('');Object.assign(raw,{0:'SYNTHETIC-EC-'+i,8:i?'La batería falla cada día. SYNTHETIC-ISSUE':'La pantalla es muy clara. SYNTHETIC-PRAISE',9:i?'Gracias por escribir. SYNTHETIC-FAIL':'Nos alegra que disfrutes de la pantalla clara. SYNTHETIC-PASS',10:i?'1':'5',11:'SYNTHETIC-AGENT-'+i,12:'2026-11-24 10:00:00',13:'2026-11-24 11:00:00'});return raw;});
-  const bytes=Buffer.from(await workbook([{name:'Sheet4',headers:[...EC_HEADERS],rows:[Array(22).fill(''),...rows]}]));const parsed=await parseEcommerceFile({name:'synthetic-ec.xlsx',size:bytes.length,arrayBuffer:async()=>bytes});assert.equal(parsed.valid,true,JSON.stringify(parsed.errors));return{bytes,name:'synthetic-ec.xlsx',sessions:parsed.sessions};
+  const rows=[0,1].map(i=>{const raw=Array(23).fill('');Object.assign(raw,{0:'SYNTHETIC-EC-'+i,3:'Synthetic product',4:'VMALL-MX-HWB2C',5:i?'La batería falla cada día. SYNTHETIC-ISSUE':'La pantalla es muy clara. SYNTHETIC-PRAISE',6:i?'Gracias por escribir. SYNTHETIC-FAIL':'Nos alegra que disfrutes de la pantalla clara. SYNTHETIC-PASS',7:i?'1':'5',8:'SYNTHETIC-AGENT-'+i,9:'2026-11-24 10:00:00',16:'2026-11-24 11:00:00',22:'是'});return raw;});
+  const bytes=Buffer.from(await workbook([{name:'System export',headers:[...SYSTEM_EC_HEADERS],rows}]));const parsed=await parseEcommerceFile({name:'synthetic-ec.xlsx',size:bytes.length,arrayBuffer:async()=>bytes});assert.equal(parsed.valid,true,JSON.stringify(parsed.errors));assert.ok(parsed.sessions.every(s=>s.ecommerce.systemSource.format==='business-export-23.v1'));return{bytes,name:'synthetic-ec.xlsx',sessions:parsed.sessions};
  }
  const infoHeaders=['会话ID','业务场景','会话开始时间','会话主题','渠道','产品型号','客服标识','客户标识','会话完整性','缺失说明'],turnHeaders=['会话ID','轮次序号','发言角色','发言方标识','发言时间','原文内容'];
  const ids=['SYNTHETIC-NP-PASS','SYNTHETIC-NP-FAIL'],info=ids.map(id=>[id,scene,'2026-11-24T10:00:00+08:00','Synthetic product question','Synthetic channel','Synthetic product','Synthetic agent','Synthetic customer','完整','']),turns=ids.flatMap((id,i)=>[[id,1,'客户','Synthetic customer','2026-11-24T10:00:00+08:00',i?'La batería falla cada día. SYNTHETIC-ISSUE':'هل توجد نسخة زرقاء؟'],[id,2,'客服','Synthetic agent','2026-11-24T10:00:10+08:00',i?'Gracias por escribir. SYNTHETIC-FAIL':'Sí, puedo comprobar la versión azul. SYNTHETIC-PASS']]);
@@ -105,12 +108,12 @@ for(const language of ['zh','en'])for(const scene of ['新品产品咨询','电�
  const kinds=new Set(requests.filter(r=>r.data.contract==='native-report-v1').map(r=>r.data.kind));for(const kind of scene==='新品产品咨询'?['consultationIssues','caseHighlights']:['issueClusters','voc','caseHighlights'])assert.ok(kinds.has(kind),'Missing fullflow node '+kind);
  if(scene==='新品产品咨询')for(const capability of ['intent','demandSummary','negativeVoice'])assert.ok(requests.some(r=>r.data.capability===capability&&r.data.contract==='native-language-v1'),'Full configured NP report reuses native '+capability);
  if(scene==='电商评论回复'){const highlight=requests.find(r=>r.data.kind==='caseHighlights').data.input;assert.equal(highlight.referenceMaterials[0].id,'EC-REPLY-STRATEGIES');assert.equal(highlight.referenceMaterials[0].sections.length,19);if(language==='en')assert.doesNotMatch(highlight.referenceMaterials[0].sections.map(s=>s.text).join('\n'),/\p{Script=Han}/u);}
- const html=buildBusinessReportHtml(result.snapshot,result.enrichment,{language,job:result.job}),xlsx=await buildBusinessDeliveryXlsx(result.snapshot,result.enrichment,{language});await fs.writeFile(path.join(dir,'report.html'),html);await fs.writeFile(path.join(dir,'details.xlsx'),xlsx);assert.match(html,new RegExp(`<html lang="${language==='en'?'en':'zh-CN'}"`));assert.doesNotMatch(html,/\[Translation missing\]|\[Untranslated:|Translation pending/);assert.ok(JSON.stringify(await readXlsx(xlsx)).includes('SYNTHETIC-ISSUE'));assert.deepEqual(modelFailures,[]);
+ const html=buildBusinessReportHtml(result.snapshot,result.enrichment,{language,job:result.job}),xlsx=await buildBusinessDeliveryXlsx(result.snapshot,result.enrichment,{language});await fs.writeFile(path.join(dir,'report.html'),html);await fs.writeFile(path.join(dir,'details.xlsx'),xlsx);assert.match(html,new RegExp(`<html lang="${language==='en'?'en':'zh-CN'}"`));assert.doesNotMatch(html,/\[Translation missing\]|\[Translation unavailable|\[Untranslated:|Translation pending/);assert.ok(JSON.stringify(await readXlsx(xlsx)).includes('SYNTHETIC-ISSUE'));assert.deepEqual(modelFailures,[]);
  const callCount=requests.length;await reports.close();reports=null;await ai.close();ai=null;await store.close();store=null;
  store=await createWorkspaceStore({dataDir,nativeLanguageStage:4});assert.equal(JSON.stringify((await store.read()).state.tasks[0].executionSnapshot),frozenBefore);reports=await createReportJobs({dataDir,store,modelConfig,client,retryDelayMs:0});assert.deepEqual(await reports.getResult(jobId),result);assert.equal(requests.length,callCount);await reports.close();reports=null;await store.close();store=null;
  server=await createWorkbenchServer({dataDir,nativeLanguageStage:4,catalogSeed:null,sceneSeed:null,automaticBuiltinUpgrade:false,arkClient:client,modelConfig});server.listen(0,'127.0.0.1');await once(server,'listening');const origin='http://127.0.0.1:'+server.address().port;
  browser=await chromium.launch({headless:true,executablePath:process.env.CHROMIUM_PATH||'C:/Users/42910/AppData/Local/ms-playwright/chromium-1228/chrome-win64/chrome.exe'});const page=await browser.newPage({acceptDownloads:true,viewport:{width:1440,height:1000}}),pageErrors=[],external=[];page.on('pageerror',e=>pageErrors.push(e.message));await page.route('**/*',route=>{if(/^https?:/.test(route.request().url())&&!route.request().url().startsWith(origin)){external.push(route.request().url());return route.abort();}return route.continue();});
  await page.goto(origin);await page.locator('[data-native-readiness="ready"]').waitFor();await page.locator('.nav-link[data-act="nav"][data-page="exports"]').click();await page.locator(`[data-act="business-job-mount"][data-job-id="${jobId}"]`).waitFor();await page.locator(`[data-act="business-job-mount"][data-job-id="${jobId}"]`).click();
  for(const [action,extension]of [['business-download-html','html'],['business-download-xlsx','xlsx']]){const button=page.locator(`[data-act="${action}"]`);await button.waitFor();await page.waitForFunction(a=>!document.querySelector(`[data-act="${a}"]`).disabled,action);const downloadPromise=page.waitForEvent('download');await button.click();const download=await downloadPromise;await download.saveAs(path.join(dir,'mounted-download.'+extension));assert.equal(await download.failure(),null);}
- const mountedHtml=await fs.readFile(path.join(dir,'mounted-download.html'),'utf8'),mountedSheets=await readXlsx(await fs.readFile(path.join(dir,'mounted-download.xlsx')));assert.match(mountedHtml,new RegExp(`<html lang="${language==='en'?'en':'zh-CN'}"`));assert.doesNotMatch(mountedHtml,/\[Translation missing\]|\[Untranslated:|Translation pending/);assert.ok(JSON.stringify(mountedSheets).includes('SYNTHETIC-ISSUE'));assert.equal(requests.length,callCount,'Mounting/downloading must not rerun native inspection or report analysis');assert.deepEqual(external,[]);assert.deepEqual(pageErrors,[]);await page.screenshot({path:path.join(dir,'mounted-deliverable.png'),fullPage:true});await fs.writeFile(path.join(dir,'verification.json'),JSON.stringify({status:'passed',scene,language,materials:bundle.materials.length,model:'scripted-local-only',externalModelCalls:0,jobId,kinds:[...kinds],pageErrors,external},null,2));
+ const mountedHtml=await fs.readFile(path.join(dir,'mounted-download.html'),'utf8'),mountedSheets=await readXlsx(await fs.readFile(path.join(dir,'mounted-download.xlsx')));assert.match(mountedHtml,new RegExp(`<html lang="${language==='en'?'en':'zh-CN'}"`));assert.doesNotMatch(mountedHtml,/\[Translation missing\]|\[Translation unavailable|\[Untranslated:|Translation pending/);assert.ok(JSON.stringify(mountedSheets).includes('SYNTHETIC-ISSUE'));assert.doesNotMatch(JSON.stringify(mountedSheets),/Translation missing|Translation unavailable|Translation pending|Untranslated:/);assert.equal(requests.length,callCount,'Mounting/downloading must not rerun native inspection or report analysis');assert.deepEqual(external,[]);assert.deepEqual(pageErrors,[]);await page.screenshot({path:path.join(dir,'mounted-deliverable.png'),fullPage:true});await fs.writeFile(path.join(dir,'verification.json'),JSON.stringify({status:'passed',runtimeRoot,scene,language,materials:bundle.materials.length,model:'scripted-local-only',externalModelCalls:0,jobId,kinds:[...kinds],pageErrors,external},null,2));
 });

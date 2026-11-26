@@ -46,25 +46,25 @@ export function validateNativePilotBundle(bundle){
 }
 
 export function nativePilotReleaseGuide(language='zh'){
- return language==='en'?`Emergency repair 0.11.27 — native pilot activation
+ return language==='en'?`0.11.28 — native English frontline pilot
 
-The 52 paired pilot materials are unchanged from 0.11.26. They are NOT injected or activated automatically. A local maintainer must explicitly enable them, enter their name and reason, and acknowledge that Business review and EC arbitration are still pending. This approval is logged for this workspace and exact bundle. Previously auto-installed materials also require this confirmation before new tasks may use them. Existing frozen tasks and reports retain their original materials.
+The complete 52-item bilingual pilot bundle is rebuilt from the exact 0.11.27 source criteria, including EC-TIME V3.3 and the EC-TARGET V3.6 v2 rollback. Both New Product Consultation and Ecommerce Review Replies can run natively in English after explicit activation. Business review and EC arbitration are still pending; the user authorized frontline trial on 26 November 2026 without waiting for them. This is trial permission, not formal business approval of the translations.
 
-EC-TARGET is restored verbatim to the released 0.11.22 v2 criteria, published under a new bundle/version. Other EC and NP criteria are unchanged. The retained EC native pilot material describes v3; it therefore cannot be used for new v2 tasks. Enabling the pilot allows the matching NP material, but does not bypass the EC mismatch. Existing legacy workspaces can create EC tasks using v2.
+No pilot material is injected or activated automatically. In a fresh workspace, choose English, open Pilot material maintenance, enter the maintainer name and reason, acknowledge the unreviewed status, then activate. The confirmation is tied to this workspace and exact bundle hash. Both scenes should then show Ready. A new bundle requires its own confirmation; older confirmation does not authorize newly changed materials. Existing frozen tasks and reports retain their original materials.
 
-English native tasks cannot reuse Chinese B6 calibration. They initially require human confirmation until each rule reaches the existing 30-pair / 80% agreement criteria in the English scope. Original source text is preserved; delivery translations remain automatic.
+AI findings, reasons and report analysis use the locked language directly. Original review/reply text is preserved and its delivery translation columns are generated automatically. English native tasks cannot reuse Chinese B6 calibration: initially all findings require human confirmation until each rule meets the existing minimum of 30 independent validation pairs and 80% agreement in the English scope.
 
-WebView2 now stores its browser profile outside the business data directory. Old desktop-profile folders are preserved and excluded from backups/startup cleanup. Browser-local preferences may reset once. Business data, frozen tasks, model settings and audit history remain in the workspace. Keep a full backup outside the program directory before upgrading.
+WebView2 profiles remain outside the business data directory. Any old desktop-profile directory is preserved and omitted from backups. The 0.11.27 Chinese criteria are unchanged. Keep a complete workspace backup outside the program directory before upgrading.
 
-`:`0.11.27紧急修复版：原生试用启用说明
+`:`0.11.28 英文原生一线试用说明
 
-52项双语试用材料与0.11.26逐字不变，默认不注入、不启用。维护人须在本机显式启用，填写姓名与原因，并确认业务逐条核对和EC仲裁仍待完成；授权绑定本工作区与材料包哈希并留痕。0.11.26已自动装入的材料，在用于新任务前同样须确认；已有任务及报告继续原冻结材料。
+完整52项双语试点材料已按0.11.27当前源重新生成，含EC-TIME V3.3、回退v2口径的EC-TARGET V3.6。新品产品咨询、电商评论回复两个场景均可在显式激活后英文原生运行。业务逐条核对和EC仲裁仍待完成；用户于2026年11月26日明确授权不再等待，先让一线试用并反馈。这是试用授权，不代表正式业务复核通过。
 
-EC-TARGET逐字回退0.11.22 v2，以新种子ID及版本发布。其他EC与NP判据不变。保留的EC原生试用材料仍对应v3，因此不能用于新v2任务：启用试用后，匹配的NP材料可用，EC不绕过版本不匹配。既有legacy工作区可正常新建使用v2的EC任务。
+试点材料默认不注入、不激活。全新工作区选择English后，打开“试用材料维护”，填写维护人与原因，确认未完成业务逐条复核后激活；确认绑定本工作区和完整材料包哈希。激活后两场景均应显示就绪。新版材料需要单独确认，旧包授权不自动授权变更后的材料。已有任务与报告继续使用原冻结材料。
 
-英文原生任务不能复用中文B6标定，初期均需人工确认；英文范围每规则独立验证至少30对且一致率80%后再逐步开启免审。原始内容保持，交付原文译文仍自动生成。
+AI判定、理由及报告分析直接使用锁定语言生成；评论/回复原文保持，交付物原文译文列仍自动生成。英文原生任务不能复用中文B6标定，初期全部人工确认；英文范围每规则至少30对独立验证样本、一致率80%后逐步开启免审。
 
-WebView2浏览器配置移至业务数据目录之外；旧desktop-profile保留原处，不进入备份与启动清理。浏览器本地偏好可能重置一次；业务数据、冻结任务、模型设置与审计保留。升级前请另存完整工作区备份。
+WebView2配置仍位于业务数据目录之外；旧desktop-profile保留原处并跳过备份。0.11.27中文判据不变。升级前请在程序目录外另存完整工作区备份。
 
 `;
 }
