@@ -52,6 +52,12 @@ function pilotBundleMetadata(bundle){
   }
   return{id:bundle.id,version:bundle.version,bundleHash:languageHash(bundle),materialStatus:'pilot-unreviewed',scenes:[...new Set(bundle.materials.map(m=>m.scene))],materialHashes:bundle.materials.map(m=>m.contentHash)};
 }
+function currentPilotActivation(state,metadata){
+  const audit=state?.languageAudit||[],latest=metadata.scenes.map(scene=>audit.findLast(e=>e.action==='activate-pilot-materials'&&e.after?.acknowledgeUnreviewed===true&&HASH.test(e.after.bundleHash||'')&&e.after.scenes?.includes(scene)));
+  // A multi-scene bundle is current only if no covered scene was subsequently
+  // assigned to another bundle. Earlier grants remain immutable history.
+  return latest.length&&latest.every(e=>e?.after.bundleHash===metadata.bundleHash)?latest[0]:null;
+}
 async function acquireLock(fsOps,lockPath){
   const unavailable=()=>new WorkspaceError('数据目录已有进程锁，无法启动第二个写入进程。无法确认归属的遗留锁需要人工检查。',409);
   try{return await fsOps.open(lockPath,'wx',0o600);}catch(error){if(error.code!=='EEXIST')throw error;}
@@ -256,7 +262,7 @@ export async function createWorkspaceStore({dataDir,fsOps=fs,catalogSeed=null,sc
       // The server keeps the loaded resource object private. Polling status must
       // not revalidate/hash all 52 materials; activation always validates anew.
       let metadata=pilotStatusMetadata.get(bundle);if(!metadata){metadata=pilotBundleMetadata(bundle);pilotStatusMetadata.set(bundle,metadata);}
-      const activation=document.state?.languageAudit?.findLast(e=>e.action==='activate-pilot-materials'&&e.after?.bundleHash===metadata.bundleHash&&e.after?.acknowledgeUnreviewed===true),legacy=workspaceLanguage(document.state)?.mode==='legacy-display-v1';
+      const activation=currentPilotActivation(document.state,metadata),legacy=workspaceLanguage(document.state)?.mode==='legacy-display-v1';
       return{available:true,status:legacy?'legacy':activation?'active':'inactive',id:metadata.id,version:metadata.version,bundleHash:metadata.bundleHash,materialCount:bundle.materials.length,scenes:metadata.scenes,activation:activation?{actor:activation.actor,at:activation.at,reason:activation.reason,bundleHash:metadata.bundleHash}:null};
     },
     activateNativePilotMaterials(bundle,input){return serial(async()=>{
@@ -271,7 +277,7 @@ export async function createWorkspaceStore({dataDir,fsOps=fs,catalogSeed=null,sc
       if(document.state.languageAudit?.some(e=>e.id===input.operationId))languageError('LANGUAGE_OPERATION_CONFLICT','The operation identifier is already present in the language audit.');
       const installed=document.state.languageAudit?.find(e=>e.id===`install-pilot-${bundle.id}-${bundle.version}`);
       if(installed&&installed.after?.bundleHash!==metadata.bundleHash)languageError('LANGUAGE_OPERATION_CONFLICT','Installed pilot version bytes changed; issue a new bundle version.');
-      if(document.state.languageAudit?.some(e=>e.action==='activate-pilot-materials'&&e.after?.bundleHash===metadata.bundleHash))return read();
+      if(currentPilotActivation(document.state,metadata))return read();
       const state=clone(document.state),registry=state.languageMaterials||{schemaVersion:1,releases:[],freezes:[]};
       for(const m of bundle.materials)if(!registry.releases.some(r=>r.contentHash===m.contentHash))registry.releases.push({id:m.id,version:m.version,scene:m.scene,contentHash:m.contentHash});
       state.languageMaterials=registry;state.languageAudit=[...(state.languageAudit||[]),{id:input.operationId,action:'activate-pilot-materials',actor:input.actor.trim(),at:new Date().toISOString(),reason:input.reason.trim(),before:{active:false},after:{...metadata,acknowledgeUnreviewed:true}}];

@@ -139,6 +139,44 @@ test('a newly activated bundle selects its exact bytes without rewriting histori
  await f.reopen();
  for(const [i,old] of oldTasks.entries())assert.deepEqual(await f.store.readNativeMaterial(old),oldFrozen[i]);
 });
+
+test('A to B to A activation restores exact current grants while replay cannot replace a later decision',async t=>{
+ const f=await setup(t,'en',{activate:false}),initial=await f.store.read();
+ const inputA={baseRevision:initial.revision,operationId:'first-A',actor:auth.actor,reason:auth.reason,acknowledgeUnreviewed:true,bundleHash:languageHash(f.bundle)};
+ await f.store.activateNativePilotMaterials(f.bundle,inputA);
+ const historical=[];
+ const createBoth=async bundle=>{for(const scene of ['新品产品咨询',sceneId]){const task=await f.create(scene),frozen=await f.store.readNativeMaterial(task);assert.ok(frozen.paired.every(m=>bundle.materials.some(n=>n.contentHash===m.contentHash)));historical.push({task,frozen});}};
+ await createBoth(f.bundle);
+ const authB={...auth,authorizationId:'synthetic-B',reason:'Synthetic second explicit pilot decision.'},bundleB={...structuredClone(f.bundle),id:'synthetic-B',version:'2',authorization:authB};
+ bundleB.materials=bundleB.materials.map(m=>authorizePilotMaterial({...m,semanticRevision:m.semanticRevision+'-B'},authB));
+ const beforeB=await f.store.read(),inputB={...inputA,baseRevision:beforeB.revision,operationId:'first-B',reason:authB.reason,bundleHash:languageHash(bundleB)};
+ await f.store.activateNativePilotMaterials(bundleB,inputB);
+ assert.equal(f.store.nativePilotStatus(f.bundle).status,'inactive');assert.equal(f.store.nativePilotStatus(f.bundle).activation,null);assert.equal(f.store.nativePilotStatus(bundleB).status,'active');
+ await createBoth(bundleB);
+ const afterB=await f.store.read();assert.deepEqual(await f.store.activateNativePilotMaterials(f.bundle,inputA),afterB);
+ assert.equal(f.store.nativePilotStatus(bundleB).status,'active');
+ const reactivateA={...inputA,baseRevision:afterB.revision,operationId:'return-to-A',reason:'Explicitly return to A for this synthetic pilot.'};
+ const restored=await f.store.activateNativePilotMaterials(f.bundle,reactivateA);
+ assert.equal(restored.state.languageAudit.length,afterB.state.languageAudit.length+1);assert.equal(restored.state.languageAudit.at(-1).id,'return-to-A');
+ assert.equal(f.store.nativePilotStatus(f.bundle).status,'active');assert.equal(f.store.nativePilotStatus(bundleB).status,'inactive');
+ assert.ok((await f.store.nativeReadiness()).scenes.every(s=>s.status==='ready'));
+ assert.deepEqual(await f.store.activateNativePilotMaterials(f.bundle,reactivateA),restored);
+ assert.deepEqual(await f.store.activateNativePilotMaterials(bundleB,inputB),restored);
+ await createBoth(f.bundle);await f.reopen();
+ assert.equal(f.store.nativePilotStatus(f.bundle).status,'active');assert.equal(f.store.nativePilotStatus(bundleB).status,'inactive');
+ for(const {task,frozen} of historical)assert.deepEqual(await f.store.readNativeMaterial(task),frozen);
+});
+
+test('bundle active status requires its grant to remain current in every covered scene',async t=>{
+ const f=await setup(t),subsetAuth={...auth,authorizationId:'NP-only-activation',reason:'Synthetic NP-only pilot decision.'};
+ const subset={...structuredClone(f.bundle),id:'NP-only-activation',authorization:subsetAuth,materials:f.bundle.materials.filter(m=>m.scene==='新品产品咨询').map(m=>authorizePilotMaterial({...m,semanticRevision:m.semanticRevision+'-NP-only'},subsetAuth))};
+ let view=await f.store.read();await f.store.activateNativePilotMaterials(subset,{baseRevision:view.revision,operationId:'NP-only',actor:auth.actor,reason:subsetAuth.reason,acknowledgeUnreviewed:true,bundleHash:languageHash(subset)});
+ assert.equal(f.store.nativePilotStatus(f.bundle).status,'inactive');assert.equal(f.store.nativePilotStatus(subset).status,'active');
+ for(const [scene,bundle] of [['新品产品咨询',subset],[sceneId,f.bundle]]){const task=await f.create(scene),frozen=await f.store.readNativeMaterial(task);assert.ok(frozen.paired.every(m=>bundle.materials.some(n=>n.contentHash===m.contentHash)));}
+ view=await f.store.read();await f.store.activateNativePilotMaterials(f.bundle,{baseRevision:view.revision,operationId:'restore-both-scenes',actor:auth.actor,reason:'Synthetic explicit restoration of both scenes.',acknowledgeUnreviewed:true,bundleHash:languageHash(f.bundle)});
+ assert.equal(f.store.nativePilotStatus(f.bundle).status,'active');assert.equal(f.store.nativePilotStatus(subset).status,'inactive');
+ assert.ok((await f.store.nativeReadiness()).scenes.every(s=>s.status==='ready'));
+});
 test('removing frozen pilot bytes rejects reopen and backup instead of falling back to installed text',async t=>{
  const f=await setup(t),task=await f.create();await f.store.close();await fs.unlink(path.join(f.dir,'language-materials',task.executionSnapshot.languageMaterialRef+'.json'));
  await assert.rejects(encodeWorkspaceArchive(f.dir),{code:'LANGUAGE_MATERIAL_MISSING'});await assert.rejects(createWorkspaceStore({dataDir:f.dir,nativeLanguageStage:4}),/读取失败|损坏/);
