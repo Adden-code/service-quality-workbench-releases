@@ -10,14 +10,18 @@ import {sceneBasisForTask,freezeSceneExecution} from '../public/scene-configurat
 const hash=v=>typeof v==='string'&&/^[a-f0-9]{64}$/.test(v);
 const same=(a,b)=>languageCanonical(a)===languageCanonical(b);
 export function assertNativeMaterialActivated(state,materials){
-  const activated=new Set((state.languageAudit||[]).filter(e=>e.action==='activate-pilot-materials'&&e.after?.acknowledgeUnreviewed===true&&hash(e.after.bundleHash)).flatMap(e=>e.after.materialHashes||[]));
   for(const material of materials){
     validateBilingualMaterial(material);assertMaterialReleaseAllowed(material);
-    if(material.review.status!=='approved-pair'&&!activated.has(material.contentHash))languageError('NATIVE_PILOT_ACTIVATION_REQUIRED','A local maintainer must explicitly activate these exact unreviewed pilot materials before creating new native tasks. Existing frozen tasks remain available.');
+    if(!materialActivated(state,material))languageError('NATIVE_PILOT_ACTIVATION_REQUIRED','A local maintainer must explicitly activate these exact unreviewed pilot materials before creating new native tasks. Existing frozen tasks remain available.');
   }
 }
 function materialActivated(state,material){
-  return material.review?.status==='approved-pair'||(state.languageAudit||[]).some(e=>e.action==='activate-pilot-materials'&&e.after?.acknowledgeUnreviewed===true&&hash(e.after.bundleHash)&&e.after.materialHashes?.includes(material.contentHash));
+  if(material.review?.status==='approved-pair')return true;
+  // A later explicit activation is the release selection for its scenes. Do
+  // not pool grants from old bundles: equal source versions may have different
+  // translated bytes. Historical tasks read their own frozen files directly.
+  const activation=(state.languageAudit||[]).findLast(e=>e.action==='activate-pilot-materials'&&e.after?.acknowledgeUnreviewed===true&&hash(e.after.bundleHash)&&e.after.scenes?.includes(material.scene));
+  return Boolean(activation?.after.materialHashes?.includes(material.contentHash));
 }
 // Publication is a separate, audited human operation. This resolver consumes
 // only existing approved bytes and never chooses among competing versions.

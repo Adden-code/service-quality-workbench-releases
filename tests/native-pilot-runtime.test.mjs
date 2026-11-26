@@ -115,6 +115,30 @@ test('pilot frozen NP and EC bytes survive actual archive restore without the in
  await restored.enableLanguageGovernance();const current=await restored.read(),staged=await manager.preflight(decoded);await manager.apply({staged,baseRevision:current.revision,closeServices:()=>restored.close(),openServices:async()=>{restored=await createWorkspaceStore({dataDir:target,nativeLanguageStage:4});}});
  const after=await restored.read();assert.deepEqual(after.state.languageMaterials,before.state.languageMaterials);assert.deepEqual(after.state.languageAudit,before.state.languageAudit);assert.deepEqual(await restored.readNativeMaterial(np),await f.store.readNativeMaterial(np));assert.deepEqual(await restored.readNativeMaterial(ec),await f.store.readNativeMaterial(ec));
 });
+
+test('a newly activated bundle selects its exact bytes without rewriting historical NP or EC tasks',async t=>{
+ const f=await setup(t),oldNp=await f.create('新品产品咨询'),oldEc=await f.create(),oldTasks=[oldNp,oldEc],oldFrozen=await Promise.all(oldTasks.map(task=>f.store.readNativeMaterial(task)));
+ const selection=await f.store.read(),npMaterials=f.bundle.materials.filter(m=>m.scene==='新品产品咨询');
+ await f.store.freezeLanguageMaterial({baseRevision:selection.revision,operationId:'explicit-old-NP-selection',materialHashes:npMaterials.map(m=>m.contentHash),promptId:'NP-NATIVE-PROMPTS',glossaryId:'NP-GLOSSARY',actor:auth.actor,reason:'Explicit synthetic selection before the next pilot is activated.'});
+ const nextAuth={...auth,authorizationId:'synthetic-second-pilot',reason:'Explicit synthetic activation of the second paired bundle.'};
+ const next={...structuredClone(f.bundle),id:'synthetic-second-pilot',version:'2',authorization:nextAuth};
+ next.materials=next.materials.map(m=>authorizePilotMaterial({...m,semanticRevision:m.semanticRevision+'-second'},nextAuth));
+ await f.store.installNativePilotMaterials(next);
+ assert.equal(f.store.nativePilotStatus(next).status,'inactive');
+ const before=await f.store.read(),basis=sceneBasisForTask(before.state,before.catalog,'新品产品咨询',now),task={scene:'新品产品咨询',basisSnapshot:basis,executionSnapshot:freezeSceneExecution(before.state,'新品产品咨询',{basis})};
+ assert.throws(()=>resolveNativeTaskMaterial(before.state,task,next.materials),{code:'NATIVE_PILOT_ACTIVATION_REQUIRED'});
+ await f.store.activateNativePilotMaterials(next,{baseRevision:before.revision,operationId:'activate-second-pilot',actor:nextAuth.actor,reason:nextAuth.reason,acknowledgeUnreviewed:true,bundleHash:languageHash(next)});
+ const ready=await f.store.nativeReadiness();assert.ok(ready.scenes.every(s=>s.status==='ready'),JSON.stringify(ready));
+ for(const scene of ['新品产品咨询',sceneId]){
+  const created=await f.create(scene),frozen=await f.store.readNativeMaterial(created);
+  assert.ok(frozen.paired.every(m=>next.materials.some(n=>n.contentHash===m.contentHash)));
+  assert.ok(frozen.paired.every(m=>m.review.authorizationId===nextAuth.authorizationId));
+ }
+ const current=await f.store.read();
+ assert.throws(()=>resolveNativeTaskMaterial(current.state,task,f.bundle.materials,oldFrozen[0]),{code:'NATIVE_PILOT_ACTIVATION_REQUIRED'});
+ await f.reopen();
+ for(const [i,old] of oldTasks.entries())assert.deepEqual(await f.store.readNativeMaterial(old),oldFrozen[i]);
+});
 test('removing frozen pilot bytes rejects reopen and backup instead of falling back to installed text',async t=>{
  const f=await setup(t),task=await f.create();await f.store.close();await fs.unlink(path.join(f.dir,'language-materials',task.executionSnapshot.languageMaterialRef+'.json'));
  await assert.rejects(encodeWorkspaceArchive(f.dir),{code:'LANGUAGE_MATERIAL_MISSING'});await assert.rejects(createWorkspaceStore({dataDir:f.dir,nativeLanguageStage:4}),/读取失败|损坏/);

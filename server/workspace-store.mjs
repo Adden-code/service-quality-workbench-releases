@@ -167,11 +167,16 @@ export async function createWorkspaceStore({dataDir,fsOps=fs,catalogSeed=null,sc
     const value=nativeLanguageReadiness(document.state,document.catalog,await publishedMaterials(),await selectedNativeFreeze());readinessCache={revision:document.revision,value};return clone(value);
   }
   async function selectedNativeFreeze(){
-    const selected=new Map();
-    for(const selection of [...(document.state?.languageAudit||[])].reverse().filter(e=>e.action==='freeze-material'&&e.after?.hash&&!e.after.taskId)){
+    const selected=new Map(),audit=document.state?.languageAudit||[];
+    for(const selection of [...audit].reverse().filter(e=>e.action==='freeze-material'&&e.after?.hash&&!e.after.taskId)){
       const ref=document.state.languageMaterials?.freezes?.find(r=>r.hash===selection.after.hash);if(!ref)languageError('LANGUAGE_FREEZE_INVALID','The explicitly selected release is missing from the frozen registry.');
       const value=JSON.parse(await fsOps.readFile(path.join(directory,'language-materials',ref.hash+'.json'),'utf8'));if(languageHash(value)!==ref.hash)languageError('LANGUAGE_FREEZE_INVALID','The selected release bytes do not match their immutable reference.');
-      const scene=value.paired?.[0]?.scene;if(scene&&value.paired.every(m=>m.scene===scene)&&!selected.has(scene))selected.set(scene,value);
+      const scene=value.paired?.[0]?.scene;
+      // A later explicit pilot activation supersedes an older pilot release
+      // choice for new tasks only. Keep the immutable selection and task files.
+      const laterActivation=audit.slice(audit.indexOf(selection)+1).some(e=>e.action==='activate-pilot-materials'&&e.after?.acknowledgeUnreviewed===true&&HASH.test(e.after.bundleHash||'')&&e.after.scenes?.includes(scene));
+      if(laterActivation&&value.paired?.some(m=>m.review?.status==='pilot-unreviewed'))continue;
+      if(scene&&value.paired.every(m=>m.scene===scene)&&!selected.has(scene))selected.set(scene,value);
     }
     return [...selected.values()];
   }
