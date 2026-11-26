@@ -1,6 +1,6 @@
 {
   "status": "pilot-unreviewed",
-  "basis": "Exact Chinese 0.11.24 source criteria; trial authorized on 2026-11-25. No new EC calibration.",
+  "basis": "Exact Chinese 0.11.27 source criteria, including EC-TARGET V3.6 / ec-target-calibration-v2; immediate frontline trial authorized on 2026-11-26. Pilot only; bilingual business review and EC arbitration remain pending.",
   "rules": {
     "EC-TIME": {
       "title": "Reply timeliness",
@@ -16,9 +16,9 @@
     },
     "EC-TARGET": {
       "title": "Targeted response and batch repetition",
-      "passCriteria": "For positive reviews, PASS if the reply addresses any specific praise point or adds information relevant to the actual review. Explicitly reflecting a specific praise point may PASS even with a formulaic sentence pattern; phrasing can be advisory. Additional product explanation, usage advice, personalized handling or follow-up is not mandatory. Generic thanks, wishes or isolated keywords do not address a specific praise point. For medium/negative reviews and negative concerns, PASS when the reply addresses the concrete issue or gives related progress, a solution or steps. An apology/acknowledgement plus an issue-specific explanation, clarification or account of the situation plus a usable official channel also passes; resolution already achieved, a detailed workflow and a promised deadline are not required. High ratings containing negative concerns follow the negative-concern boundary.",
-      "failCriteria": "For positive reviews, the individual semantic check is FAIL only when the reply both addresses no specific praise point and provides no relevant additional information; both conditions must hold. Generic praise answered only with generic thanks, wishes or polite stock phrases still fails. Do not invent product facts or issues. For negative concerns, generic apology plus a contact channel, or repetition of issue keywords without an issue-specific explanation, clarification, situation or action, is FAIL. The batch repetition check fails only for at least three distinct source rows under the same nonempty administrator, with every pair of replies reaching 85% normalized character-bigram Dice similarity. Never combine administrators or propagate failure through a chain of merely adjacent similarities.",
-      "exceptionCriteria": "When classification has completed as invalid, the individual EC-TARGET semantic/relevance subcheck is NA; do not penalize failure to address meaningless content. Do not infer an unfinished or failed classification. The batch repetition subcheck remains independent: semantic NA cannot override its FAIL. Missing original review or reply remains UNKNOWN. Only two similar replies by the same administrator are advisory, not an automatic batch failure. If the administrator is missing, do not guess ownership: mark the batch subcheck incomplete while retaining any individual semantic FAIL. WhatsApp, hotline or private-message channel words do not automatically cause FAIL. Assess channel usability only from the reply and frozen references, without external lookup or speculation. In reason, briefly identify the review points, the specific response/relevant added information, and what is met or missing. Separate advice from hard failure; add no required output fields. This release leaves the negative-concern boundary unchanged pending business arbitration."
+      "passCriteria": "For positive reviews, add useful information related to a specific praise point or the actual review, such as product explanations, usage advice, personalized handling or follow-up arrangements. Even generic positive reviews require relevant additional information; do not invent product facts or issues. For medium/negative reviews or negative concerns, address the concrete issue or provide related handling progress, solutions or steps. An apology/acknowledgement of the issue plus an issue-specific explanation, clarification or account of the situation plus a usable official channel also passes; resolution already achieved, a detailed workflow and a promised deadline are not required. High ratings containing negative concerns follow the negative-concern boundary for the actual issue.",
+      "failCriteria": "For positive reviews, merely repeating praise plus thanks and wishes, or listing selling points and polite stock phrases without relevant additional information, is FAIL. For negative concerns, generic apology plus a contact channel, or repetition of issue keywords without an issue-specific explanation, clarification, account of the situation or action, is FAIL. The batch repetition check is FAIL when at least three distinct source rows under the same nonempty administrator have replies with every pair reaching 85% normalized character-bigram Dice similarity. Never combine administrators or propagate failure through a chain of merely adjacent similarities.",
+      "exceptionCriteria": "Only two similar replies by the same administrator are advisory, not an automatic batch failure. If the administrator is missing, do not guess ownership: mark the batch subcheck incomplete while retaining any individual semantic FAIL. Missing original review or reply is UNKNOWN; an existing generic reply is FAIL. WhatsApp, hotline or private-message channel words do not automatically cause FAIL. Assess channel usability only from the reply and frozen references, without external lookup or speculation. In reason, briefly identify the review points, the reply's relevant added information or concrete response, and what is met or missing. Separate advice from hard failure; add no required output fields."
     },
     "EC-STEPS": {
       "title": "Reply structure",
@@ -36,36 +36,73 @@
   "templates": {
     "新品产品咨询": {
       "title": "New product quality inspection report",
-      "sections": {"overview":"Quality overview by product","dimensions":"Results across the three quality dimensions","cases":"Case studies","improvements":"Failure causes and Top 3 improvement priorities","voc":"Customer voice analysis"},
-      "groups": {"courtesy":"Service etiquette checks","discovery":"Needs discovery check","sales":"Sales awareness checks"},
-      "columns": {"translation":"Conversation translation","sales-stage":"Sales stage","intent":"Customer intent","demand":"Customer request summary","negative-flag":"Negative feedback present","negative-voice":"Original negative feedback","overall":"Overall result","failure-summary":"Failure reasons and recommended actions"}
+      "sections": {
+        "overview": "Quality overview by product",
+        "dimensions": "Results across the three quality dimensions",
+        "cases": "Case studies",
+        "improvements": "Failure causes and Top 3 improvement priorities",
+        "voc": "Customer voice analysis"
+      },
+      "groups": {
+        "courtesy": "Service etiquette checks",
+        "discovery": "Needs discovery check",
+        "sales": "Sales awareness checks"
+      },
+      "columns": {
+        "translation": "Conversation translation",
+        "sales-stage": "Sales stage",
+        "intent": "Customer intent",
+        "demand": "Customer request summary",
+        "negative-flag": "Negative feedback present",
+        "negative-voice": "Original negative feedback",
+        "overall": "Overall result",
+        "failure-summary": "Failure reasons and recommended actions"
+      }
     },
     "电商评论回复": {
       "title": "Ecommerce review management quality report",
-      "sections": {"overview":"Quality overview","distribution":"Review type distribution","dimensions":"Results across the five quality checks","cases":"Case studies","improvements":"Failure causes and Top 3 improvement priorities","voc":"Customer voice analysis"},
+      "sections": {
+        "overview": "Quality overview",
+        "distribution": "Review type distribution",
+        "dimensions": "Results across the five quality checks",
+        "cases": "Case studies",
+        "improvements": "Failure causes and Top 3 improvement priorities",
+        "voc": "Customer voice analysis"
+      },
       "groups": {},
-      "columns": {"comment-translation":"Translation of review original text","reply-translation":"Translation of reply original text","overall":"Overall result","failure-summary":"Summary of reasons for non-compliance"}
+      "columns": {
+        "comment-translation": "Translation of review original text",
+        "reply-translation": "Translation of reply original text",
+        "overall": "Overall result",
+        "failure-summary": "Summary of reasons for non-compliance"
+      }
     }
   },
   "referenceSections": {
-    "source-row-21":"III. Review reply strategies (reference content for AI assistance).",
-    "source-row-22":"1. Reply structure.",
-    "source-row-23":"Scenario | Suggested reply time | Reference structure | Reference example.",
-    "source-row-24":"Positive high-rating review | 24H | Opening + product value + closing. Example: Dear customer, thank you for recognizing and supporting our products (opening) + [product] offers [key benefits such as performance, battery life or design, reflecting the review] to make your experience convenient and enjoyable (product value) + We hope you enjoy exploring more products. Contact our store support whenever needed, and have a wonderful day (closing). This is reference writing guidance, not an independent rule or time override.",
-    "source-row-25":"Negative high-rating review | Opening + apology + solution + closing. Example: Dear Huawei customer (opening), we are sorry for the disappointing experience (apology), [solution], and thank you for your support. Please contact store support if you need further help; have a pleasant day (closing).",
-    "source-row-26":"Medium and low ratings.",
-    "source-row-27":"2. Reply strategies.",
-    "source-row-28":"Review type | Reply strategy.",
-    "source-row-29":"Positive high-rating strategy: (1) Opening may greet, thank, acknowledge or compliment the customer. (2) Product-related content may concern product benefits or store service. If the review mentions one or several benefits, respond to one of them, for example image quality when the customer praises pixels. If no benefit is mentioned, choose a relevant product benefit or store service. (3) Closing may offer wishes, thanks, acknowledgement or a service commitment. A closing may be omitted when the response is too long or the situation makes it inappropriate.",
-    "source-row-30":"Negative high-rating and medium/low-rating strategies | Problem type | Scenario | Solution.",
-    "source-row-31":"How-to enquiries | Questions such as how to operate the product | Give a targeted answer to the customer's operation question.",
-    "source-row-32":"Fault-related problems | Product defects, appearance/structure, materials/workmanship, product information | Opening + solution + recommendation for inspection at a service store + closing.",
-    "source-row-33":"Feature/appearance shortcomings | Problems with feature experience or cosmetic imperfections | First explain the product's actual support for the feature, then address the customer's specific concern.",
-    "source-row-34":"After-sales problems | Returns/refunds, warranty/repair, invoices/documents and after-sales channel quality | Respond to the specific issue. Example: Regarding [the issue stated in your review], we have checked [verified circumstances]. If [condition], you can [specific solution].",
-    "source-row-35":"Delivery problems | Transportation and delivery service | Respond to the specific issue. Example: We have confirmed that [the delivery problem stated in your review] is due to [verified cause], and have arranged [specific solution].",
-    "source-row-36":"Price problems | Promotion rules, price changes or additional charges | Respond to the specific issue. Promotion rules: We are sorry for the inconvenience; the promotion rules are [rules]. Cross-platform comparison: Different platforms use different operating and promotional strategies and resources, which can lead to reasonable price differences. Store price changes: Thank you for your interest in Huawei; promotions may differ across periods.",
-    "source-row-37":"User experience | No concrete issue but dissatisfaction, complaints about price or value | Illustrative product-benefit wording: HUAWEI WATCH FIT 5 has a slim and light design, weighing 27 g and measuring 9.5 mm thick, suitable for commuting and exercise. These source-example specifications are illustrative writing material, not a substitute for verified product knowledge.",
-    "source-row-38":"Several issues in one review | Focus on one or two most important issues affecting use | Example: Regarding the issues you raised, our support team has [action] + at most two solutions + closing.",
-    "source-row-39":"Excellent positive-reply guidance: (1) Connect the opening and closing or build meaningful interaction; references must relate to the body and the review. (2) Be warm, positive and approachable; avoid negative wording and use tact. (3) Be concise, coherent and easy for most readers to understand, without contradicting earlier content. (4) Use a fresh, engaging style without vulgar humor. (5) Match the review's content and tone, such as loyal Huawei users, formal business users, youthful/playful customers and product context; avoid a uniform stock reply. Practical checks: connection—does the reply refer to the review's keywords/emotion? Positive example: clear photos → mention imaging; negative example: clear photos → only thank you for your support. Warmth—use friendly language: glad you like it versus we received your review. Concision—three to five focused sentences versus a long response without a clear point. Style match—light language for a playful review versus internet slang in response to a formal customer. Source adoption note #26: add assessment methods and positive/negative examples for each requirement."
+    "source-row-21": "III. Review reply strategies (reference content for AI assistance).",
+    "source-row-22": "1. Reply structure.",
+    "source-row-23": "Scenario | Suggested reply time | Reference structure | Reference example.",
+    "source-row-24": "Positive high-rating review | 24H | Opening + product value + closing. Example: Dear customer, thank you for recognizing and supporting our products (opening) + [product] offers [key benefits such as performance, battery life or design, reflecting the review] to make your experience convenient and enjoyable (product value) + We hope you enjoy exploring more products. Contact our store support whenever needed, and have a wonderful day (closing). This is reference writing guidance, not an independent rule or time override.",
+    "source-row-25": "Negative high-rating review | Opening + apology + solution + closing. Example: Dear Huawei customer (opening), we are sorry for the disappointing experience (apology), [solution], and thank you for your support. Please contact store support if you need further help; have a pleasant day (closing).",
+    "source-row-26": "Medium and low ratings.",
+    "source-row-27": "2. Reply strategies.",
+    "source-row-28": "Review type | Reply strategy.",
+    "source-row-29": "Positive high-rating strategy: (1) Opening may greet, thank, acknowledge or compliment the customer. (2) Product-related content may concern product benefits or store service. If the review mentions one or several benefits, respond to one of them, for example image quality when the customer praises pixels. If no benefit is mentioned, choose a relevant product benefit or store service. (3) Closing may offer wishes, thanks, acknowledgement or a service commitment. A closing may be omitted when the response is too long or the situation makes it inappropriate.",
+    "source-row-30": "Negative high-rating and medium/low-rating strategies | Problem type | Scenario | Solution.",
+    "source-row-31": "How-to enquiries | Questions such as how to operate the product | Give a targeted answer to the customer's operation question.",
+    "source-row-32": "Fault-related problems | Product defects, appearance/structure, materials/workmanship, product information | Opening + solution + recommendation for inspection at a service store + closing.",
+    "source-row-33": "Feature/appearance shortcomings | Problems with feature experience or cosmetic imperfections | First explain the product's actual support for the feature, then address the customer's specific concern.",
+    "source-row-34": "After-sales problems | Returns/refunds, warranty/repair, invoices/documents and after-sales channel quality | Respond to the specific issue. Example: Regarding [the issue stated in your review], we have checked [verified circumstances]. If [condition], you can [specific solution].",
+    "source-row-35": "Delivery problems | Transportation and delivery service | Respond to the specific issue. Example: We have confirmed that [the delivery problem stated in your review] is due to [verified cause], and have arranged [specific solution].",
+    "source-row-36": "Price problems | Promotion rules, price changes or additional charges | Respond to the specific issue. Promotion rules: We are sorry for the inconvenience; the promotion rules are [rules]. Cross-platform comparison: Different platforms use different operating and promotional strategies and resources, which can lead to reasonable price differences. Store price changes: Thank you for your interest in Huawei; promotions may differ across periods.",
+    "source-row-37": "User experience | No concrete issue but dissatisfaction, complaints about price or value | Illustrative product-benefit wording: HUAWEI WATCH FIT 5 has a slim and light design, weighing 27 g and measuring 9.5 mm thick, suitable for commuting and exercise. These source-example specifications are illustrative writing material, not a substitute for verified product knowledge.",
+    "source-row-38": "Several issues in one review | Focus on one or two most important issues affecting use | Example: Regarding the issues you raised, our support team has [action] + at most two solutions + closing.",
+    "source-row-39": "Excellent positive-reply guidance: (1) Connect the opening and closing or build meaningful interaction; references must relate to the body and the review. (2) Be warm, positive and approachable; avoid negative wording and use tact. (3) Be concise, coherent and easy for most readers to understand, without contradicting earlier content. (4) Use a fresh, engaging style without vulgar humor. (5) Match the review's content and tone, such as loyal Huawei users, formal business users, youthful/playful customers and product context; avoid a uniform stock reply. Practical checks: connection—does the reply refer to the review's keywords/emotion? Positive example: clear photos → mention imaging; negative example: clear photos → only thank you for your support. Warmth—use friendly language: glad you like it versus we received your review. Concision—three to five focused sentences versus a long response without a clear point. Style match—light language for a playful review versus internet slang in response to a formal customer. Source adoption note #26: add assessment methods and positive/negative examples for each requirement."
+  },
+  "source": {
+    "version": "0.11.27",
+    "sceneHash": "688567a652e19828d26e81bd912d3486cc4f28384a2299f3cdc7f58fd8b2079c",
+    "catalogHash": "2c6bfab8d29798512139b4a44a1d531831552c1441329d6897b5973441e886ea",
+    "npMaterialsHash": "57d6e4c4ec0352a2d986d1aa4342b85355eae9be89685f8f87b77fe9b55e268d"
   }
 }
