@@ -1,5 +1,19 @@
 # 会话质检工作台
 
+## 0.11.28 · 两场景英文原生一线试用
+
+**[免登录下载完整EXE安装包](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.28-native-pilot/QualityWorkbench-0.11.28-Full-Setup-Windows-x64.exe)** · [发布说明](https://github.com/Adden-code/service-quality-workbench-releases/releases/tag/v0.11.28-native-pilot)
+
+按用户2026-11-26授权，以已验收0.11.27当前中文源重制52项双语试用材料（native-pilot-20261126-v2）。英文新品/电商均可显式激活后建任务、AI跑批、审核与交付；无需再等待业务逐条复核或EC仲裁。材料仍如实标为pilot-unreviewed。
+
+**默认不注入、不激活。**首次选择English，打开Pilot material maintenance，填写维护人与原因，勾选试用确认后激活；新旧工作区都须确认本次新包，旧任务保持原冻结材料。英文B6独立积累30对/80%验证；原文译文列仍自动生成。
+
+中文种子与0.11.27逐字节不变，保留EC-TARGET v2以及desktop-profile备份修复。本机189项针对性回归、实际EXE安装、安装文件中英NP/EC四条合成端到端及匿名完整下载通过；内网GLM效果待业务试用。
+
+buildId `0.11.28-11506e71be3c15b7`；SHA256 `6a80a0d63451b213a9458ecc0c80cf52e2a119aa51fb20946a52641034f08afc`；[构建源码](https://github.com/Adden-code/service-quality-workbench-releases/commit/0e161cd295776061cda3e1a794b12ddd1234356d)。
+
+以下为历史交付记录：0.11.27已获业务验收，其EC原生材料不匹配限制由0.11.28重制包解除。
+
 ## 0.11.27 · 桌面缓存与 EC-TARGET v2 回退修复
 
 **[免登录下载完整 EXE 安装包](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.27-hotfix/QualityWorkbench-0.11.27-Full-Setup-Windows-x64.exe)** · [发布与验收说明](https://github.com/Adden-code/service-quality-workbench-releases/releases/tag/v0.11.27-hotfix)
