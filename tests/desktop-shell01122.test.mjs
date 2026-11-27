@@ -26,6 +26,8 @@ class PolicyHarness {static int Main(string[] args){Console.OutputEncoding=new S
  else if(args[0]=="workbench")result=DesktopPolicy.WorkbenchUri(args[1]).AbsoluteUri;
  else if(args[0]=="close")result=DesktopPolicy.NeedsCloseConfirmation(json.DeserializeObject(args[1]) as Dictionary<string,object>);
  else if(args[0]=="bridge")result=new DesktopBridge(args[1],"en").Call(args[2]);
+ else if(args[0]=="missing")result=DesktopPolicy.MissingStartupFiles(args[1]);
+ else if(args[0]=="installer")result=DesktopPolicy.InstallerMatches(args[1],args[2]);
  Console.WriteLine(json.Serialize(new {ok=true,value=result}));return 0;
  }catch(Exception e){var host=e as DesktopHostException;Console.WriteLine(json.Serialize(new {ok=false,code=host==null?e.GetType().Name:host.Code}));return 0;}}}`);
  await execute(defaultCompiler(),['/nologo','/target:exe','/platform:x64',`/out:${harness}`,`/reference:${built.executable}`,'/reference:System.Web.Extensions.dll',source],{windowsHide:true});
@@ -110,8 +112,16 @@ test('installer no-instance exit and diagnostics never call the host or create a
  const log=path.join(root,'forbidden-host.log');await fs.writeFile(path.join(root,'packaging','desktop-host.mjs'),`import fs from 'node:fs';fs.appendFileSync(${JSON.stringify(log)},'unexpected command');`);
  const env={...process.env,DEMO_DATA_DIR:path.join(root,'never-created-business-data')};
  await execute(built.executable,['--exit-for-install'],{windowsHide:true,env});
+ await execute(built.executable,['--exit-for-install','--home',path.join(root,'old incomplete installation')],{windowsHide:true,env});
  const diagnostic=path.join(root,'diagnostics.json');await execute(built.executable,['--diagnostics',diagnostic],{windowsHide:true,env});
  const value=JSON.parse(await fs.readFile(diagnostic,'utf8'));assert.equal(value.architecture,'x64');assert.equal(value.dataDir,env.DEMO_DATA_DIR);assert.equal(typeof value.runtimeAvailable,'boolean');
  assert.equal(existsSync(log),false);assert.equal(existsSync(env.DEMO_DATA_DIR),false);
  await assert.rejects(execute(built.executable,['--invalid'],{windowsHide:true,env}),error=>error.code===5);
+});
+
+test('R41 desktop missing-core detection works without Java or Node; repair accepts only exact installer hash',native,async()=>{
+ const incomplete=path.join(root,'incomplete'),missing=(await invoke('missing',incomplete)).value;
+ for(const file of ['runtime/java/bin/server/jvm.dll','runtime/java/lib/modules','runtime/node/node.exe'])assert.ok(missing.includes(file));
+ const exe=path.join(root,'synthetic-installer.exe');await fs.writeFile(exe,'synthetic executable bytes');const hash=sha256(await fs.readFile(exe));
+ assert.equal((await invoke('installer',exe,hash)).value,true);await fs.appendFile(exe,'changed');assert.equal((await invoke('installer',exe,hash)).value,false);
 });

@@ -11,6 +11,7 @@ import {runDesktopCommand} from '../packaging/desktop-host.mjs';
 import {runPortableCommand} from '../packaging/portable-launch.mjs';
 import {activeDesktopJobCount,readDesktopActivity} from '../server/desktop-activity.mjs';
 import {createWorkbenchServer} from '../server.mjs';
+import {javaCoreFiles} from '../packaging/startup-diagnostics.mjs';
 const root=path.resolve('tests/artifacts/desktop-host01122'),idle=()=>({busy:false,counts:{ai:0,report:0,translation:0,structured:0},unknown:false});
 const listen=(server,port=0)=>new Promise((resolve,reject)=>{server.once('error',reject);server.listen(port,'127.0.0.1',()=>resolve(server.address().port));});
 async function unusedPort(){for(;;){const server=http.createServer(),n=await listen(server);await new Promise(resolve=>server.close(resolve));try{getConfig({env:{DEMO_PORT:String(n)}});return n;}catch{}}}
@@ -19,6 +20,7 @@ async function fixture(t){
  await fs.mkdir(root,{recursive:true});const dir=await fs.mkdtemp(path.join(root,'synthetic-')),home=path.join(dir,'中文 app'),layout=getLayout(home),supervisors=[],workers=[];
  t.after(async()=>{for(const supervisor of supervisors)await supervisor.stop();assert.ok(dir.startsWith(root+path.sep));await fs.rm(dir,{recursive:true,force:true});});
  for(const file of [layout.nodeExe,layout.javaExe,layout.jarPath,layout.runtimeScript,layout.launchScript,layout.serverModule,path.join(layout.publicDir,'index.html')]){await fs.mkdir(path.dirname(file),{recursive:true});await fs.writeFile(file,'Synthetic packaged dependency');}
+ for(const relative of javaCoreFiles){const file=path.join(home,'runtime/java',relative);await fs.mkdir(path.dirname(file),{recursive:true});await fs.writeFile(file,'Synthetic packaged dependency');}
  const appPort=await unusedPort();let workerPort=await unusedPort();while(workerPort===appPort)workerPort=await unusedPort();
  const env={...process.env,LOCALAPPDATA:path.join(dir,'local'),DEMO_DATA_DIR:path.join(dir,'data'),DEMO_PORT:String(appPort),WORKBENCH_WORKER_PORT:String(workerPort)},config=getConfig({rootDir:home,env});
  const start=async(create=options=>createWorkbenchServer({...options,catalogSeed:null,sceneSeed:null}))=>{const supervisor=await startSupervisor(config,{registerSignals:false,env,createWorkbenchServer:create,spawnWorker:(executable,args,opts)=>{const worker=spawn(process.execPath,['-e',workerCode],opts);workers.push(worker);return worker;}});supervisors.push(supervisor);return supervisor;};

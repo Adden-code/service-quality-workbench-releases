@@ -12,7 +12,7 @@ test('business installer is a separate per-user x64 product and preserves user d
  assert.match(source,/ResultCode\s*<>\s*0/);assert.match(source,/ewWaitUntilTerminated/);
  const uninstall=source.split('[UninstallRun]')[1].split('[Code]')[0];
  assert.match(uninstall,/runtime\\node\\node\.exe/);assert.match(uninstall,/portable-launch\.mjs/);assert.match(uninstall,/--stop/);
- assert.match(uninstall,/--stop-installation/);assert.match(source,/ScriptPath \+ '\" --stop-installation'/);
+ assert.match(uninstall,/--stop-installation/);assert.match(source,/ScriptPath \+ '\" --stop-installation --home/);
  assert.doesNotMatch(uninstall,/停止会话质检工作台\.exe|MessageBox/);
  assert.doesNotMatch(source,/UninstallDelete|taskkill|powershell|ExecutionPolicy|演示版|BCC52644/i);
 });

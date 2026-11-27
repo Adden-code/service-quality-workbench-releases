@@ -7,6 +7,7 @@ import {spawn} from 'node:child_process';
 import {createHash,randomBytes,timingSafeEqual} from 'node:crypto';
 import {fileURLToPath,pathToFileURL} from 'node:url';
 import {productVersion} from './version.mjs';
+import {javaCoreFiles,boundedOutput,saveStartupFailure} from './startup-diagnostics.mjs';
 
 const bundleRoot=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 // WHATWG Fetch bad ports >=1024, verified against the bundled Node 24 Undici constants.
@@ -21,7 +22,7 @@ const englishErrors=Object.freeze({
  PORT_COLLISION:'The application and Spring AI worker must use different ports.',
  INVALID_TIMEOUT:'Startup timeout must be an integer between 1000 and 180000 milliseconds.',
  UNSAFE_FILE:'An instance or dependency file has an unsupported file type. Restore the complete package.',
- MISSING_DEPENDENCY:'A bundled runtime or program file is missing or empty. Reinstall the complete package; no separate Node or Java installation is needed.',
+ MISSING_DEPENDENCY:'The installation is incomplete. Run the installer again to repair it. Your business data will not be lost.',
  INVALID_DIRECTORY:'The program or data directory is unavailable. Check access before retrying.',
  UNSAFE_DATA_DIRECTORY:'The business data directory must be outside the public web directory.',
  INVALID_INSTANCE:'The saved instance record is invalid. No unknown process has been controlled. Check the data directory and logs.',
@@ -32,7 +33,8 @@ const englishErrors=Object.freeze({
  STOP_FAILED:'The verified service could not stop completely. Use its own stop launcher and check the logs before replacing program files.',
  STOP_TIMEOUT:'Shutdown has not completed within 20 seconds. No other process has been stopped. Check the logs before retrying.',
  PORT_IN_USE:'A required local port is already in use. Choose different application and worker ports, or stop the service that owns the port.',
- WORKER_EXIT:'The bundled Java worker exited during startup. Check logs/portable-startup.log in the data directory.',
+ WORKER_EXIT:'The bundled Java service exited before it became ready. Run the installer again to repair program files; your business data will not be lost. If it still fails, send logs/portable-startup.log to support. Ask IT to check application-control or antivirus events; a security block has not been confirmed.',
+ WORKER_SPAWN_FAILED:'Windows could not start the bundled Java service. Run the installer again; if it still fails, ask IT to check application-control or antivirus events. Your business data is retained. See logs/portable-startup.log.',
  WORKER_TIMEOUT:'The Java worker health check timed out. The application was not started. Check the data-directory logs.',
  START_CANCELLED:'Application startup was cancelled.',
  STALE_LOCK_CONFIRMATION:'A lock belongs to an exited process. Confirm recovery before starting.',
@@ -43,7 +45,7 @@ const englishErrors=Object.freeze({
  APP_START_FAILED:'The application could not start. Its own worker was cleaned up. Check logs/portable-startup.log.',
 });
 export function safeErrorMessage(value,language=process.env.WORKBENCH_LAUNCHER_LANGUAGE||'zh'){
- if(language==='en')return value?.portable&&Object.hasOwn(englishErrors,value.code)?englishErrors[value.code]:'The service command failed. Check logs/portable-startup.log in the data directory.';
+ if(language==='en')return value?.portable&&Object.hasOwn(englishErrors,value.code)?englishErrors[value.code]+(Array.isArray(value.details?.missingFiles)?'\n'+value.details.missingFiles.filter(p=>typeof p==='string'&&/^[\w./ -]+$/.test(p)).join('\n'):''):'The service command failed. Check logs/portable-startup.log in the data directory.';
  return value?.portable?value.message:'便携服务启动失败，请查看数据目录 logs/portable-startup.log。';
 }
 
@@ -72,9 +74,9 @@ async function plainFile(file,{optional=false}={}){
   catch(cause){if(optional&&cause.code==='ENOENT')return null;throw cause;}
 }
 export async function validateResources(config){
-  for(const [label,file] of [['Node',config.nodeExe],['Java',config.javaExe],['Spring AI JAR',config.jarPath],['主管脚本',config.runtimeScript],['启动脚本',config.launchScript],['工作台服务',config.serverModule],['工作台页面',path.join(config.publicDir,'index.html')]]){
-    try{const stat=await plainFile(file);if(!stat.size)throw new Error();}catch{throw error('MISSING_DEPENDENCY',`便携依赖不完整（${label}），请重新解压完整启动包。`);}
-  }
+  const files=[config.nodeExe,config.jarPath,config.runtimeScript,config.launchScript,config.serverModule,path.join(config.publicDir,'index.html'),...javaCoreFiles.map(p=>path.join(config.rootDir,'runtime/java',p))],missingFiles=[];
+  for(const file of files){try{const stat=await plainFile(file);if(!stat.size)throw new Error();}catch{missingFiles.push(path.relative(config.rootDir,file).replaceAll('\\','/'));}}
+  if(missingFiles.length)throw Object.assign(error('MISSING_DEPENDENCY',`安装不完整，请重新运行安装包即可修复，数据不会丢失。\n缺失或空文件：\n${missingFiles.join('\n')}`),{details:{missingFiles}});
 }
 async function identity(config,{create=false}={}){
   let rootDir,dataDir;
@@ -276,10 +278,10 @@ export async function startSupervisor(config,{spawnWorker=spawn,createWorkbenchS
   // Dependency injection is only for isolated lifecycle tests; production always uses the packaged Java.
   await validateResources(config);
   const id=await identity(config,{create:true}),nonce=randomBytes(16).toString('hex'),bridgeToken=randomBytes(32).toString('hex');
-  let lock,record,control,app,child,state='starting',workerExited=false,stopping,ready=false,stopFailure,installationFile;
+  let lock,record,control,app,child,state='starting',workerExited=false,stopping,ready=false,stopFailure,installationFile,workerFailure,workerClosed;
   let finishStartup;const startupFinished=new Promise(resolve=>finishStartup=resolve);
   const signalHandlers=new Map();
-  const log=async code=>{try{await fs.mkdir(config.logsDir,{recursive:true,mode:0o700});await appendLog(path.join(config.logsDir,'portable-startup.log'),`${new Date().toISOString()} ${code} app=${config.appPort} worker=${config.workerPort}\n`,{mode:0o600});}catch{/* Do not log process environments, request bodies, or model secrets. */}};
+  const log=async(code,detail)=>{try{await fs.mkdir(config.logsDir,{recursive:true,mode:0o700});await appendLog(path.join(config.logsDir,'portable-startup.log'),`${new Date().toISOString()} ${code} app=${config.appPort} worker=${config.workerPort}${detail?' '+JSON.stringify(detail):''}\n`,{mode:0o600});}catch{/* Do not log process environments, request bodies, or model secrets. */}};
   async function stop(){
     if(stopping)return stopping;
     state='stopping';stopFailure=undefined;
@@ -327,12 +329,18 @@ export async function startSupervisor(config,{spawnWorker=spawn,createWorkbenchS
     await publishRecord(config,record);installationFile=await registerInstallation(config,record);await log('STARTING');
     const childEnv={...env,WORKBENCH_BRIDGE_TOKEN:bridgeToken,WORKBENCH_WORKER_PORT:String(config.workerPort)};
     for(const key of Object.keys(childEnv))if(key.toUpperCase()==='ARK_API_KEY')delete childEnv[key];
-    // Worker output is intentionally discarded: only controlled startup events are persisted.
-    child=spawnWorker(config.javaExe,['-jar',config.jarPath],{cwd:id.rootDir,env:childEnv,windowsHide:true,stdio:['ignore','ignore','ignore']});
-    child.once('error',()=>{workerExited=true;void log('WORKER_SPAWN_FAILED');if(ready)void stop().catch(()=>{});});
-    child.once('exit',()=>{workerExited=true;void log('WORKER_EXIT');if(ready){if(registerSignals)process.exitCode=1;void stop().catch(()=>{});}});
+    // Only bounded startup output is retained. After readiness, drain and discard
+    // both streams so no model requests, business text or credentials are logged.
+    const stderr=boundedOutput(childEnv),stdout=boundedOutput(childEnv);
+    child=spawnWorker(config.javaExe,['-jar',config.jarPath],{cwd:id.rootDir,env:childEnv,windowsHide:true,stdio:['ignore','pipe','pipe']});
+    child.stderr?.on('data',chunk=>{if(!ready)stderr.append(chunk);});child.stdout?.on('data',chunk=>{if(!ready)stdout.append(chunk);});
+    workerClosed=new Promise(resolve=>child.once('close',resolve));
+    const failed=(code,message)=>Object.assign(error(code,message),{details:{exitCode:child.exitCode,signal:child.signalCode,stderrTail:stderr.value(),stdoutTail:stdout.value()}});
+    child.once('error',cause=>{workerExited=true;workerFailure=failed('WORKER_SPAWN_FAILED','Windows未能启动内置Java服务。请重新运行安装包修复，数据不会丢失；仍失败时请联系IT检查应用控制或安全软件事件，尚不能确认是拦截。详见 logs/portable-startup.log。');workerFailure.details.spawnCode=cause.code||'UNKNOWN';if(ready){void log(workerFailure.code,{spawnCode:workerFailure.details.spawnCode});void stop().catch(()=>{});}});
+    child.once('exit',(exitCode,signal)=>{workerExited=true;workerFailure??=failed('WORKER_EXIT','内置Java服务启动后退出。请重新运行安装包修复，数据不会丢失；仍失败时将 logs/portable-startup.log 交给支持人员，并请IT检查应用控制或安全软件事件（尚未确认拦截）。');workerFailure.details.exitCode=exitCode;workerFailure.details.signal=signal;if(ready){void log('WORKER_EXIT',{exitCode,signal});if(registerSignals)process.exitCode=1;void stop().catch(()=>{});}});
+    child.once('close',()=>{if(workerFailure&&!ready){workerFailure.details.stderrTail=stderr.value();workerFailure.details.stdoutTail=stdout.value();}});
     const deadline=Date.now()+config.startupTimeoutMs;
-    while(!(await healthyWorker(config.workerPort,bridgeToken))){if(workerExited||stopping)throw error('WORKER_EXIT','Java执行服务未能启动，详见安全启动日志。');if(Date.now()>=deadline)throw error('WORKER_TIMEOUT','Java执行服务健康检查超时，未启动工作台。');await sleep(100);}
+    while(!(await healthyWorker(config.workerPort,bridgeToken))){if(workerExited||stopping)throw workerFailure||error('START_CANCELLED','启动已取消。');if(Date.now()>=deadline)throw Object.assign(error('WORKER_TIMEOUT','Java执行服务健康检查超时，未启动工作台。'),{details:{stderrTail:stderr.value(),stdoutTail:stdout.value()}});await sleep(100);}
     if(workerExited||stopping)throw error('WORKER_EXIT','Java执行服务在启动时退出。');
     await log('WORKER_HEALTHY');
     try{
@@ -345,7 +353,7 @@ export async function startSupervisor(config,{spawnWorker=spawn,createWorkbenchS
     app.on('error',()=>{if(registerSignals)process.exitCode=1;void log('APP_ERROR');void stop().catch(()=>{});});
     ready=true;state='ready';finishStartup();await log('READY');
     return {status:()=>publicStatus(record,state,stopFailure,app?.desktopActivity?.()),stop};
-  }catch(cause){finishStartup();await log(cause?.portable?cause.code:'START_FAILED');await stop();throw cause?.portable?cause:error('START_FAILED','便携主管启动失败，请查看数据目录日志。');}
+  }catch(cause){finishStartup();if(workerClosed&&workerExited)await Promise.race([workerClosed,sleep(1000)]);const failure=workerFailure||cause;await log(failure?.portable?failure.code:'START_FAILED',failure.details);await saveStartupFailure(config,env.WORKBENCH_START_ATTEMPT,failure).catch(()=>{});await stop();throw failure?.portable?failure:error('START_FAILED','便携主管启动失败，请查看数据目录日志。');}
 }
 
 if(process.argv[1]&&pathToFileURL(path.resolve(process.argv[1])).href===import.meta.url){

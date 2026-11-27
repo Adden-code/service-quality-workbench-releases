@@ -15,11 +15,12 @@ import {acceptanceChecklist} from './self-service-guide.mjs';
 import {builtinUsageGuide} from './builtin-guide.mjs';
 import {prepareFactoryResources,parseFactoryBuildArgs} from './factory-resources.mjs';
 import {buildDesktopShell} from './build-desktop.mjs';
+import {startupRecoveryGuide} from './startup-guide.mjs';
 import {validateNativeReleasePayload,nativeReleaseGuide,nativePilotReleaseGuide,validateNativePilotBundle} from './native-release-gate.mjs';
 
 const project=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 export const portableVersion=productVersion;
-export const portableFiles=Object.freeze([...payloadFiles.filter(p=>p!=='launch-demo.mjs'),'packaging/portable-runtime.mjs','packaging/portable-launch.mjs','packaging/desktop-host.mjs','packaging/version.mjs']);
+export const portableFiles=Object.freeze([...payloadFiles.filter(p=>p!=='launch-demo.mjs'),'packaging/portable-runtime.mjs','packaging/portable-launch.mjs','packaging/desktop-host.mjs','packaging/version.mjs','packaging/startup-diagnostics.mjs']);
 export const portableModules=Object.freeze(['java.se','jdk.crypto.ec','jdk.crypto.mscapi','jdk.unsupported','jdk.charsets','jdk.localedata','jdk.zipfs']);
 const partName=/^[A-Za-z0-9][A-Za-z0-9._-]{0,159}$/;
 const shaPattern=/^[a-f0-9]{64}$/;
@@ -101,7 +102,7 @@ export async function buildPortable({outputDir,nodeExe,nodeLicense,javaRuntime,j
  await fs.mkdir(path.join(root,'runtime/node'),{recursive:true});await fs.copyFile(nodeExe,path.join(root,'runtime/node/node.exe'));await fs.copyFile(nodeLicense,path.join(root,'runtime/node/LICENSE.txt'));
  await fs.cp(javaRuntime,path.join(root,'runtime/java'),{recursive:true,dereference:true});
  await fs.mkdir(path.join(root,'service'));await fs.copyFile(jarPath,path.join(root,'service/spring-ai-worker.jar'));
- const zhGuide=languageGuide('zh')+(factoryProfile==='builtin-two-scenes'?builtinUsageGuide(portableVersion):guide()),enGuide=languageGuide('en')+(factoryProfile==='builtin-two-scenes'?builtinUsageGuide(portableVersion,'en'):englishUsageGuide(portableVersion));
+ const zhGuide=startupRecoveryGuide('zh')+languageGuide('zh')+(factoryProfile==='builtin-two-scenes'?builtinUsageGuide(portableVersion):guide()),enGuide=startupRecoveryGuide('en')+languageGuide('en')+(factoryProfile==='builtin-two-scenes'?builtinUsageGuide(portableVersion,'en'):englishUsageGuide(portableVersion));
  await fs.writeFile(path.join(root,'使用说明.txt'),'\uFEFF'+zhGuide,'utf8');
  await fs.writeFile(path.join(root,'User Guide (English).txt'),'\uFEFF'+enGuide,'utf8');
  await fs.writeFile(path.join(root,'Read Me First.txt'),'\uFEFF'+enGuide+'\n---\n\n'+zhGuide,'utf8');

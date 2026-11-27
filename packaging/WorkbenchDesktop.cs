@@ -20,6 +20,27 @@ using Microsoft.Web.WebView2.WinForms;
 // are delegated to the packaged JSON bridge, never to process enumeration.
 public static class DesktopPolicy
 {
+    public static string[] MissingStartupFiles(string root)
+    {
+        string[] required = new string[] { "runtime/node/node.exe", "packaging/desktop-host.mjs", "runtime/java/bin/java.exe", "runtime/java/bin/server/jvm.dll", "runtime/java/bin/jli.dll", "runtime/java/bin/java.dll", "runtime/java/bin/zip.dll", "runtime/java/bin/verify.dll", "runtime/java/bin/vcruntime140.dll", "runtime/java/bin/vcruntime140_1.dll", "runtime/java/lib/modules", "runtime/java/conf/security/java.security", "service/spring-ai-worker.jar" };
+        List<string> missing = new List<string>();
+        foreach (string relative in required) { try { FileInfo file = new FileInfo(Path.Combine(root, relative)); if (!file.Exists || file.Length == 0 || (file.Attributes & FileAttributes.ReparsePoint) != 0) missing.Add(relative); } catch (IOException) { missing.Add(relative); } catch (UnauthorizedAccessException) { missing.Add(relative); } }
+        return missing.ToArray();
+    }
+    public static Dictionary<string, string> RepairSettings(string root)
+    {
+        Dictionary<string, string> result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        string file = Path.Combine(root, "installer-repair.ini");
+        if (!File.Exists(file) || new FileInfo(file).Length > 16384) return result;
+        bool section = false;
+        foreach (string raw in File.ReadAllLines(file)) { string line = raw.Trim(); if (line.StartsWith("[")) { section = line.Equals("[Repair]", StringComparison.OrdinalIgnoreCase); continue; } int index = line.IndexOf('='); if (section && index > 0) result[line.Substring(0, index).Trim()] = line.Substring(index + 1).Trim(); }
+        return result;
+    }
+    public static bool InstallerMatches(string file, string expected)
+    {
+        if (System.String.IsNullOrWhiteSpace(file) || !File.Exists(file) || expected == null || expected.Length != 64) return false;
+        using (FileStream stream = File.OpenRead(file)) using (SHA256 sha = SHA256.Create()) return BitConverter.ToString(sha.ComputeHash(stream)).Replace("-", "").Equals(expected, StringComparison.OrdinalIgnoreCase);
+    }
     public static string PathKey(string value) { return Path.GetFullPath(value).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar).ToLowerInvariant(); }
     public static string InstanceKey(string root, string userSid)
     {
@@ -196,9 +217,9 @@ internal sealed class WorkbenchWindow : Form
     private readonly string root, language, expectedDataDir; private string dataDir; private readonly DesktopBridge bridge;
     private readonly NotifyIcon tray = new NotifyIcon(); private readonly Panel content = new Panel(); private readonly Panel messagePanel = new Panel();
     private readonly Label message = new Label(); private readonly ToolStrip toolbar = new ToolStrip(); private readonly ToolStripStatusLabel status = new ToolStripStatusLabel();
-    private readonly ToolStripButton retry, browser; private WebView2 web; private CoreWebView2Environment environment; private Uri workbench;
+    private readonly ToolStripButton retry, browser, repair; private WebView2 web; private CoreWebView2Environment environment; private Uri workbench;
     private readonly List<Form> children = new List<Form>(); private Task initialization; private Task<int> closeWork; private bool allowClose, browserFallback, runtimeAvailable, serviceStarted;
-    private TaskCompletionSource<bool> browserExited; private bool browserCreated; private FormWindowState restoredState = FormWindowState.Maximized;
+    private TaskCompletionSource<bool> browserExited; private bool browserCreated, startupIncomplete; private FormWindowState restoredState = FormWindowState.Maximized;
     private string T(string zh, string en) { return language == "en" ? en : zh; }
     public WorkbenchWindow(string appRoot, string selectedLanguage, string configuredDataDir)
     {
@@ -209,9 +230,10 @@ internal sealed class WorkbenchWindow : Form
         ToolStripButton home = new ToolStripButton(T("工作台首页", "Workbench home")); home.Click += delegate { if (web != null && web.CoreWebView2 != null && workbench != null) web.CoreWebView2.Navigate(workbench.AbsoluteUri); };
         browser = new ToolStripButton(T("在浏览器中打开", "Open in browser")); browser.Click += async delegate { if (workbench == null) { browserFallback = true; initialization = InitializeAsync(); await initialization; } else OpenExternal(workbench.AbsoluteUri); };
         ToolStripButton logs = new ToolStripButton(T("查看日志", "View logs")); logs.Click += delegate { OpenLogs(); };
+        repair = new ToolStripButton(T("修复安装", "Repair installation")); repair.Visible = false; repair.Click += async delegate { await RepairInstallationAsync(); };
         ToolStripButton help = new ToolStripButton(T("WebView2离线安装说明", "WebView2 offline setup")); help.Click += delegate { RuntimeHelp(); };
         ToolStripButton stop = new ToolStripButton(T("停止并退出", "Stop and exit")); stop.Click += delegate { Close(); };
-        toolbar.Items.AddRange(new ToolStripItem[] { home, retry, browser, logs, help, stop }); toolbar.Dock = DockStyle.Top;
+        toolbar.Items.AddRange(new ToolStripItem[] { home, retry, browser, repair, logs, help, stop }); toolbar.Dock = DockStyle.Top;
         content.Dock = DockStyle.Fill; content.BackColor = Color.White; messagePanel.Dock = DockStyle.Fill; messagePanel.Padding = new Padding(32); message.Dock = DockStyle.Fill; message.TextAlign = ContentAlignment.MiddleLeft; message.Font = new Font(Font.FontFamily, 11F); messagePanel.Controls.Add(message); content.Controls.Add(messagePanel);
         StatusStrip strip = new StatusStrip(); strip.Items.Add(status); status.Spring = true; status.TextAlign = ContentAlignment.MiddleLeft;
         Controls.Add(content); Controls.Add(toolbar); Controls.Add(strip);
@@ -227,6 +249,7 @@ internal sealed class WorkbenchWindow : Form
     private void ShowFailure(Exception error)
     {
         DesktopHostException host = error as DesktopHostException;
+        repair.Visible = host != null && (host.Code == "MISSING_DEPENDENCY" || host.Code == "WORKER_EXIT" || host.Code == "WORKER_SPAWN_FAILED");
         SetMessage(T("暂未完成操作，窗口已保留。\r\n", "The operation did not complete. This window remains open.\r\n") + (host == null ? error.Message : host.Code + ": " + host.Message) + "\r\n\r\n" + T("可点击“重新连接”或“查看日志”。旧版浏览器启动/停止入口仍可使用。\r\n数据目录：", "Select Reconnect or View logs. The existing browser start/stop launchers remain available.\r\nData directory: ") + dataDir);
         ShowWorkbench();
     }
@@ -249,6 +272,9 @@ internal sealed class WorkbenchWindow : Form
     {
         retry.Enabled = false; browser.Enabled = false;
         try {
+            string[] missing = DesktopPolicy.MissingStartupFiles(root); startupIncomplete = missing.Length > 0;
+            if (startupIncomplete) throw new DesktopHostException("MISSING_DEPENDENCY", T("安装不完整，请重新运行安装包即可修复，数据不会丢失。也可点击顶部“修复安装”。\r\n缺失或空文件：\r\n", "The installation is incomplete. Run the installer again to repair it. Your business data will not be lost. You can also select Repair installation above.\r\nMissing or empty files:\r\n") + String.Join("\r\n", missing));
+            repair.Visible = false;
             SetMessage(T("正在检查桌面运行环境…", "Checking the desktop runtime…"));
             if (!CheckRuntime() && !browserFallback) { SetMessage(T("未找到 Microsoft Edge WebView2 Runtime。\r\n后台服务尚未启动。\r\n\r\n请查看顶部“WebView2离线安装说明”，安装后重新连接；或选择“在浏览器中打开”继续使用。", "Microsoft Edge WebView2 Runtime was not found.\r\nThe background service has not been started.\r\n\r\nUse WebView2 offline setup above, then reconnect, or choose Open in browser.")); return; }
             Dictionary<string, object> inspection = await bridge.CallAsync("--inspect"); CheckInspection(inspection);
@@ -307,6 +333,23 @@ internal sealed class WorkbenchWindow : Form
         string logs = Path.Combine(dataDir, "logs"), target = Directory.Exists(logs) ? logs : Directory.Exists(dataDir) ? dataDir : root;
         try { Process.Start(new ProcessStartInfo("explorer.exe", DesktopPolicy.QuoteArgument(target)) { UseShellExecute = true }); } catch (Exception error) { ShowFailure(error); }
     }
+    private async Task RepairInstallationAsync()
+    {
+        repair.Enabled = false;
+        try {
+            Dictionary<string, string> settings = DesktopPolicy.RepairSettings(root); string file, expected;
+            if (!settings.TryGetValue("SHA256", out expected)) { MessageBox.Show(this, T("未找到原安装包校验记录，请重新运行已下载的完整安装包。业务数据不会丢失。", "No original installer record is available. Run your downloaded full installer again. Your business data will not be lost."), Text); return; }
+            if (!settings.TryGetValue("Installer", out file) || !File.Exists(file)) {
+                using (OpenFileDialog picker = new OpenFileDialog()) { picker.Title = T("选择本版本原安装包", "Select this version's original installer"); picker.Filter = "Installer (*.exe)|*.exe"; if (picker.ShowDialog(this) != DialogResult.OK) return; file = picker.FileName; }
+            }
+            if (!await Task.Run(() => DesktopPolicy.InstallerMatches(file, expected))) throw new DesktopHostException("REPAIR_INSTALLER_MISMATCH", T("文件与本版本原安装包不一致，未运行。请重新下载完整安装包并直接运行。", "This file does not match the original installer. It was not run. Download the full installer again and run it directly."));
+            if (serviceStarted && await PrepareCloseAsync() != 0) return;
+            // The installer independently stops verified background instances
+            // using its own intact tools before it replaces any program file.
+            Process.Start(new ProcessStartInfo(file, "/SILENT /NORESTART /DIR=" + DesktopPolicy.QuoteArgument(root)) { UseShellExecute = true, WorkingDirectory = Path.GetDirectoryName(file), WindowStyle = ProcessWindowStyle.Normal });
+            CloseAfterStop();
+        } catch (Exception error) { ShowFailure(error); } finally { repair.Enabled = true; }
+    }
     private string ActivityDescription(Dictionary<string, object> inspection)
     {
         Dictionary<string, object> activity = DesktopPolicy.Object(inspection, "activity"), counts = DesktopPolicy.Object(activity, "counts");
@@ -323,6 +366,9 @@ internal sealed class WorkbenchWindow : Form
     {
         try {
             if (initialization != null && !initialization.IsCompleted) await initialization;
+            // Startup file validation runs before any bridge/service process.
+            // A missing runtime must not trap a never-started window on close.
+            if (startupIncomplete && !serviceStarted) { await DisposeBrowserAsync(); return 0; }
             Dictionary<string, object> inspection = await bridge.CallAsync("--inspect"); CheckInspection(inspection);
             if (DesktopPolicy.NeedsCloseConfirmation(inspection)) {
                 ShowWorkbench(); string prompt = T("仍有任务运行或任务状态未知。\r\n", "Tasks are still running or their status is unknown.\r\n") + ActivityDescription(inspection) + "\r\n\r\n" + T("停止服务并退出吗？未完成任务会中断，可按已有检查点恢复。选择“否”将保留服务和任务。", "Stop the service and exit? Unfinished tasks will be interrupted and can resume from saved checkpoints. No keeps the service and tasks running.");
@@ -359,7 +405,8 @@ internal static class WorkbenchDesktop
     [STAThread]
     private static int Main(string[] args)
     {
-        string root = AppDomain.CurrentDomain.BaseDirectory, language = DesktopPolicy.Language(root, CultureInfo.CurrentUICulture.TwoLetterISOLanguageName); bool installExit = args.Length == 1 && args[0] == "--exit-for-install";
+        bool installExit = (args.Length == 1 || args.Length == 3 && args[1] == "--home") && args[0] == "--exit-for-install";
+        string root = installExit && args.Length == 3 ? Path.GetFullPath(args[2]) : AppDomain.CurrentDomain.BaseDirectory, language = DesktopPolicy.Language(root, CultureInfo.CurrentUICulture.TwoLetterISOLanguageName);
         try {
             if (args.Length == 2 && args[0] == "--diagnostics") {
                 string runtime = ""; try { runtime = CoreWebView2Environment.GetAvailableBrowserVersionString(null); } catch (WebView2RuntimeNotFoundException) { }

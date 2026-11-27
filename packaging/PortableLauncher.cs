@@ -29,7 +29,7 @@ internal static class PortableLauncher
             string node = Path.Combine(root, "runtime", "node", "node.exe");
             string script = Path.Combine(root, "packaging", "portable-launch.mjs");
             if (!File.Exists(node) || !File.Exists(script))
-                throw new FileNotFoundException(Text("便携文件不完整，请重新解压完整启动包。无需另行安装Node或Java。", "Application files are incomplete. Reinstall the complete package; no separate Node or Java installation is required."));
+                throw new FileNotFoundException(Text("安装不完整，请重新运行安装包即可修复，数据不会丢失。无需另行安装Node或Java。", "The installation is incomplete. Run the installer again to repair it. Your business data will not be lost. No separate Node or Java installation is required."));
             string command = "\"" + script + "\"" + (stopping ? " --stop" : status ? " --status" : noOpen ? " --no-open" : "");
             ProcessStartInfo start = new ProcessStartInfo(node, command);
             start.WorkingDirectory = root;

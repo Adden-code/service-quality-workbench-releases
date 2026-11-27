@@ -8,6 +8,7 @@ import {spawn} from 'node:child_process';
 import {EventEmitter} from 'node:events';
 import {createHash} from 'node:crypto';
 import {productVersion} from '../packaging/version.mjs';
+import {saveStartupFailure} from '../packaging/startup-diagnostics.mjs';
 
 const runtimeUrl=new URL('../packaging/portable-runtime.mjs',import.meta.url);
 const launchUrl=new URL('../packaging/portable-launch.mjs',import.meta.url);
@@ -32,6 +33,7 @@ async function fixture(t,env={}){
   const {getLayout,getConfig}=await implementation();
   const layout=getLayout(rootDir);
   for(const target of [layout.nodeExe,layout.javaExe,layout.jarPath,layout.runtimeScript,layout.launchScript,layout.serverModule,path.join(layout.publicDir,'index.html')]){await fs.mkdir(path.dirname(target),{recursive:true});await fs.writeFile(target,'fixture');}
+  for(const relative of ['bin/server/jvm.dll','bin/jli.dll','bin/java.dll','bin/zip.dll','bin/verify.dll','bin/vcruntime140.dll','bin/vcruntime140_1.dll','lib/modules','conf/security/java.security']){const target=path.join(rootDir,'runtime/java',relative);await fs.mkdir(path.dirname(target),{recursive:true});await fs.writeFile(target,'fixture');}
   const appPort=await unusedPort();let workerPort=await unusedPort();while(workerPort===appPort)workerPort=await unusedPort();
   const config=getConfig({rootDir,env:{LOCALAPPDATA:path.join(temporary,'local data'),DEMO_PORT:String(appPort),WORKBENCH_WORKER_PORT:String(workerPort),...env}});
   return {rootDir,config,temporary};
@@ -111,7 +113,7 @@ test('工作台和Java执行端口都拒绝随包Fetch完整禁用清单中的�
 
 test('缺少随包Java时拒绝启动，不调用其他运行时',async t=>{
   const {startSupervisor}=await implementation();const {config}=await fixture(t);await fs.unlink(config.javaExe);let spawns=0;
-  await assert.rejects(startSupervisor(config,{spawnWorker:()=>spawns++,registerSignals:false}),/依赖|Java/);assert.equal(spawns,0);
+  await assert.rejects(startSupervisor(config,{spawnWorker:()=>spawns++,registerSignals:false}),cause=>cause.code==='MISSING_DEPENDENCY'&&cause.details.missingFiles.includes('runtime/java/bin/java.exe'));assert.equal(spawns,0);
   assert.equal(existsSync(config.instanceFile),false);assert.equal(existsSync(config.lockFile),false);
 });
 
@@ -226,6 +228,30 @@ test('Java启动失败回收私有记录并保留安全诊断日志',async t=>{
   await assert.rejects(startSupervisor(config,{spawnWorker:(_exe,_args,options)=>spawn(process.execPath,['-e','process.exit(7)'],options),registerSignals:false}),/Java|执行服务/);
   assert.equal(existsSync(config.instanceFile),false);assert.equal(existsSync(config.lockFile),false);
   assert.match(await fs.readFile(path.join(config.logsDir,'portable-startup.log'),'utf8'),/WORKER_EXIT/);
+});
+
+test('R41 missing Java VM or module image is rejected before any process starts',async t=>{
+ const {validateResources}=await implementation();
+ for(const relative of ['bin/server/jvm.dll','lib/modules']){
+  const {config}=await fixture(t);await fs.unlink(path.join(config.rootDir,'runtime/java',relative));
+  await assert.rejects(validateResources(config),cause=>cause.code==='MISSING_DEPENDENCY'&&cause.message.includes(relative)&&cause.message.includes('数据不会丢失'));
+ }
+});
+
+test('R41 Java exit retains exit code and bounded, redacted stderr',async t=>{
+ const {startSupervisor}=await implementation(),{config}=await fixture(t);
+ const worker=`process.stderr.write('x'.repeat(20000)+'\\nError: could not load jvm.dll\\nAuthorization: Bearer SECRET_FOR_TEST\\n'+process.env.WORKBENCH_BRIDGE_TOKEN+'\\n');process.exit(7);`;
+ await assert.rejects(startSupervisor(config,{spawnWorker:(_exe,_args,options)=>spawn(process.execPath,['-e',worker],options),registerSignals:false}),cause=>cause.code==='WORKER_EXIT');
+ const log=await fs.readFile(path.join(config.logsDir,'portable-startup.log'),'utf8');
+ assert.match(log,/"exitCode":7/);assert.match(log,/could not load jvm.dll/);assert.doesNotMatch(log,/SECRET_FOR_TEST/);assert.ok(log.length<14000);
+ assert.equal(existsSync(config.lockFile),false);
+});
+
+test('R41 detached launch returns this attempt worker failure instead of generic START_FAILED',async t=>{
+ const {runPortableCommand}=await import(launchUrl),{safeErrorMessage}=await implementation(),{config}=await fixture(t);
+ await assert.rejects(runPortableCommand(['--no-open'],{config,write:()=>{},startDetached:async(c,env)=>{
+  await saveStartupFailure(c,env.WORKBENCH_START_ATTEMPT,{code:'WORKER_EXIT',message:'Java执行服务启动后退出。',details:{exitCode:9}});return{exitCode:1};
+ }}),cause=>cause.code==='WORKER_EXIT'&&cause.details.exitCode===9&&!/[\u4e00-\u9fff]/.test(safeErrorMessage(cause,'en')));
 });
 
 test('自有Java始终无法退出时停止失败并保留实例身份，禁止安装器误判已停',async t=>{

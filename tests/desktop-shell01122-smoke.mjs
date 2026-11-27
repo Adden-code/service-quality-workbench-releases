@@ -10,12 +10,14 @@ import {promisify} from 'node:util';
 import {fileURLToPath} from 'node:url';
 import {chromium} from 'playwright';
 import {buildDesktopShell,WEBVIEW2_SDK} from '../packaging/build-desktop.mjs';
+import {javaCoreFiles} from '../packaging/startup-diagnostics.mjs';
 const execute=promisify(execFile),project=fileURLToPath(new URL('..',import.meta.url));
 const base=path.resolve(process.env.VERIFY_DESKTOP_SHELL_OUTPUT||path.join(project,'..','outputs','service01122-desktop-20261124'));
 await fs.mkdir(base,{recursive:true});const root=await fs.mkdtemp(path.join(base,'native-smoke-'));
 const data=path.join(root,'synthetic-data'),other=path.join(root,'other-data'),calls=path.join(root,'host-calls.jsonl');
 const sdkDir=process.env.WEBVIEW2_SDK_DIR||path.resolve(project,'..','.tools','webview2-sdk',WEBVIEW2_SDK.version);
 const built=await buildDesktopShell({root,sdkDir});await fs.mkdir(path.join(root,'runtime','node'),{recursive:true});await fs.copyFile(process.execPath,path.join(root,'runtime','node','node.exe'));
+for(const relative of [...javaCoreFiles.map(file=>'runtime/java/'+file),'service/spring-ai-worker.jar']){const file=path.join(root,relative);await fs.mkdir(path.dirname(file),{recursive:true});await fs.writeFile(file,'Synthetic startup prerequisite');}
 await fs.writeFile(path.join(root,'desktop-language.ini'),'[Desktop]\r\nLanguage=english\r\n');
 const server=http.createServer((req,res)=>{res.setHeader('content-type','text/html; charset=utf-8');res.end(`<!doctype html><meta charset="utf-8"><title>Synthetic native desktop verification</title><h1>Synthetic native desktop verification</h1><p id="language"></p><input id="file" type="file"><button id="download">Download fixture</button><button id="popup">Open printable report</button><script>document.querySelector('#language').textContent=navigator.language;document.querySelector('#download').onclick=()=>{const a=document.createElement('a');a.download='synthetic-native.txt';a.href=URL.createObjectURL(new Blob(['synthetic native download'],{type:'text/plain'}));a.click()};document.querySelector('#popup').onclick=()=>window.open(URL.createObjectURL(new Blob(['<!doctype html><title>Synthetic printable report</title><h1>Synthetic printable report</h1><button onclick="window.print()">Print</button>'],{type:'text/html'})));</script>`);});
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));const origin=`http://127.0.0.1:${server.address().port}`;
