@@ -1,5 +1,17 @@
 # 会话质检工作台
 
+## 0.11.29 · 启动自愈与安装完整性修复候选
+
+**[免登录完整EXE安装包](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.29-startup-repair/QualityWorkbench-0.11.29-Full-Setup-Windows-x64.exe)** · [修复范围及验证限制](https://github.com/Adden-code/service-quality-workbench-releases/releases/tag/v0.11.29-startup-repair)
+
+新增安装器532项完整性核验、Java核心件预检、退出码/启动错误尾部记录，以及核对原包SHA后修复安装入口。业务规则、52项英文试点材料和显式激活机制与0.11.28字节不变。内置java.exe签名有效（Eclipse Foundation）；自有安装器/桌面壳签名另行办理。
+
+**预发布：最终EXE安装及一键修复全链路待业务机覆盖安装复测。**75项回归、随包中英两场景4条合成端到端、英文界面/语法/文件清单及免登录完整下载核SHA通过；此前候选实际安装及Java故障注入通过。最终包在本机后续安装时卡在进入安装日志前，已成功的旧候选也受影响，尚无明确安全拦截证据，不把它计为最终安装通过。
+
+buildId `0.11.29-f868bc35e54b34bc`；SHA256 `bec5af20214080e9f51730c21442e2d40b7554ee7d45dc3ab0c00dbaae0842b3`；[构建源码](https://github.com/Adden-code/service-quality-workbench-releases/commit/795218b8c393d179bc2b7b48897b40a9e71ac178)。
+
+以下保留历史交付记录：
+
 ## 0.11.28 · 两场景英文原生一线试用
 
 **[免登录下载完整EXE安装包](https://github.com/Adden-code/service-quality-workbench-releases/releases/download/v0.11.28-native-pilot/QualityWorkbench-0.11.28-Full-Setup-Windows-x64.exe)** · [发布说明](https://github.com/Adden-code/service-quality-workbench-releases/releases/tag/v0.11.28-native-pilot)
