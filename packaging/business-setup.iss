@@ -168,9 +168,10 @@ begin
     Log(Summary + ' report=' + IntegrityReport);
     if IntegrityPassed then begin
       RepairInfo := ExpandConstant('{app}\installer-repair.ini');
-      SetIniString('Repair', 'Installer', ExpandConstant('{srcexe}'), RepairInfo);
-      SetIniString('Repair', 'SHA256', GetSHA256OfFile(ExpandConstant('{srcexe}')), RepairInfo);
-      SetIniString('Repair', 'Version', '{#ProductVersion}', RepairInfo);
+      SaveStringToFile(RepairInfo, UTF8Encode('[Repair]' + #13#10 +
+        'Installer=' + ExpandConstant('{srcexe}') + #13#10 +
+        'SHA256=' + GetSHA256OfFile(ExpandConstant('{srcexe}')) + #13#10 +
+        'Version={#ProductVersion}' + #13#10), False);
     end;
   end;
 end;

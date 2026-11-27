@@ -28,6 +28,7 @@ class PolicyHarness {static int Main(string[] args){Console.OutputEncoding=new S
  else if(args[0]=="bridge")result=new DesktopBridge(args[1],"en").Call(args[2]);
  else if(args[0]=="missing")result=DesktopPolicy.MissingStartupFiles(args[1]);
  else if(args[0]=="installer")result=DesktopPolicy.InstallerMatches(args[1],args[2]);
+ else if(args[0]=="repairSettings")result=DesktopPolicy.RepairSettings(args[1]);
  Console.WriteLine(json.Serialize(new {ok=true,value=result}));return 0;
  }catch(Exception e){var host=e as DesktopHostException;Console.WriteLine(json.Serialize(new {ok=false,code=host==null?e.GetType().Name:host.Code}));return 0;}}}`);
  await execute(defaultCompiler(),['/nologo','/target:exe','/platform:x64',`/out:${harness}`,`/reference:${built.executable}`,'/reference:System.Web.Extensions.dll',source],{windowsHide:true});
@@ -122,6 +123,8 @@ test('installer no-instance exit and diagnostics never call the host or create a
 test('R41 desktop missing-core detection works without Java or Node; repair accepts only exact installer hash',native,async()=>{
  const incomplete=path.join(root,'incomplete'),missing=(await invoke('missing',incomplete)).value;
  for(const file of ['runtime/java/bin/server/jvm.dll','runtime/java/lib/modules','runtime/node/node.exe'])assert.ok(missing.includes(file));
- const exe=path.join(root,'synthetic-installer.exe');await fs.writeFile(exe,'synthetic executable bytes');const hash=sha256(await fs.readFile(exe));
+ const exe=path.join(root,'合成安装包 English.exe');await fs.writeFile(exe,'synthetic executable bytes');const hash=sha256(await fs.readFile(exe));
+ await fs.writeFile(path.join(root,'installer-repair.ini'),`[Repair]\r\nInstaller=${exe}\r\nSHA256=${hash}\r\nVersion=synthetic\r\n`,'utf8');
+ assert.equal((await invoke('repairSettings',root)).value.Installer,exe);
  assert.equal((await invoke('installer',exe,hash)).value,true);await fs.appendFile(exe,'changed');assert.equal((await invoke('installer',exe,hash)).value,false);
 });
